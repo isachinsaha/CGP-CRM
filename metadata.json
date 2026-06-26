@@ -1,0 +1,8 @@
+{
+  "name": "Career Growth Placement CRM",
+  "description": "Custom job consultancy CRM for Career Growth Placement, managing overseas and local recruiting pipelines with sub-agent sandboxes, assignments, and reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

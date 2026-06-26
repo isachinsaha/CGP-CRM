@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Google AI Studio App</title>
+    <script>
+      // Defensive safeguard against browser extensions attempting to write to window.fetch when it has only a getter.
+      try {
+        const originalFetch = window.fetch;
+        let currentFetch = originalFetch;
+        Object.defineProperty(window, 'fetch', {
+          get() {
+            return currentFetch || originalFetch;
+          },
+          set(value) {
+            currentFetch = value;
+          },
+          configurable: true,
+          enumerable: true
+        });
+      } catch (err) {
+        console.warn('Defensive fetch wrapper initialization failed:', err);
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
