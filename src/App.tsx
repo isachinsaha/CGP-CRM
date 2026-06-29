@@ -539,6 +539,7 @@ export default function App() {
                 userRole={userRole}
                 currentAgentId={currentAgentId}
                 onSelectLead={setSelectedLead}
+                coordinators={coordinatorsList}
               />
             )}
 

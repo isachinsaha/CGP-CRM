@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { StatSummary, Lead } from '../types.ts';
+import { StatSummary, Lead, Coordinator } from '../types.ts';
 import { 
   BarChart3, TrendingUp, Target, Percent, Sparkles, 
   UserCheck, Inbox, Calendar, Users, Award, ShieldAlert, Clock, MapPin, CheckCircle,
@@ -13,6 +13,7 @@ interface CampaignAnalyticsProps {
   userRole?: 'admin' | 'agent';
   currentAgentId?: string;
   onSelectLead?: (lead: Lead) => void;
+  coordinators?: Coordinator[];
 }
 
 const isAssignedToday = (dateStr?: string) => {
@@ -45,7 +46,8 @@ export default function CampaignAnalytics({
   onRefreshData,
   userRole = 'admin',
   currentAgentId,
-  onSelectLead
+  onSelectLead,
+  coordinators = []
 }: CampaignAnalyticsProps) {
   const [reportTab, setReportTab] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
@@ -70,10 +72,12 @@ export default function CampaignAnalytics({
 
   // Dynamic Coordinator Interval Stats
   const coordinatorIntervalStats = useMemo(() => {
-    const coordinatorsList = [
-      'Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 
-      'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'
-    ];
+    const coordinatorsList = coordinators && coordinators.length > 0
+      ? coordinators.filter(c => c.role === 'agent').map(c => c.displayName)
+      : [
+          'Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 
+          'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'
+        ];
 
     let intervalLeads = activeLeads;
     if (reportTab === 'daily') {
@@ -116,7 +120,7 @@ export default function CampaignAnalytics({
         conversionRate
       };
     }).sort((a, b) => b.conversionRate - a.conversionRate || b.won - a.won);
-  }, [activeLeads, reportTab]);
+  }, [activeLeads, reportTab, coordinators]);
 
   const totalLeadsCount = activeLeads.length;
 
@@ -281,14 +285,16 @@ export default function CampaignAnalytics({
     const oneMonthAgo = Date.now() - 30 * 24 * 3600 * 1000;
     const monthlyLeads = activeLeads.filter(l => new Date(l.createdAt).getTime() >= oneMonthAgo);
 
-    // List of 10 sub agents
-    const coordinators = [
-      'Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 
-      'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'
-    ];
+    // List of sub agents
+    const coordinatorsList = coordinators && coordinators.length > 0
+      ? coordinators.filter(c => c.role === 'agent').map(c => c.displayName)
+      : [
+          'Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 
+          'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'
+        ];
 
     // Compute stats for each coordinator
-    const agentLeaderboard = coordinators.map(name => {
+    const agentLeaderboard = coordinatorsList.map(name => {
       const agentLeads = activeLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase());
       const total = agentLeads.length;
       const won = agentLeads.filter(l => l.stage === 'won').length;
@@ -312,7 +318,7 @@ export default function CampaignAnalytics({
       wonCount: monthlyLeads.filter(l => l.stage === 'won').length,
       leaderboard: agentLeaderboard
     };
-  }, [activeLeads]);
+  }, [activeLeads, coordinators]);
 
   const renderConversionGraph = () => {
     return (
