@@ -14,11 +14,15 @@ import {
   limit, 
   writeBatch
 } from 'firebase/firestore';
-import { Lead, LeadStage, StatSummary, Coordinator } from '../types.ts';
+import { Lead, LeadStage, StatSummary, Coordinator, Job } from '../types.ts';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
 const DATA_FILE = path.join(DATA_DIR, 'leads.json');
 const COORDINATORS_FILE = path.join(DATA_DIR, 'coordinators.json');
+const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
 
 // Initialize client-side Firebase Firestore with standard Web SDK
 // This bypasses GCP Service Account IAM permissions propagation issues on shared databases!
@@ -54,6 +58,25 @@ function initFirestore() {
 // Perform initial initialization
 initFirestore();
 
+// Helper to recursively strip or replace undefined values with empty/null for Firestore compatibility
+function cleanForFirestore(obj: any): any {
+  if (obj === null || obj === undefined) return null;
+  if (Array.isArray(obj)) {
+    return obj.map(cleanForFirestore);
+  }
+  if (typeof obj === 'object') {
+    const cleaned: any = {};
+    for (const key of Object.keys(obj)) {
+      const val = obj[key];
+      if (val !== undefined) {
+        cleaned[key] = cleanForFirestore(val);
+      }
+    }
+    return cleaned;
+  }
+  return obj;
+}
+
 // Helper to ensure coordinators database exists with default seed accounts
 export async function initializeCoordinatorsDatabase() {
   const defaultCoordinators: Coordinator[] = [
@@ -84,7 +107,7 @@ export async function initializeCoordinatorsDatabase() {
         const batch = writeBatch(db);
         defaultCoordinators.forEach(c => {
           const docRef = doc(db, 'coordinators', c.id);
-          batch.set(docRef, c);
+          batch.set(docRef, cleanForFirestore(c));
         });
         await batch.commit();
         console.log('[Firestore Client] Seeded coordinators successfully.');
@@ -131,12 +154,20 @@ export async function getCoordinators(): Promise<Coordinator[]> {
 // Save all coordinators
 export async function saveCoordinators(coordinators: Coordinator[]): Promise<void> {
   await initializeCoordinatorsDatabase();
+
+  // Write to local JSON file first so we ALWAYS have a local copy and stay fully functional!
+  try {
+    fs.writeFileSync(COORDINATORS_FILE, JSON.stringify(coordinators, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to write coordinators file', err);
+  }
+
   if (db) {
     try {
       const batch = writeBatch(db);
       coordinators.forEach(c => {
         const docRef = doc(db, 'coordinators', c.id);
-        batch.set(docRef, c);
+        batch.set(docRef, cleanForFirestore(c));
       });
       await batch.commit();
 
@@ -155,12 +186,8 @@ export async function saveCoordinators(coordinators: Coordinator[]): Promise<voi
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save coordinators to cloud:', err);
+      // Log but do not throw, as we saved to the local file successfully
     }
-  }
-  try {
-    fs.writeFileSync(COORDINATORS_FILE, JSON.stringify(coordinators, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to write coordinators file', err);
   }
 }
 
@@ -447,7 +474,7 @@ async function initializeDatabase() {
         const batch = writeBatch(db);
         initialLeads.forEach(l => {
           const docRef = doc(db, 'leads', l.id);
-          batch.set(docRef, l);
+          batch.set(docRef, cleanForFirestore(l));
         });
         await batch.commit();
         console.log('[Firestore Client] Seeded leads successfully.');
@@ -512,12 +539,20 @@ export async function getLeadById(id: string): Promise<Lead | undefined> {
 // Save all leads
 export async function saveLeads(leads: Lead[]): Promise<void> {
   await initializeDatabase();
+
+  // Write to local JSON file first so we ALWAYS have a local copy and stay fully functional!
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(leads, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to write database', err);
+  }
+
   if (db) {
     try {
       const batch = writeBatch(db);
       leads.forEach(l => {
         const docRef = doc(db, 'leads', l.id);
-        batch.set(docRef, l);
+        batch.set(docRef, cleanForFirestore(l));
       });
       await batch.commit();
 
@@ -536,12 +571,8 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save leads to cloud:', err);
+      // Log but do not throw, as we saved to the local file successfully
     }
-  }
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(leads, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to write database', err);
   }
 }
 
@@ -549,7 +580,7 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
 export async function addLead(lead: Lead): Promise<void> {
   if (db) {
     try {
-      await setDoc(doc(db, 'leads', lead.id), lead);
+      await setDoc(doc(db, 'leads', lead.id), cleanForFirestore(lead));
     } catch (err: any) {
       console.error('[Firestore Client] Failed to add lead to cloud:', err);
     }
@@ -623,4 +654,180 @@ export async function getStats(): Promise<StatSummary> {
     byStage,
     byCampaign
   };
+}
+
+// Ensure jobs database exists with default seed jobs
+export async function initializeJobsDatabase() {
+  const defaultJobs: Job[] = [
+    {
+      id: 'job_nesto_hypermarket',
+      title: 'NESTO HYPERMARKET',
+      country: 'Dubai',
+      requirement: 'Sales (1400 AED)',
+      processingFeeMale: '95k',
+      processingFeeFemale: '65k',
+      accommodation: 'Free Accommodation & Transportation + Air ticket every 2 years',
+      ageLimit: 'Max 32',
+      conditions: [
+        'Pre Medical',
+        'No Stamping Required',
+        'Need to send Introduction Video',
+        'Original Passport is mandatory',
+        'Qualification 10th above'
+      ],
+      modeOfInterview: 'Online',
+      applicability: 'Both Male & Female Candidates can Apply',
+      otherTerms: 'Freshers can Apply. Includes International Flight Tickets.',
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'job_guest_relations_dubai',
+      title: 'GUEST RELATIONSHIP EXECUTIVE(DUBAI) (Highend Fine Dine)',
+      country: 'Dubai',
+      requirement: 'Guest Relations (2000 - 2700 AED)',
+      processingFeeMale: '75k',
+      processingFeeFemale: '75k',
+      accommodation: 'Free Meal & Transportation + Air ticket every 2 years, Accomodation Free for the 1st month',
+      ageLimit: 'Max 32',
+      conditions: [
+        'Pre Medical',
+        'No Stamping Required',
+        'Min 1 - 2 yrs experience in Restaurant or Hotel Reception',
+        'Original Passport is mandatory'
+      ],
+      modeOfInterview: 'Online',
+      applicability: 'Only Female Candidates can Apply',
+      otherTerms: 'Company Name (Highend Fine Dine). Includes International Flight Tickets.',
+      createdAt: new Date().toISOString()
+    }
+  ];
+
+  if (db) {
+    try {
+      const statusRef = doc(db, 'metadata', 'jobs_status');
+      const statusSnap = await getDoc(statusRef);
+      if (!statusSnap.exists()) {
+        console.log('[Firestore Client] Seeding default jobs to cloud...');
+        const batch = writeBatch(db);
+        defaultJobs.forEach(j => {
+          const docRef = doc(db, 'jobs', j.id);
+          batch.set(docRef, cleanForFirestore(j));
+        });
+        batch.set(statusRef, { seeded: true, updatedAt: new Date().toISOString() });
+        await batch.commit();
+        console.log('[Firestore Client] Seeded jobs successfully.');
+      }
+      return;
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to check/seed jobs, falling back to local file:', err);
+    }
+  }
+
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(JOBS_FILE)) {
+    fs.writeFileSync(JOBS_FILE, JSON.stringify(defaultJobs, null, 2), 'utf-8');
+  }
+}
+
+// Get all jobs
+export async function getJobs(): Promise<Job[]> {
+  await initializeJobsDatabase();
+  if (db) {
+    try {
+      const snapshot = await getDocs(collection(db, 'jobs'));
+      const jobs: Job[] = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data) {
+          jobs.push({
+            id: docSnap.id,
+            title: data.title || '',
+            country: data.country || 'Other',
+            requirement: data.requirement || '',
+            processingFeeMale: data.processingFeeMale || '',
+            processingFeeFemale: data.processingFeeFemale || '',
+            accommodation: data.accommodation || '',
+            ageLimit: data.ageLimit || '',
+            conditions: Array.isArray(data.conditions) ? data.conditions : [],
+            modeOfInterview: data.modeOfInterview || 'Online',
+            applicability: data.applicability || 'Both Male & Female Candidates can Apply',
+            otherTerms: data.otherTerms || '',
+            isActive: data.isActive !== undefined ? Boolean(data.isActive) : true,
+            createdAt: data.createdAt || new Date().toISOString()
+          } as Job);
+        }
+      });
+      return jobs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to fetch jobs from cloud, falling back to local files:', err);
+    }
+  }
+  try {
+    const data = fs.readFileSync(JOBS_FILE, 'utf-8');
+    const jobs = JSON.parse(data) as Job[];
+    const sanitized = jobs.map(j => ({
+      id: j.id || `job_${Math.random().toString(36).substring(2, 7)}`,
+      title: j.title || '',
+      country: j.country || 'Other',
+      requirement: j.requirement || '',
+      processingFeeMale: j.processingFeeMale || '',
+      processingFeeFemale: j.processingFeeFemale || '',
+      accommodation: j.accommodation || '',
+      ageLimit: j.ageLimit || '',
+      conditions: Array.isArray(j.conditions) ? j.conditions : [],
+      modeOfInterview: j.modeOfInterview || 'Online',
+      applicability: j.applicability || 'Both Male & Female Candidates can Apply',
+      otherTerms: j.otherTerms || '',
+      isActive: j.isActive !== undefined ? Boolean(j.isActive) : true,
+      createdAt: j.createdAt || new Date().toISOString()
+    }));
+    return sanitized.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  } catch (err) {
+    console.error('Failed to read jobs file', err);
+    return [];
+  }
+}
+
+// Save all jobs
+export async function saveJobs(jobs: Job[]): Promise<void> {
+  await initializeJobsDatabase();
+  const validJobs = (jobs || []).filter(j => j && typeof j === 'object' && j.id);
+
+  // Write to local file first so we ALWAYS have a local copy and stay fully functional!
+  try {
+    fs.writeFileSync(JOBS_FILE, JSON.stringify(validJobs, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to write jobs file', err);
+  }
+
+  if (db) {
+    try {
+      const batch = writeBatch(db);
+      validJobs.forEach(j => {
+        const docRef = doc(db, 'jobs', j.id);
+        batch.set(docRef, cleanForFirestore(j));
+      });
+      await batch.commit();
+
+      // Delete any removed jobs
+      const snapshot = await getDocs(collection(db, 'jobs'));
+      const deleteBatch = writeBatch(db);
+      let hasDeletes = false;
+      snapshot.forEach(docSnap => {
+        if (!validJobs.some(j => j.id === docSnap.id)) {
+          deleteBatch.delete(docSnap.ref);
+          hasDeletes = true;
+        }
+      });
+      if (hasDeletes) {
+        await deleteBatch.commit();
+      }
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to save jobs to cloud:', err);
+      throw err;
+    }
+  }
 }

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Lock, User, Eye, EyeOff, ShieldCheck, PhoneCall, KeyRound, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
+// @ts-ignore
+import cgpLogo from '../assets/images/cgp_logo_1782388689853.jpg';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: { id: string; username: string; displayName: string; role: 'admin' | 'agent' }) => void;
@@ -70,44 +72,44 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 px-6 lg:px-8 font-sans">
+    <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 px-6 lg:px-8 font-sans selection:bg-accent-purple selection:text-white">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
         {/* Logo Container */}
-        <div className="inline-flex h-24 w-24 rounded-2xl overflow-hidden bg-white border border-slate-200 shadow-md p-0.5 select-none animate-in zoom-in-95 duration-300">
+        <div className="inline-flex h-24 w-24 rounded-3xl overflow-hidden bg-slate-900 border border-slate-750 shadow-xl p-1 select-none animate-in zoom-in-95 duration-300">
           <img 
-            src="/src/assets/images/cgp_logo_1782388689853.jpg" 
+            src={cgpLogo} 
             alt="CGP Logo" 
-            className="h-full w-full object-cover"
+            className="h-full w-full object-cover rounded-2xl"
             referrerPolicy="no-referrer"
           />
         </div>
         
-        <h2 className="mt-4 text-2xl font-black text-slate-900 tracking-tight uppercase">
+        <h2 className="mt-4 text-2xl font-black text-slate-50 tracking-tight font-display uppercase">
           CGP HR Solutions
         </h2>
-        <p className="mt-1 text-xs text-slate-500 font-bold tracking-wide">
+        <p className="mt-1 text-[10px] text-accent-purple font-extrabold tracking-widest uppercase">
           ABROAD RECRUITING TELE-CALLING HUB
         </p>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white py-8 px-8 rounded-3xl border border-slate-150 shadow-sm space-y-6">
-          <div className="border-b border-slate-100 pb-4 text-center">
-            <h3 className="text-sm font-black text-slate-800 tracking-wider uppercase flex items-center justify-center gap-1.5">
-              <KeyRound className="h-4 w-4 text-indigo-500" />
+        <div className="bg-slate-900/90 py-8 px-8 rounded-3xl border border-slate-800 shadow-2xl space-y-6 backdrop-blur-md">
+          <div className="border-b border-slate-800 pb-4 text-center">
+            <h3 className="text-xs font-black text-slate-100 tracking-wider uppercase flex items-center justify-center gap-1.5 font-display">
+              <KeyRound className="h-4 w-4 text-accent-purple" />
               Secure Staff Authentication
             </h3>
-            <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
+            <p className="text-[11px] text-slate-400 font-semibold mt-1">
               Enter your designated ID & Password below to access candidate buckets
             </p>
           </div>
 
           {errorMsg && (
-            <div className="bg-red-50 border border-red-150 p-3.5 rounded-2xl flex items-start gap-2.5 text-xs text-red-700 font-bold animate-shake">
-              <AlertCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+            <div className="bg-red-950/40 border border-red-900/50 p-3.5 rounded-2xl flex items-start gap-2.5 text-xs text-red-200 font-bold animate-shake">
+              <AlertCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
               <div>
-                <p className="font-extrabold uppercase text-[10px] tracking-wider text-red-800">Login Attempt Denied</p>
-                <p className="font-medium mt-0.5 text-[11px] leading-relaxed">{errorMsg}</p>
+                <p className="font-extrabold uppercase text-[10px] tracking-wider text-red-300">Login Attempt Denied</p>
+                <p className="font-medium mt-0.5 text-[11px] leading-relaxed text-red-200/90">{errorMsg}</p>
               </div>
             </div>
           )}
@@ -115,11 +117,11 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           <form className="space-y-4" onSubmit={handleSubmit}>
             {/* Username Input */}
             <div>
-              <label htmlFor="username" className="block text-[10px] font-black uppercase text-slate-500 tracking-wider mb-1.5">
+              <label htmlFor="username" className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5 font-display">
                 Username / Agent ID
               </label>
-              <div className="relative rounded-xl shadow-3xs">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+              <div className="relative rounded-xl shadow-sm">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
                   <User className="h-4 w-4" />
                 </div>
                 <input
@@ -130,18 +132,18 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="e.g. admin or joyce"
-                  className="block w-full pl-10 pr-4 py-2.5 text-xs font-bold text-slate-800 placeholder-slate-400 bg-slate-50 hover:bg-slate-50/50 focus:bg-white border border-slate-200 focus:border-slate-900 rounded-xl focus:outline-none focus:ring-1 focus:ring-slate-900 transition-all font-mono"
+                  className="block w-full pl-10 pr-4 py-2.5 text-xs font-bold text-slate-100 placeholder-slate-500 bg-slate-850 hover:bg-slate-800/80 focus:bg-slate-800 border border-slate-750 focus:border-accent-purple rounded-xl focus:outline-none focus:ring-1 focus:ring-accent-purple/20 transition-all font-mono"
                 />
               </div>
             </div>
 
             {/* Password Input */}
             <div>
-              <label htmlFor="password" className="block text-[10px] font-black uppercase text-slate-500 tracking-wider mb-1.5">
+              <label htmlFor="password" className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5 font-display">
                 Security Password
               </label>
-              <div className="relative rounded-xl shadow-3xs">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+              <div className="relative rounded-xl shadow-sm">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
                   <Lock className="h-4 w-4" />
                 </div>
                 <input
@@ -152,12 +154,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="block w-full pl-10 pr-10 py-2.5 text-xs font-bold text-slate-800 placeholder-slate-400 bg-slate-50 hover:bg-slate-50/50 focus:bg-white border border-slate-200 focus:border-slate-900 rounded-xl focus:outline-none focus:ring-1 focus:ring-slate-900 transition-all font-mono"
+                  className="block w-full pl-10 pr-10 py-2.5 text-xs font-bold text-slate-100 placeholder-slate-500 bg-slate-850 hover:bg-slate-800/80 focus:bg-slate-800 border border-slate-750 focus:border-accent-purple rounded-xl focus:outline-none focus:ring-1 focus:ring-accent-purple/20 transition-all font-mono"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition-all cursor-pointer"
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-350 transition-all cursor-pointer"
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -168,7 +170,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-xl text-xs font-black text-white bg-slate-900 hover:bg-black focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-900 shadow-sm transition-all hover:shadow-md cursor-pointer disabled:opacity-50 mt-2 uppercase tracking-widest"
+              className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-xl text-xs font-black text-white bg-accent-purple hover:bg-accent-purple/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-purple shadow-sm transition-all hover:shadow-lg hover:shadow-accent-purple/10 cursor-pointer disabled:opacity-50 mt-2 uppercase tracking-widest"
             >
               {isLoading ? (
                 <div className="flex items-center gap-2">

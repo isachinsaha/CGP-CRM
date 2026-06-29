@@ -120,14 +120,14 @@ export default function WebhookSandbox({ onLeadAdded, apiMode }: WebhookSandboxP
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8" id="webhook-sandbox-root">
       {/* Configuration Column */}
       <div className="lg:col-span-7 space-y-6">
-        <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-xs">
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-xs">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-2">
-                <Terminal className="h-5 w-5 text-emerald-650" />
+              <h2 className="text-lg font-semibold text-slate-100 tracking-tight flex items-center gap-2">
+                <Terminal className="h-5 w-5 text-accent-emerald" />
                 Inbound Meta Ads Simulator
               </h2>
-              <p className="text-slate-500 text-sm mt-0.5">
+              <p className="text-slate-400 text-sm mt-0.5">
                 Simulate Meta ad callbacks and candidate query submissions when they click your placement ads.
               </p>
             </div>
@@ -144,31 +144,31 @@ export default function WebhookSandbox({ onLeadAdded, apiMode }: WebhookSandboxP
                   key={idx}
                   type="button"
                   onClick={() => selectPreset(idx)}
-                  className={`text-left p-3 rounded-xl border text-sm transition-all flex flex-col justify-between h-24 ${
+                  className={`text-left p-3 rounded-xl border text-sm transition-all flex flex-col justify-between h-24 cursor-pointer ${
                     activePresetIndex === idx
-                      ? 'border-emerald-500 bg-emerald-50/30'
-                      : 'border-slate-100 hover:border-slate-200 bg-slate-50/30'
+                      ? 'border-accent-emerald bg-emerald-950/20'
+                      : 'border-slate-800 hover:border-slate-700 bg-slate-950/30'
                   }`}
                 >
                   <div className="flex justify-between items-start w-full">
-                    <span className="font-semibold text-slate-800 truncate block max-w-[130px]">{p.name}</span>
+                    <span className="font-semibold text-slate-100 truncate block max-w-[130px]">{p.name}</span>
                     <span
                       className={`text-[10px] px-2 py-0.5 rounded-full font-medium uppercase tracking-wider ${
                         p.badge === 'high'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                          ? 'bg-emerald-950/40 text-accent-emerald border border-emerald-900/30'
                           : p.badge === 'medium'
-                          ? 'bg-emerald-50/55 text-emerald-600 border border-emerald-100/50'
+                          ? 'bg-emerald-950/25 text-emerald-400 border border-emerald-900/20'
                           : p.badge === 'low'
-                          ? 'bg-amber-50 text-amber-700 border border-amber-100/40'
-                          : 'bg-slate-50 text-slate-500 border border-slate-150'
+                          ? 'bg-amber-950/40 text-accent-amber border border-amber-900/30'
+                          : 'bg-slate-900 text-slate-400 border border-slate-800'
                       }`}
                     >
                       {p.badge}
                     </span>
                   </div>
                   <div>
-                    <span className="text-xs text-slate-500 block truncate">{p.campaign}</span>
-                    <span className="text-[10px] text-slate-400 block truncate">{p.description}</span>
+                    <span className="text-xs text-slate-400 block truncate">{p.campaign}</span>
+                    <span className="text-[10px] text-slate-500 block truncate">{p.description}</span>
                   </div>
                 </button>
               ))}
@@ -179,7 +179,7 @@ export default function WebhookSandbox({ onLeadAdded, apiMode }: WebhookSandboxP
           <form onSubmit={triggerWebhook} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Candidate Profile Name</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Candidate Profile Name</label>
                 <input
                   type="text"
                   name="whatsappName"
@@ -187,12 +187,12 @@ export default function WebhookSandbox({ onLeadAdded, apiMode }: WebhookSandboxP
                   onChange={handleInputChange}
                   required
                   placeholder="e.g. SUBHA TAMANG"
-                  className="w-full text-sm px-3.5 py-2 rounded-xl bg-slate-50/50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-slate-800 uppercase"
+                  className="w-full text-sm px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-purple focus:bg-slate-950 transition-all text-slate-100 uppercase"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Candidate Phone Number</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Candidate Phone Number</label>
                 <input
                   type="text"
                   name="phone"
@@ -200,18 +200,18 @@ export default function WebhookSandbox({ onLeadAdded, apiMode }: WebhookSandboxP
                   onChange={handleInputChange}
                   required
                   placeholder="e.g. 9801234567"
-                  className="w-full text-sm px-3.5 py-2 rounded-xl bg-slate-50/50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-slate-800 font-mono"
+                  className="w-full text-sm px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-purple focus:bg-slate-950 transition-all text-slate-100 font-mono"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Inbound Recruitment Ad Campaign</label>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Inbound Recruitment Ad Campaign</label>
               <select
                 name="campaignName"
                 value={formData.campaignName}
                 onChange={handleInputChange}
-                className="w-full text-sm px-3.5 py-2 rounded-xl bg-slate-50/50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-slate-800 appearance-none cursor-pointer"
+                className="w-full text-sm px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-purple focus:bg-slate-950 transition-all text-slate-100 appearance-none cursor-pointer"
               >
                 <option value="Qatar Hospitality Program">✈️ Qatar Hospitality Program (Hotel Waiter/Crew)</option>
                 <option value="Germany Nursing Visa Program">👩‍⚕️ Germany Nursing Visa Program (GNM/BSc Nurses)</option>
@@ -222,7 +222,7 @@ export default function WebhookSandbox({ onLeadAdded, apiMode }: WebhookSandboxP
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Inbound Ad Message / Candidate Query Text</label>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Inbound Ad Message / Candidate Query Text</label>
               <textarea
                 name="initialMessage"
                 value={formData.initialMessage}
@@ -230,13 +230,13 @@ export default function WebhookSandbox({ onLeadAdded, apiMode }: WebhookSandboxP
                 required
                 rows={4}
                 placeholder="Type raw incoming message text..."
-                className="w-full text-sm p-3.5 rounded-xl bg-slate-50/50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-slate-800 resize-none font-sans"
+                className="w-full text-sm p-3.5 rounded-xl bg-slate-950 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-purple focus:bg-slate-950 transition-all text-slate-100 resize-none font-sans"
               />
             </div>
 
             {apiMode === 'simulation' && (
-              <div className="flex gap-2.5 items-start p-3 bg-amber-50 rounded-xl border border-amber-100 text-amber-800 text-xs text-left">
-                <HelpCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+              <div className="flex gap-2.5 items-start p-3 bg-amber-950/20 rounded-xl border border-amber-900/30 text-amber-400 text-xs text-left">
+                <HelpCircle className="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
                 <span>
                   No live <strong>GEMINI_API_KEY</strong> detected in Secrets. Dynamic AI extraction is offline; processing lead via fallback rule-based matching. Apply a live key in Settings to inspect live conversational extraction!
                 </span>
@@ -246,10 +246,10 @@ export default function WebhookSandbox({ onLeadAdded, apiMode }: WebhookSandboxP
             <button
               type="submit"
               disabled={loading}
-              className={`w-full py-3 px-4 rounded-xl text-white font-medium text-sm flex items-center justify-center gap-2.5 transition-all shadow-sm ${
+              className={`w-full py-3 px-4 rounded-xl text-white font-medium text-sm flex items-center justify-center gap-2.5 transition-all shadow-sm cursor-pointer ${
                 loading
-                  ? 'bg-slate-400 cursor-not-allowed'
-                  : 'bg-slate-900 hover:bg-black hover:shadow-slate-100'
+                  ? 'bg-slate-800 cursor-not-allowed text-slate-500'
+                  : 'bg-accent-purple hover:bg-purple-600'
               }`}
             >
               <Send className={`h-4 w-4 ${loading ? 'animate-pulse' : ''}`} />
@@ -312,7 +312,7 @@ export default function WebhookSandbox({ onLeadAdded, apiMode }: WebhookSandboxP
                     <div><span className="text-pink-400">ID:</span> {responseLog.lead.id}</div>
                     <div><span className="text-purple-400">Qualified Name:</span> {responseLog.lead.name}</div>
                     <div><span className="text-blue-400">Campaign source:</span> {responseLog.lead.campaign}</div>
-                    <div><span className="text-yellow-400">Fit Score Assigned:</span> {responseLog.lead.fitScore.toUpperCase()}</div>
+                    <div><span className="text-yellow-400">Fit Score Assigned:</span> {(responseLog.lead.fitScore || 'unqualified').toUpperCase()}</div>
                     <div><span className="text-emerald-400">Calculated Budget:</span> ${responseLog.lead.budget.toLocaleString()} ({responseLog.lead.budgetRaw})</div>
                     <div><span className="text-indigo-400">Requirements Extracted:</span> [{responseLog.lead.requirements.join(', ')}]</div>
                     <div className="border-t border-slate-800 pt-1 mt-1 font-sans text-slate-400 italic">

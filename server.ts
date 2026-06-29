@@ -8,8 +8,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Load local database helper
-import { getLeads, addLead, saveLeads, getStats, getLeadById, getCoordinators, saveCoordinators, initializeCoordinatorsDatabase } from './src/server/db.ts';
-import { Lead, Message, LeadStage, FitScore, Coordinator } from './src/types.ts';
+import { getLeads, addLead, saveLeads, getStats, getLeadById, getCoordinators, saveCoordinators, initializeCoordinatorsDatabase, getJobs, saveJobs } from './src/server/db.ts';
+import { Lead, Message, LeadStage, FitScore, Coordinator, Job } from './src/types.ts';
 
 const app = express();
 const PORT = 3000;
@@ -45,6 +45,26 @@ function getGemini(): GoogleGenAI | null {
     }
   }
   return aiClient;
+}
+
+// Helper to generate a clean, unique lead ID like SAPNA_27-06-2026 or SAPNA_27-06-2026_1
+function generateUniqueLeadId(leads: Lead[], cleanNameId: string): string {
+  const d = new Date();
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  const dateStr = `${day}-${month}-${year}`;
+  const baseId = `${cleanNameId}_${dateStr}`;
+  
+  if (!leads.some(l => l.id === baseId)) {
+    return baseId;
+  }
+  
+  let counter = 1;
+  while (leads.some(l => l.id === `${baseId}_${counter}`)) {
+    counter++;
+  }
+  return `${baseId}_${counter}`;
 }
 
 // ---------------- SERVER API ROUTES ----------------
@@ -90,8 +110,9 @@ app.post('/api/leads', async (req, res) => {
     const sequence = leads.length + 1;
     const serialNo = `CGP-${1000 + sequence}`;
 
+    const cleanNameId = String(name).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
     const newLead = {
-      id: `lead_${Date.now()}`,
+      id: generateUniqueLeadId(leads, cleanNameId),
       serialNo,
       entryDate: new Date().toISOString().split('T')[0],
       assignDate: assignedTo ? new Date().toISOString().split('T')[0] : '',
@@ -198,8 +219,14 @@ app.post('/api/leads/bulk', async (req, res) => {
           ? tags.split(',').map((t: string) => t.trim()).filter(Boolean) 
           : [];
 
+      const cleanNameId = String(name).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
+      const d = new Date();
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      const dateStr = `${day}-${month}-${year}`;
       const newLead = {
-        id: `lead_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 5)}`,
+        id: `${cleanNameId}_${dateStr}_bulk_${index}_${Math.random().toString(36).substr(2, 4)}`,
         serialNo,
         entryDate: new Date().toISOString().split('T')[0],
         assignDate: assignedTo ? new Date().toISOString().split('T')[0] : '',
@@ -350,7 +377,7 @@ app.post('/api/coordinators', async (req, res) => {
     }
 
     const newCoord: Coordinator = {
-      id: `coord_${cleanUsername.toLowerCase()}_${Date.now()}`,
+      id: `COORD_${cleanUsername.toUpperCase()}`,
       username: cleanUsername,
       displayName: String(displayName).trim(),
       password: String(password).trim(),
@@ -702,6 +729,112 @@ app.delete('/api/leads/:id', async (req, res) => {
   }
 });
 
+
+// ---------------- ACTIVE JOBS CRUD ENDPOINTS ----------------
+
+// GET all active jobs
+app.get('/api/jobs', async (req, res) => {
+  try {
+    const jobs = await getJobs();
+    res.json(jobs);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST add a new job
+app.post('/api/jobs', async (req, res) => {
+  try {
+    const { title, country, requirement, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
+    if (!title) {
+      res.status(400).json({ error: 'Job title is required.' });
+      return;
+    }
+
+    const jobs = await getJobs();
+    const newJob: Job = {
+      id: `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      title: String(title).trim(),
+      country: country ? String(country).trim() : 'Kuwait',
+      requirement: requirement ? String(requirement).trim() : 'General Requirement',
+      processingFeeMale: processingFeeMale ? String(processingFeeMale).trim() : 'No fee listed',
+      processingFeeFemale: processingFeeFemale ? String(processingFeeFemale).trim() : 'No fee listed',
+      accommodation: accommodation ? String(accommodation).trim() : 'No details provided',
+      ageLimit: ageLimit ? String(ageLimit).trim() : 'N/A',
+      conditions: Array.isArray(conditions) ? conditions.map(c => String(c).trim()).filter(Boolean) : [],
+      modeOfInterview: modeOfInterview ? String(modeOfInterview) : 'Online',
+      applicability: applicability ? String(applicability) : 'Both Male & Female can Apply',
+      otherTerms: otherTerms ? String(otherTerms).trim() : '',
+      isActive: isActive !== undefined ? Boolean(isActive) : true,
+      createdAt: new Date().toISOString()
+    };
+
+    jobs.unshift(newJob);
+    await saveJobs(jobs);
+
+    res.status(201).json(newJob);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// PUT update an existing job
+app.put('/api/jobs/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, country, requirement, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
+
+    const jobs = await getJobs();
+    const idx = jobs.findIndex(j => j.id === id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Job not found' });
+      return;
+    }
+
+    const updatedJob = {
+      ...jobs[idx],
+      title: title !== undefined ? String(title).trim() : (jobs[idx].title || ''),
+      country: country !== undefined ? String(country).trim() : (jobs[idx].country || 'Kuwait'),
+      requirement: requirement !== undefined ? String(requirement).trim() : (jobs[idx].requirement || 'General Requirement'),
+      processingFeeMale: processingFeeMale !== undefined ? String(processingFeeMale).trim() : (jobs[idx].processingFeeMale || 'No fee listed'),
+      processingFeeFemale: processingFeeFemale !== undefined ? String(processingFeeFemale).trim() : (jobs[idx].processingFeeFemale || 'No fee listed'),
+      accommodation: accommodation !== undefined ? String(accommodation).trim() : (jobs[idx].accommodation || 'No details provided'),
+      ageLimit: ageLimit !== undefined ? String(ageLimit).trim() : (jobs[idx].ageLimit || 'N/A'),
+      conditions: conditions !== undefined ? (Array.isArray(conditions) ? conditions.map(c => String(c).trim()).filter(Boolean) : (jobs[idx].conditions || [])) : (jobs[idx].conditions || []),
+      modeOfInterview: modeOfInterview !== undefined ? String(modeOfInterview) : (jobs[idx].modeOfInterview || 'Online'),
+      applicability: applicability !== undefined ? String(applicability) : (jobs[idx].applicability || 'Both Male & Female can Apply'),
+      otherTerms: otherTerms !== undefined ? String(otherTerms).trim() : (jobs[idx].otherTerms || ''),
+      isActive: isActive !== undefined ? Boolean(isActive) : (jobs[idx].isActive !== undefined ? jobs[idx].isActive : true)
+    };
+
+    jobs[idx] = updatedJob;
+    await saveJobs(jobs);
+
+    res.json(updatedJob);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// DELETE a job
+app.delete('/api/jobs/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const jobs = await getJobs();
+    const filtered = jobs.filter(j => j.id !== id);
+    if (jobs.length === filtered.length) {
+      res.status(404).json({ error: 'Job not found' });
+      return;
+    }
+
+    await saveJobs(filtered);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+
 // POST simulate incoming WhatsApp Meta ad Webhook lead
 app.post('/api/webhook/whatsapp', async (req, res) => {
   try {
@@ -825,7 +958,8 @@ Extract:
     const sequence = leads.length + 1;
     const serialNo = `CGP-${1000 + sequence}`;
 
-    const newLeadId = `lead_${Date.now()}`;
+    const cleanNameId = String(aiAnalysis.name).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
+    const newLeadId = generateUniqueLeadId(leads, cleanNameId);
     const newLead: Lead = {
       id: newLeadId,
       serialNo,

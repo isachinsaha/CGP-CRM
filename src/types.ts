@@ -90,4 +90,21 @@ export interface Coordinator {
   createdAt: string;
 }
 
+export interface Job {
+  id: string;
+  title: string;
+  country: string;
+  requirement: string;
+  processingFeeMale: string;
+  processingFeeFemale: string;
+  accommodation: string;
+  ageLimit: string;
+  conditions: string[];
+  modeOfInterview: string;
+  applicability: string;
+  otherTerms: string;
+  isActive?: boolean;
+  createdAt: string;
+}
+
 
