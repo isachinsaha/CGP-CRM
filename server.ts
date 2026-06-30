@@ -14,7 +14,8 @@ import { Lead, Message, LeadStage, FitScore, Coordinator, Job } from './src/type
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Lazy-initialize Gemini client to avoid startup crashes if key is omitted
 let aiClient: GoogleGenAI | null = null;
@@ -1271,7 +1272,299 @@ Provide the Strategic Analysis Report now. Do not include introductory notes or 
 });
 
 
-// ---------------- VITE FRONTEND MIDDLEWARE SETUP ----------------
+// POST Smart AI Candidate Profiler and Matcher
+app.post('/api/ai-match-leads', async (req, res) => {
+  try {
+    const { jobId, textCommand, image } = req.body;
+
+    let jobDetails = {
+      title: 'Hotel Receptionist',
+      country: 'Maldives/MVR (or other)',
+      salary: 'USD 450 per month',
+      experience: 'Minimum 3 years as a Receptionist',
+      skills: 'Good English communication skills',
+      preferredRegion: 'West Bengal, Darjeeling, or Siliguri region',
+      benefits: 'Free Food, Free Accommodation'
+    };
+
+    // If an existing job was selected, fetch its details and merge
+    if (jobId) {
+      const jobs = await getJobs();
+      const matchedJob = jobs.find(j => j.id === jobId);
+      if (matchedJob) {
+        jobDetails.title = matchedJob.title || jobDetails.title;
+        jobDetails.country = matchedJob.country || jobDetails.country;
+        jobDetails.experience = matchedJob.requirement || jobDetails.experience;
+        jobDetails.skills = matchedJob.applicability || jobDetails.skills;
+        jobDetails.preferredRegion = matchedJob.otherTerms || jobDetails.preferredRegion;
+        jobDetails.benefits = (matchedJob.conditions && matchedJob.conditions.join(', ')) || jobDetails.benefits;
+      }
+    }
+
+    // Parse textCommand details directly if provided without image
+    if (textCommand && !image) {
+      jobDetails.title = textCommand.split('\n')[0].replace(/Match candidates for/i, '').replace(/role/i, '').replace(/"/g, '').trim() || jobDetails.title;
+    }
+
+    const ai = getGemini();
+    let isFlyerParsed = false;
+
+    // Phase 1: Flyer Image Visual Extraction using Gemini 3.5 Flash
+    if (ai && image) {
+      try {
+        let base64Data = image;
+        let mimeType = 'image/png';
+        if (image.startsWith('data:')) {
+          const parts = image.split(',');
+          base64Data = parts[1];
+          const mimeMatch = parts[0].match(/data:(.*?);base64/);
+          if (mimeMatch) mimeType = mimeMatch[1];
+        }
+
+        const imagePart = {
+          inlineData: {
+            mimeType,
+            data: base64Data
+          }
+        };
+
+        const parsePrompt = `Analyze this job vacancy flyer/advertisement creative.
+Extract the job requirements and details. Return a JSON object with these fields:
+{
+  "title": "the job position title, e.g. Receptionist",
+  "country": "the country/region of work, e.g. Maldives, Germany, Qatar",
+  "salary": "the salary details listed, e.g. USD 450 per month",
+  "experience": "required experience, e.g. 3 years as receptionist",
+  "skills": "required skills/criteria, e.g. English speaking",
+  "preferredRegion": "any preferred region of origin, e.g. West Bengal, Darjeeling, or Siliguri region",
+  "benefits": "benefits listed, e.g. Free food, free accommodation"
+}
+Ensure the output is valid JSON.`;
+
+        const parseRes = await ai.models.generateContent({
+          model: 'gemini-3.5-flash',
+          contents: { parts: [imagePart, { text: parsePrompt }] },
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                country: { type: Type.STRING },
+                salary: { type: Type.STRING },
+                experience: { type: Type.STRING },
+                skills: { type: Type.STRING },
+                preferredRegion: { type: Type.STRING },
+                benefits: { type: Type.STRING }
+              },
+              required: ["title"]
+            }
+          }
+        });
+
+        if (parseRes.text) {
+          const parsed = JSON.parse(parseRes.text.trim());
+          jobDetails = { ...jobDetails, ...parsed };
+          isFlyerParsed = true;
+        }
+      } catch (parseErr) {
+        console.error('Error parsing flyer image with Gemini:', parseErr);
+      }
+    }
+
+    // Merge custom command rules on top of parsed values if both exist
+    if (textCommand && isFlyerParsed) {
+      jobDetails.experience += ` | Additional requirement: ${textCommand}`;
+    }
+
+    const leads = await getLeads();
+
+    // Phase 2: Double-Stage Matching (Fast keyword filter to find top 120 potential fits, then AI score)
+    const searchTerms = [
+      ...jobDetails.title.toLowerCase().split(/[\s-/]+/),
+      ...jobDetails.preferredRegion.toLowerCase().split(/[\s,.-]+/)
+    ].filter(t => t && t.length > 2);
+
+    const preScored = leads.map(lead => {
+      let score = 0;
+      const leadText = `
+        ${lead.name} 
+        ${lead.position || ''} 
+        ${lead.origin || ''} 
+        ${lead.experience || ''} 
+        ${lead.country || ''} 
+        ${lead.remarks1 || ''} 
+        ${lead.remarks2 || ''} 
+        ${lead.remarks3 || ''}
+      `.toLowerCase();
+
+      // Position Match weights high
+      if (lead.position && lead.position.toLowerCase().includes(jobDetails.title.toLowerCase())) {
+        score += 60;
+      }
+
+      // Origin matcher
+      const regions = ['darjeeling', 'siliguri', 'bengal', 'sikkim'];
+      regions.forEach(r => {
+        if (jobDetails.preferredRegion.toLowerCase().includes(r) && leadText.includes(r)) {
+          score += 40;
+        }
+      });
+
+      // Search term index matching
+      searchTerms.forEach(term => {
+        if (leadText.includes(term)) score += 10;
+      });
+
+      if (lead.stage === 'lost') score -= 30; // lower priority for lost leads
+
+      return { lead, preScore: score };
+    });
+
+    // Select the top 120 leads for high-precision Gemini evaluation
+    const topCandidates = preScored
+      .sort((a, b) => b.preScore - a.preScore)
+      .slice(0, 120)
+      .map(item => item.lead);
+
+    let matchedProfiles: any[] = [];
+    let isSimulatedResult = false;
+
+    // Phase 3: AI precision evaluation using Gemini 3.5 Flash JSON schema matching
+    if (ai && topCandidates.length > 0) {
+      try {
+        const systemInstruction = `You are an elite, highly professional AI recruiter for overseas placements.
+Evaluate the candidate list against the given Job Demand requirements.
+Assign a matching score (0 to 100) based on their skills, gender/age, origin/preferred regions, experience, and Remarks Log.
+Provide a clear, brief 1-sentence matching explanation.
+Return the output strictly in the requested JSON schema.`;
+
+        const evaluationPrompt = `Job Demand Details:
+- Title: ${jobDetails.title}
+- Target Location: ${jobDetails.country}
+- Salary Package: ${jobDetails.salary}
+- Required Experience: ${jobDetails.experience}
+- Skills Preference: ${jobDetails.skills}
+- Origin Region Preference: ${jobDetails.preferredRegion}
+- Additional Benefits: ${jobDetails.benefits}
+
+Candidates to Evaluate:
+${JSON.stringify(topCandidates.map(c => ({
+  id: c.id,
+  name: c.name,
+  gender: c.gender,
+  age: c.age,
+  origin: c.origin,
+  position: c.position,
+  experience: c.experience,
+  remarks: `${c.remarks1} ${c.remarks2} ${c.remarks3}`.trim()
+})), null, 2)}`;
+
+        const evalRes = await ai.models.generateContent({
+          model: 'gemini-3.5-flash',
+          contents: evaluationPrompt,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                matches: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      leadId: { type: Type.STRING },
+                      score: { type: Type.INTEGER },
+                      reason: { type: Type.STRING }
+                    },
+                    required: ["leadId", "score", "reason"]
+                  }
+                }
+              },
+              required: ["matches"]
+            }
+          }
+        });
+
+        if (evalRes.text) {
+          const parsedEval = JSON.parse(evalRes.text.trim());
+          const matchMap = new Map<string, { score: number; reason: string }>();
+          parsedEval.matches.forEach((m: any) => {
+            matchMap.set(m.leadId, { score: m.score, reason: m.reason });
+          });
+
+          matchedProfiles = topCandidates.map(c => {
+            const matchInfo = matchMap.get(c.id) || { score: 50, reason: 'Candidate matches general profile criteria.' };
+            return {
+              ...c,
+              matchScore: matchInfo.score,
+              matchReason: matchInfo.reason
+            };
+          }).sort((a, b) => b.matchScore - a.matchScore);
+        }
+      } catch (evalErr) {
+        console.error('Error during precise Gemini evaluation:', evalErr);
+        isSimulatedResult = true;
+      }
+    } else {
+      isSimulatedResult = true;
+    }
+
+    // Heuristics-based Fallback/Simulated Matching Mode
+    if (isSimulatedResult || matchedProfiles.length === 0) {
+      matchedProfiles = topCandidates.map(c => {
+        let score = 50;
+        let reason = 'Candidate holds general profiles corresponding to position keywords.';
+
+        const leadText = `
+          ${c.name} 
+          ${c.position || ''} 
+          ${c.origin || ''} 
+          ${c.experience || ''} 
+          ${c.remarks1 || ''} 
+          ${c.remarks2 || ''} 
+          ${c.remarks3 || ''}
+        `.toLowerCase();
+
+        // Check for position relevance
+        const isReceptionist = leadText.includes('reception') || leadText.includes('front') || leadText.includes('hotel') || leadText.includes('office') || leadText.includes('admin');
+        if (isReceptionist) {
+          score += 35;
+          reason = 'Excellent matches found in resume keywords for Receptionist/Front Office roles.';
+        }
+
+        // Check for region preference
+        const isPreferredOrigin = leadText.includes('darjeeling') || leadText.includes('siliguri') || leadText.includes('bengal') || leadText.includes('sikkim');
+        if (isPreferredOrigin) {
+          score += 12;
+          reason += ' Origin aligns with the preferred West Bengal/Darjeeling region.';
+        }
+
+        if (c.experience && c.experience.toLowerCase().includes('years')) {
+          score += 3;
+        }
+
+        score = Math.min(98, Math.max(55, score));
+
+        return {
+          ...c,
+          matchScore: score,
+          matchReason: reason
+        };
+      }).sort((a, b) => b.matchScore - a.matchScore);
+    }
+
+    res.json({
+      jobDetails,
+      matches: matchedProfiles.slice(0, 30),
+      isSimulated: isSimulatedResult || !ai
+    });
+
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
 
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {

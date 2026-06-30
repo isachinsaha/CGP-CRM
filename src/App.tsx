@@ -17,6 +17,7 @@ import LeadBoard from './components/LeadBoard.tsx';
 import LeadList from './components/LeadList.tsx';
 import CampaignAnalytics from './components/CampaignAnalytics.tsx';
 import ActiveJobs from './components/ActiveJobs.tsx';
+import AiProfileMatcher from './components/AiProfileMatcher.tsx';
 import LeadModal from './components/LeadModal.tsx';
 import LoginScreen from './components/LoginScreen.tsx';
 import CoordinatorsManager from './components/CoordinatorsManager.tsx';
@@ -26,7 +27,7 @@ import CoordinatorsManager from './components/CoordinatorsManager.tsx';
 import cgpLogo from './assets/images/cgp_logo_1782388689853.jpg';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'board' | 'list' | 'analytics' | 'jobs'>('board');
+  const [activeTab, setActiveTab] = useState<'board' | 'list' | 'analytics' | 'jobs' | 'ai-matcher'>('board');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [stats, setStats] = useState<StatSummary | null>(null);
@@ -440,6 +441,7 @@ export default function App() {
               { id: 'board', label: 'Your Pipeline', icon: LayoutGrid },
               { id: 'list', label: 'Spreadsheet Explorer', icon: Table },
               { id: 'analytics', label: 'Consultancy Reports', icon: BarChart3 },
+              { id: 'ai-matcher', label: 'AI Profile Matcher', icon: Sparkles },
               { id: 'jobs', label: 'Active Jobs Hub', icon: Briefcase }
             ].map(tab => {
               const Icon = tab.icon;
@@ -547,6 +549,14 @@ export default function App() {
               <ActiveJobs
                 currentUser={currentUser}
                 countries={countries}
+              />
+            )}
+
+            {activeTab === 'ai-matcher' && (
+              <AiProfileMatcher
+                onSelectLead={setSelectedLead}
+                onUpdateLead={async () => { await pullCrmData(true); }}
+                userRole={userRole}
               />
             )}
           </div>

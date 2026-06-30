@@ -49,7 +49,9 @@ export default function CampaignAnalytics({
   onSelectLead,
   coordinators = []
 }: CampaignAnalyticsProps) {
-  const [reportTab, setReportTab] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [reportTab, setReportTab] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('daily');
+  const [customStartDate, setCustomStartDate] = useState<string>('2025-01-01');
+  const [customEndDate, setCustomEndDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
 
   // Help calculate percentage safely
   const calculatePercent = (value: number, total: number) => {
@@ -100,6 +102,14 @@ export default function CampaignAnalytics({
         const dateToCheck = l.assignDate || l.updatedAt || l.createdAt;
         return new Date(dateToCheck).getTime() >= oneMonthAgo;
       });
+    } else if (reportTab === 'custom') {
+      const startMs = new Date(customStartDate + 'T00:00:00').getTime();
+      const endMs = new Date(customEndDate + 'T23:59:59').getTime();
+      intervalLeads = activeLeads.filter(l => {
+        const dateToCheck = l.assignDate || l.updatedAt || l.createdAt;
+        const ms = new Date(dateToCheck).getTime();
+        return !isNaN(ms) && ms >= startMs && ms <= endMs;
+      });
     }
 
     return coordinatorsList.map(name => {
@@ -120,7 +130,7 @@ export default function CampaignAnalytics({
         conversionRate
       };
     }).sort((a, b) => b.conversionRate - a.conversionRate || b.won - a.won);
-  }, [activeLeads, reportTab, coordinators]);
+  }, [activeLeads, reportTab, coordinators, customStartDate, customEndDate]);
 
   const totalLeadsCount = activeLeads.length;
 
@@ -319,6 +329,96 @@ export default function CampaignAnalytics({
       leaderboard: agentLeaderboard
     };
   }, [activeLeads, coordinators]);
+  
+  // 4. CUSTOM DATE-WISE REPORT ESTIMATIONS
+  const customStats = useMemo(() => {
+    const startMs = new Date(customStartDate + 'T00:00:00').getTime();
+    const endMs = new Date(customEndDate + 'T23:59:59').getTime();
+
+    // Helper to check if a date is within range
+    const isWithinRange = (dateToCheck?: string) => {
+      if (!dateToCheck) return false;
+      const ms = new Date(dateToCheck).getTime();
+      return !isNaN(ms) && ms >= startMs && ms <= endMs;
+    };
+
+    const customLeads = activeLeads.filter(l => {
+      const date = l.assignDate || l.updatedAt || l.createdAt;
+      return isWithinRange(date);
+    });
+
+    const customLeadsCreated = activeLeads.filter(l => isWithinRange(l.createdAt));
+
+    const activeOutreachCount = activeLeads.filter(l => {
+      const isOutreach = l.stage !== 'new' && (l.remarks1 || l.remarks2 || l.notes);
+      return isWithinRange(l.updatedAt) && isOutreach;
+    }).length;
+
+    const wonCount = customLeads.filter(l => l.stage === 'won').length;
+
+    // Remarks logged during the period
+    const remarksInPeriod = activeLeads.filter(l => {
+       return isWithinRange(l.updatedAt) && (l.remarks1 || l.remarks2 || l.remarks3);
+    }).map(l => ({
+      id: l.id,
+      name: l.name,
+      assignedTo: l.assignedTo,
+      country: l.country,
+      remarks: l.remarks3 || l.remarks2 || l.remarks1,
+      date: new Date(l.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }),
+      time: new Date(l.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }));
+
+    // Country distribution
+    const countryDistribution: Record<string, number> = {};
+    customLeads.forEach(l => {
+      const country = l.country?.toUpperCase() || 'QATAR';
+      countryDistribution[country] = (countryDistribution[country] || 0) + 1;
+    });
+
+    const sortedCountries = Object.entries(countryDistribution).map(([country, count]) => ({
+      country,
+      count,
+      percent: calculatePercent(count, customLeads.length)
+    })).sort((a, b) => b.count - a.count);
+
+    // Leaderboard
+    const coordinatorsList = coordinators && coordinators.length > 0
+      ? coordinators.filter(c => c.role === 'agent').map(c => c.displayName)
+      : [
+          'Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 
+          'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'
+        ];
+
+    const agentLeaderboard = coordinatorsList.map(name => {
+      const agentLeads = customLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase());
+      const total = agentLeads.length;
+      const won = agentLeads.filter(l => l.stage === 'won').length;
+      const progress = agentLeads.filter(l => ['contacted', 'negotiating', 'proposal'].includes(l.stage)).length;
+      const lost = agentLeads.filter(l => l.stage === 'lost').length;
+      const assignedInPeriod = agentLeads.filter(l => isWithinRange(l.assignDate));
+
+      return {
+        name,
+        total,
+        won,
+        progress,
+        lost,
+        assignedInPeriod,
+        conversionRate: calculatePercent(won, total)
+      };
+    }).sort((a, b) => b.won - a.won || b.total - a.total);
+
+    return {
+      createdCount: customLeadsCreated.length,
+      wonCount,
+      activeOutreachCount,
+      remarksInPeriod,
+      countries: sortedCountries,
+      leaderboard: agentLeaderboard,
+      totalCount: customLeads.length
+    };
+  }, [activeLeads, customStartDate, customEndDate, coordinators]);
 
   const renderConversionGraph = () => {
     return (
@@ -604,11 +704,12 @@ export default function CampaignAnalytics({
             </h3>
             <p className="text-xs text-slate-400 font-medium font-sans">Daily remarks logs, weekly countries distribution, and monthly leadership matrix.</p>
           </div>
-          <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+          <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 flex-wrap gap-1">
             {[
               { id: 'daily', label: 'Daily Report' },
               { id: 'weekly', label: 'Weekly Report' },
-              { id: 'monthly', label: 'Monthly Report' }
+              { id: 'monthly', label: 'Monthly Report' },
+              { id: 'custom', label: 'Select Date Wise' }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -624,6 +725,46 @@ export default function CampaignAnalytics({
             ))}
           </div>
         </div>
+
+        {/* --- CUSTOM DATE RANGE PICKER (shows up when 'custom' is active) --- */}
+        {reportTab === 'custom' && (
+          <div className="mb-6 p-4 bg-slate-950 rounded-xl border border-slate-850 flex flex-col sm:flex-row items-center gap-4 text-left select-none">
+            <div>
+              <span className="text-[10px] font-black uppercase text-accent-purple tracking-widest block font-mono">Date Range Selector</span>
+              <p className="text-[10px] text-slate-450 font-bold mt-0.5">Filter the reports and coordinator charts by a custom date range.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto sm:ml-auto">
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
+                <span className="text-[10px] font-bold text-slate-400 uppercase font-mono">Start:</span>
+                <input 
+                  type="date" 
+                  value={customStartDate} 
+                  onChange={(e) => setCustomStartDate(e.target.value)} 
+                  className="bg-transparent text-xs text-slate-100 font-bold outline-hidden focus:ring-0 border-0 p-0 cursor-pointer"
+                />
+              </div>
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
+                <span className="text-[10px] font-bold text-slate-400 uppercase font-mono">End:</span>
+                <input 
+                  type="date" 
+                  value={customEndDate} 
+                  onChange={(e) => setCustomEndDate(e.target.value)} 
+                  className="bg-transparent text-xs text-slate-100 font-bold outline-hidden focus:ring-0 border-0 p-0 cursor-pointer"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomStartDate('2025-01-01');
+                  setCustomEndDate(new Date().toISOString().split('T')[0]);
+                }}
+                className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase bg-purple-950/40 text-accent-purple border border-purple-900/30 hover:bg-accent-purple hover:text-white transition-all cursor-pointer"
+              >
+                Reset (2025 - Now)
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* --- DAILY REPORT CONTENT --- */}
         {reportTab === 'daily' && (
@@ -829,6 +970,201 @@ export default function CampaignAnalytics({
               </table>
             </div>
           </div>
+          {renderConversionGraph()}
+        </div>
+      )}
+
+      {/* --- CUSTOM DATE-WISE REPORT CONTENT --- */}
+      {reportTab === 'custom' && (
+        <div className="space-y-6">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="p-4 bg-emerald-950/20 border border-emerald-900/20 rounded-xl space-y-1 text-left">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wide block">Inflow in Period</span>
+              <span className="text-3xl font-black text-slate-100 block">{customStats.createdCount}</span>
+              <p className="text-xs text-slate-450 font-sans">Newly created job leads during this period.</p>
+            </div>
+
+            <div className="p-4 bg-purple-950/20 border border-purple-900/20 rounded-xl space-y-1 text-left">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wide block">Outreach Logs in Period</span>
+              <span className="text-3xl font-black text-slate-100 block">{customStats.activeOutreachCount}</span>
+              <p className="text-xs text-slate-450 font-sans">Remarks updated & calls logged during this period.</p>
+            </div>
+
+            <div className="p-4 bg-amber-950/20 border border-amber-900/20 rounded-xl space-y-1 text-left">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wide block font-display">Placements Won in Period</span>
+              <span className="text-3xl font-black text-slate-100 block">{customStats.wonCount}</span>
+              <p className="text-xs text-slate-450 font-sans">Confirmed visa status / won leads in this range.</p>
+            </div>
+          </div>
+
+          {/* Grid for Country Demands and Remarks Logs */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-left">
+            {/* Left Side: Country distribution */}
+            <div className="lg:col-span-5 space-y-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                <h4 className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-4 flex items-center gap-1.5 font-display">
+                  <MapPin className="h-4 w-4 text-accent-emerald" />
+                  Abroad Country Demands (Custom Range)
+                </h4>
+                <div className="space-y-3.5">
+                  {customStats.countries.length > 0 ? (
+                    customStats.countries.map((item, idx) => (
+                      <div key={idx} className="space-y-1">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-bold text-slate-200">{item.country} Candidates</span>
+                          <span className="font-mono text-slate-400">{item.count} leads ({item.percent}%)</span>
+                        </div>
+                        <div className="w-full bg-slate-950 h-3 rounded-lg overflow-hidden p-0.5 border border-slate-850">
+                          <div 
+                            className="h-full bg-accent-emerald rounded-md" 
+                            style={{ width: `${item.percent}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="py-10 text-center text-xs text-slate-450">No leads captured in this date range.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-850">
+                <span className="text-[10px] font-bold text-accent-purple uppercase tracking-widest block mb-1 font-mono">DATE-WISE SUMMARY</span>
+                <p className="text-xs text-slate-450 leading-relaxed font-sans">
+                  Showing statistics for {new Date(customStartDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} to {new Date(customEndDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}. Total active files matching criteria: <strong>{customStats.totalCount} leads</strong>.
+                </p>
+              </div>
+            </div>
+
+            {/* Right Side: Remarks log */}
+            <div className="lg:col-span-7 border border-slate-800 rounded-xl p-4 bg-slate-950/40">
+              <h4 className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-3 flex items-center gap-1.5 font-display">
+                <Clock className="h-4 w-4 text-accent-emerald" />
+                Remarks Logged During This Period
+              </h4>
+              {customStats.remarksInPeriod.length > 0 ? (
+                <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+                  {customStats.remarksInPeriod.slice(0, 15).map((item, idx) => (
+                    <div key={idx} className="bg-slate-900 p-3 rounded-xl border border-slate-800/80 shadow-md flex justify-between items-start gap-4">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-100 text-xs">{item.name}</span>
+                          <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded font-mono font-medium text-slate-350 uppercase border border-slate-750">
+                            ✈️ {item.country || 'QATAR'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-300 italic">"{item.remarks}"</p>
+                        <div className="text-[10px] text-slate-450">
+                          Caller: <span className="font-bold text-accent-emerald">{item.assignedTo || 'Unassigned'}</span>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-[9px] text-slate-400 block font-mono font-bold">{item.date}</span>
+                        <span className="text-[9px] text-slate-500 block font-mono">{item.time}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {customStats.remarksInPeriod.length > 15 && (
+                    <div className="text-center text-[10px] text-slate-450 pt-1">
+                      ...and {customStats.remarksInPeriod.length - 15} more remarks logged in this range.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="py-16 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-1.5">
+                  <p>No phone calls or remarks logged during this custom period.</p>
+                  <p className="text-[10px]">Select a wider range or verify candidate remarks logs.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Leadership matrix table */}
+          <div className="space-y-5 text-left pt-2">
+            <div className="bg-slate-950 text-white rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border border-slate-850">
+              <div>
+                <span className="text-[10px] bg-purple-500/10 text-accent-purple rounded-full px-2.5 py-0.5 font-bold uppercase tracking-wide border border-purple-900/20">
+                  Custom Range Leadership matrix
+                </span>
+                <h4 className="text-lg font-black tracking-tight mt-1 font-display text-slate-100">Coordinators Leaderboard (Filtered Range)</h4>
+                <p className="text-xs text-slate-400">Activity and conversion ratios for Career Growth Placement's agents within selected dates.</p>
+              </div>
+              <div className="text-right shrink-0">
+                <span className="text-xs text-slate-400 block font-medium">Placements Won in Range</span>
+                <span className="text-2xl font-black text-accent-emerald">{customStats.wonCount} candidates</span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-800">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-slate-950 border-b border-slate-800 text-left">
+                    <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase select-none">Rank</th>
+                    <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase select-none">Coordinator Name</th>
+                    <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-center select-none">Assigned Leads</th>
+                    <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-left select-none">Assigned in Range (Candidates)</th>
+                    <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-center select-none">Progressing Candidates</th>
+                    <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-center text-rose-400 select-none">Lost / Unqualified</th>
+                    <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-center text-accent-emerald select-none">Visa-Cleared (Won)</th>
+                    <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-right select-none">Conversion</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40 bg-slate-900">
+                  {customStats.leaderboard.map((agent, index) => {
+                    const isTop1 = index === 0;
+                    return (
+                      <tr key={index} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="px-5 py-3 text-xs font-bold text-slate-300">
+                          {isTop1 ? (
+                            <span className="flex items-center gap-1 text-amber-500" title="Top Performer">
+                              🏆 1
+                            </span>
+                          ) : (
+                            <span># {index + 1}</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3 text-xs font-extrabold text-slate-200">
+                          {agent.name}
+                        </td>
+                        <td className="px-5 py-3 text-xs text-slate-300 text-center font-mono">
+                          {agent.total}
+                        </td>
+                        <td className="px-5 py-3 text-xs text-left">
+                          {agent.assignedInPeriod && agent.assignedInPeriod.length > 0 ? (
+                            <div className="space-y-1">
+                              <span className="inline-flex items-center gap-1 bg-slate-800 text-slate-300 font-extrabold text-[9px] px-2 py-0.5 rounded-full uppercase tracking-wider border border-slate-750">
+                                📢 {agent.assignedInPeriod.length} Assigned
+                              </span>
+                              <div className="text-[11px] text-slate-200 font-bold leading-tight line-clamp-2">
+                                {agent.assignedInPeriod.map((lead: Lead) => lead.name).join(', ')}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 font-medium">—</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3 text-xs text-slate-300 text-center font-mono font-medium">
+                          {agent.progress}
+                        </td>
+                        <td className="px-5 py-3 text-xs text-slate-500 text-center font-mono">
+                          {agent.lost}
+                        </td>
+                        <td className="px-5 py-3 text-xs text-center font-bold text-accent-emerald font-mono bg-emerald-950/10">
+                          {agent.won}
+                        </td>
+                        <td className="px-5 py-3 text-xs text-right font-extrabold text-slate-300 font-mono">
+                          {agent.conversionRate}%
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Conversion Graph */}
           {renderConversionGraph()}
         </div>
       )}
