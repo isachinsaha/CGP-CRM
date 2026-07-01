@@ -16,9 +16,10 @@ import {
   ChevronUp,
   ShieldCheck,
   AlertCircle,
-  Globe
+  Globe,
+  Megaphone
 } from 'lucide-react';
-import { Job } from '../types';
+import { Job, ImportantUpdate } from '../types';
 import { getCountryFlagUrl, getCountryCode } from '../utils';
 
 interface ActiveJobsProps {
@@ -62,6 +63,14 @@ export default function ActiveJobs({ currentUser, countries }: ActiveJobsProps) 
   const [conditionsText, setConditionsText] = useState('');
   const [isActive, setIsActive] = useState(true);
 
+  // Important Updates states
+  const [updates, setUpdates] = useState<ImportantUpdate[]>([]);
+  const [isUpdateFormOpen, setIsUpdateFormOpen] = useState(false);
+  const [editingUpdate, setEditingUpdate] = useState<ImportantUpdate | null>(null);
+  const [updateText, setUpdateText] = useState('');
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [deletingUpdateId, setDeletingUpdateId] = useState<string | null>(null);
+
   // Fetch all jobs
   const fetchJobs = async (focusCountry?: string) => {
     setIsLoading(true);
@@ -94,9 +103,26 @@ export default function ActiveJobs({ currentUser, countries }: ActiveJobsProps) 
     }
   };
 
+  // Fetch important updates
+  const fetchUpdates = async () => {
+    try {
+      const res = await fetch('/api/updates');
+      if (res.ok) {
+        const data = await res.json();
+        setUpdates(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.error('Failed to load updates', err);
+    }
+  };
+
   useEffect(() => {
     fetchJobs();
-  }, []);
+    if (currentUser?.role === 'admin') {
+      fetchUpdates();
+    }
+  }, [currentUser]);
+
 
   // Handle open form for creating new job
   const handleOpenCreate = (e?: React.MouseEvent) => {
@@ -247,6 +273,87 @@ export default function ActiveJobs({ currentUser, countries }: ActiveJobsProps) 
     }
   };
 
+  // Important Updates handlers
+  const handleOpenCreateUpdate = () => {
+    setUpdateError(null);
+    setEditingUpdate(null);
+    setUpdateText('');
+    setIsUpdateFormOpen(true);
+  };
+
+  const handleOpenEditUpdate = (upd: ImportantUpdate) => {
+    setUpdateError(null);
+    setEditingUpdate(upd);
+    setUpdateText(upd.text);
+    setIsUpdateFormOpen(true);
+  };
+
+  const handleSubmitUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!updateText.trim()) return;
+
+    try {
+      let res;
+      if (editingUpdate) {
+        res = await fetch(`/api/updates/${editingUpdate.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: updateText.trim() })
+        });
+      } else {
+        res = await fetch('/api/updates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: updateText.trim() })
+        });
+      }
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to save the update.');
+      }
+
+      setIsUpdateFormOpen(false);
+      setEditingUpdate(null);
+      setUpdateText('');
+      setUpdateError(null);
+      fetchUpdates();
+      
+      // Dispatch custom event to notify global ImportantUpdatesBar to refresh instantly
+      window.dispatchEvent(new CustomEvent('cgp-updates-changed'));
+    } catch (err) {
+      setUpdateError((err as Error).message);
+    }
+  };
+
+  const handleDeleteUpdate = (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDeletingUpdateId(id);
+  };
+
+  const confirmDeleteUpdate = async () => {
+    if (!deletingUpdateId) return;
+    try {
+      const res = await fetch(`/api/updates/${deletingUpdateId}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to delete update.');
+      }
+      setDeletingUpdateId(null);
+      fetchUpdates();
+      
+      // Dispatch custom event to notify global ImportantUpdatesBar to refresh instantly
+      window.dispatchEvent(new CustomEvent('cgp-updates-changed'));
+    } catch (err) {
+      setUpdateError((err as Error).message);
+      setDeletingUpdateId(null);
+    }
+  };
+
+
   // Group jobs by country
   const groupedJobs = React.useMemo(() => {
     const groups: Record<string, Job[]> = {};
@@ -300,6 +407,75 @@ export default function ActiveJobs({ currentUser, countries }: ActiveJobsProps) 
           </button>
         </div>
       </div>
+
+      {/* Admin Important Updates Control Panel */}
+      {currentUser?.role === 'admin' && (
+        <div className="bg-slate-900 border border-slate-750/80 rounded-3xl p-6 shadow-xl space-y-4 text-left">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-800">
+            <div>
+              <h2 className="text-base font-black text-slate-100 uppercase tracking-wider flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-red-500 animate-bounce" />
+                Live Important Updates Control Panel
+              </h2>
+              <p className="text-xs text-slate-400 font-bold">
+                Publish today's interviews, Zoom/GMeet links, and announcements in the running red bar below the tabs.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleOpenCreateUpdate}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-bold text-xs rounded-xl transition duration-150 shadow-md shadow-red-600/10 inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Live Update
+            </button>
+          </div>
+
+          {updateError && (
+            <div className="bg-rose-500/10 border border-rose-500/20 text-rose-300 p-3 rounded-xl flex items-center gap-2 text-xs font-bold">
+              <AlertCircle className="w-4.5 h-4.5 flex-shrink-0" />
+              <span>{updateError}</span>
+            </div>
+          )}
+
+          {updates.length === 0 ? (
+            <p className="text-xs text-slate-500 font-bold py-2 text-center">No live updates active. Add an update to display it on the main screen ticker.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[220px] overflow-y-auto pr-2">
+              {updates.map((update) => (
+                <div key={update.id} className="bg-slate-850 border border-slate-800 hover:border-slate-700 p-3.5 rounded-2xl flex items-start justify-between gap-3 shadow-3xs group transition duration-150">
+                  <div className="space-y-1">
+                    <span className="text-[9px] font-black text-slate-500 font-mono block">
+                      PUBLISHED: {new Date(update.createdAt).toLocaleString()}
+                    </span>
+                    <p className="text-xs font-bold text-red-500 leading-relaxed break-words">
+                      {update.text}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditUpdate(update)}
+                      className="p-1.5 text-slate-400 hover:text-accent-purple hover:bg-slate-800 rounded-lg cursor-pointer transition"
+                      title="Edit update text"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteUpdate(update.id, e)}
+                      className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-slate-800 rounded-lg cursor-pointer transition"
+                      title="Remove update"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="bg-rose-500/10 border border-rose-500/20 text-rose-300 p-4 rounded-xl flex items-center gap-3">
@@ -908,6 +1084,118 @@ export default function ActiveJobs({ currentUser, countries }: ActiveJobsProps) 
           </div>
         </div>
       )}
+
+      {/* Custom Update Delete Confirmation Modal */}
+      {deletingUpdateId && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto" aria-labelledby="update-modal-title" role="dialog" aria-modal="true">
+          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div 
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" 
+              onClick={() => setDeletingUpdateId(null)}
+            />
+            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div className="relative z-10 inline-block align-middle bg-slate-850 rounded-3xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md sm:w-full border border-slate-750">
+              <div className="p-6 text-center space-y-4">
+                <div className="w-12 h-12 bg-rose-950/40 text-rose-400 rounded-full flex items-center justify-center mx-auto">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-lg font-bold text-slate-100">Delete Live Update</h3>
+                  <p className="text-sm text-slate-400">
+                    Are you sure you want to permanently delete this update from the scrolling updates bar?
+                  </p>
+                </div>
+                <div className="pt-4 flex items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setDeletingUpdateId(null)}
+                    className="px-4 py-2 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 hover:bg-slate-800 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmDeleteUpdate}
+                    className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-bold rounded-xl transition shadow-md shadow-rose-600/10 cursor-pointer"
+                  >
+                    Delete Update
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Slide-over Update Form Modal */}
+      {isUpdateFormOpen && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto" aria-labelledby="update-form-title" role="dialog" aria-modal="true">
+          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div 
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" 
+              onClick={() => setIsUpdateFormOpen(false)}
+            />
+            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div className="relative z-10 inline-block align-middle bg-slate-850 rounded-3xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full border border-slate-750">
+              <div className="p-6 border-b border-slate-750 flex items-center justify-between bg-slate-900/30">
+                <div className="space-y-1">
+                  <h3 className="text-lg font-bold text-slate-100">
+                    {editingUpdate ? 'Edit Live Update' : 'Add Live Update'}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    This will appear in red color scrolling across the screen. Keep it short and important!
+                  </p>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => setIsUpdateFormOpen(false)}
+                  className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmitUpdate} className="p-6 space-y-4">
+                {updateError && (
+                  <div className="bg-rose-950/40 border border-rose-900/30 text-rose-400 p-3.5 rounded-xl flex items-center gap-2 text-xs font-bold">
+                    <AlertCircle className="w-4.5 h-4.5 flex-shrink-0 text-rose-500" />
+                    <span>{updateError}</span>
+                  </div>
+                )}
+                
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Update Message / Interview Link Details</label>
+                  <textarea
+                    rows={4}
+                    required
+                    value={updateText}
+                    onChange={(e) => setUpdateText(e.target.value)}
+                    placeholder="e.g. Today's interviews: Nesto Hypermarket screening starting at 3:00 PM. Zoom link: https://zoom.us/j/9876543210"
+                    className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold leading-relaxed"
+                  />
+                </div>
+
+                <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-750">
+                  <button
+                    type="button"
+                    onClick={() => setIsUpdateFormOpen(false)}
+                    className="px-4 py-2 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 hover:bg-slate-800 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-bold rounded-xl transition shadow-md shadow-red-600/10 cursor-pointer"
+                  >
+                    {editingUpdate ? 'Save Changes' : 'Publish Update'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
 
     </div>
   );

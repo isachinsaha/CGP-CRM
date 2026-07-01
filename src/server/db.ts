@@ -14,7 +14,7 @@ import {
   limit, 
   writeBatch
 } from 'firebase/firestore';
-import { Lead, LeadStage, StatSummary, Coordinator, Job } from '../types.ts';
+import { Lead, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate } from '../types.ts';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 if (!fs.existsSync(DATA_DIR)) {
@@ -23,6 +23,7 @@ if (!fs.existsSync(DATA_DIR)) {
 const DATA_FILE = path.join(DATA_DIR, 'leads.json');
 const COORDINATORS_FILE = path.join(DATA_DIR, 'coordinators.json');
 const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
+const UPDATES_FILE = path.join(DATA_DIR, 'updates.json');
 
 // Initialize client-side Firebase Firestore with standard Web SDK
 // This bypasses GCP Service Account IAM permissions propagation issues on shared databases!
@@ -831,3 +832,121 @@ export async function saveJobs(jobs: Job[]): Promise<void> {
     }
   }
 }
+
+// Ensure updates database exists with default seed updates
+export async function initializeUpdatesDatabase() {
+  const defaultUpdates: ImportantUpdate[] = [
+    {
+      id: 'update_1',
+      text: "Today's interviews: Nesto Hypermarket screening starting at 3:00 PM. Zoom link: https://zoom.us/j/9876543210",
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'update_2',
+      text: "Guest Relations Dubai (Highend Fine Dine) second round interview via Google Meet: https://meet.google.com/abc-defg-hij on June 28 at 4:30 PM.",
+      createdAt: new Date().toISOString()
+    }
+  ];
+
+  if (db) {
+    try {
+      const statusRef = doc(db, 'metadata', 'updates_status');
+      const statusSnap = await getDoc(statusRef);
+      if (!statusSnap.exists()) {
+        console.log('[Firestore Client] Seeding default updates to cloud...');
+        const batch = writeBatch(db);
+        defaultUpdates.forEach(upd => {
+          const docRef = doc(db, 'updates', upd.id);
+          batch.set(docRef, cleanForFirestore(upd));
+        });
+        batch.set(statusRef, { seeded: true, updatedAt: new Date().toISOString() });
+        await batch.commit();
+        console.log('[Firestore Client] Seeded updates successfully.');
+      }
+      return;
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to check/seed updates, falling back to local file:', err);
+    }
+  }
+
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(UPDATES_FILE)) {
+    fs.writeFileSync(UPDATES_FILE, JSON.stringify(defaultUpdates, null, 2), 'utf-8');
+  }
+}
+
+// Get all updates
+export async function getUpdates(): Promise<ImportantUpdate[]> {
+  await initializeUpdatesDatabase();
+  if (db) {
+    try {
+      const snapshot = await getDocs(collection(db, 'updates'));
+      const updates: ImportantUpdate[] = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data) {
+          updates.push({
+            id: docSnap.id,
+            text: data.text || '',
+            createdAt: data.createdAt || new Date().toISOString()
+          } as ImportantUpdate);
+        }
+      });
+      return updates.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to fetch updates from cloud, falling back to local files:', err);
+    }
+  }
+  try {
+    const data = fs.readFileSync(UPDATES_FILE, 'utf-8');
+    const updates = JSON.parse(data) as ImportantUpdate[];
+    return updates.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  } catch (err) {
+    console.error('Failed to read updates file', err);
+    return [];
+  }
+}
+
+// Save all updates
+export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
+  await initializeUpdatesDatabase();
+  const validUpdates = (updates || []).filter(u => u && typeof u === 'object' && u.id);
+
+  try {
+    fs.writeFileSync(UPDATES_FILE, JSON.stringify(validUpdates, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to write updates file', err);
+  }
+
+  if (db) {
+    try {
+      const batch = writeBatch(db);
+      validUpdates.forEach(u => {
+        const docRef = doc(db, 'updates', u.id);
+        batch.set(docRef, cleanForFirestore(u));
+      });
+      await batch.commit();
+
+      // Delete any removed updates
+      const snapshot = await getDocs(collection(db, 'updates'));
+      const deleteBatch = writeBatch(db);
+      let hasDeletes = false;
+      snapshot.forEach(docSnap => {
+        if (!validUpdates.some(u => u.id === docSnap.id)) {
+          deleteBatch.delete(docSnap.ref);
+          hasDeletes = true;
+        }
+      });
+      if (hasDeletes) {
+        await deleteBatch.commit();
+      }
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to save updates to cloud:', err);
+      throw err;
+    }
+  }
+}
+

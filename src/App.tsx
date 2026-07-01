@@ -22,6 +22,7 @@ import LeadModal from './components/LeadModal.tsx';
 import LoginScreen from './components/LoginScreen.tsx';
 import CoordinatorsManager from './components/CoordinatorsManager.tsx';
 import CGPLogo from './components/CGPLogo.tsx';
+import ImportantUpdatesBar from './components/ImportantUpdatesBar.tsx';
 
 // Import local assets
 

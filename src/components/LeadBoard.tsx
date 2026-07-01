@@ -16,6 +16,7 @@ import {
   Trello 
 } from 'lucide-react';
 import { getCountryFlagUrl } from '../utils';
+import ImportantUpdatesBar from './ImportantUpdatesBar.tsx';
 
 interface LeadBoardProps {
   leads: Lead[];
@@ -285,6 +286,9 @@ export default function LeadBoard({
   return (
     <div className="space-y-6" id="cgp-leads-pipeline">
       
+      {/* Live Scrolling Important Updates Bar */}
+      <ImportantUpdatesBar />
+      
       {/* Sub Agent Bucket Select Bar inside Kanban */}
       {userRole === 'agent' && (
         <div className="flex bg-slate-900 p-3.5 rounded-2xl border border-slate-800 justify-between items-center text-left">
@@ -299,7 +303,7 @@ export default function LeadBoard({
 
       {/* Pipeline Border Card Container */}
       <div className="bg-slate-950/40 rounded-3xl border border-slate-750/85 p-6 shadow-xl text-left">
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-5 border-b border-slate-750/80 pb-4 gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-5 border-b border-slate-750/80 pb-4 gap-4">
           <div>
             <h3 className="text-xs font-black text-slate-100 uppercase tracking-widest flex items-center gap-2 font-display">
               <TrendingUp className="h-4 w-4 text-accent-emerald" />
@@ -310,101 +314,91 @@ export default function LeadBoard({
             </p>
           </div>
           
-          {/* View Switcher segment button styled beautifully */}
-          <div className="flex items-center self-start md:self-auto bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner">
-            <button
-              type="button"
-              onClick={() => setViewMode('hub')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                viewMode === 'hub'
-                  ? 'bg-accent-purple text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <LayoutGrid className="h-3 w-3" />
-              Pipeline Hub View
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('board')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                viewMode === 'board'
-                  ? 'bg-accent-purple text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Trello className="h-3 w-3" />
-              Classic Kanban View
-            </button>
-          </div>
-        </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* View Switcher segment button styled beautifully */}
+            <div className="flex items-center bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner">
+              <button
+                type="button"
+                onClick={() => setViewMode('hub')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  viewMode === 'hub'
+                    ? 'bg-accent-purple text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <LayoutGrid className="h-3 w-3" />
+                Pipeline Hub View
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('board')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  viewMode === 'board'
+                    ? 'bg-accent-purple text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Trello className="h-3 w-3" />
+                Classic Kanban View
+              </button>
+            </div>
 
-        {/* Date Filter Bar Row */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6 bg-slate-900/40 p-3 rounded-2xl border border-slate-800/80">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-black uppercase text-accent-purple tracking-widest font-mono">📅 Pipeline Filters:</span>
-          </div>
-          
-          <div className="flex flex-wrap items-center gap-2">
-            {[
-              { id: 'all', label: 'All Candidates' },
-              { id: 'today', label: 'Today' },
-              { id: 'yesterday', label: 'Yesterday' },
-              { id: 'date-wise', label: 'Date Wise' }
-            ].map(filter => {
-              const isActive = pipelineDateFilter === filter.id;
-              return (
-                <button
-                  key={filter.id}
-                  type="button"
-                  onClick={() => {
-                    // "if i select on today it will show leads for today and if i unselect the today it will show all the leads"
-                    if (isActive) {
-                      setPipelineDateFilter('all');
-                    } else {
-                      setPipelineDateFilter(filter.id as any);
-                    }
-                  }}
-                  className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-accent-emerald text-slate-950 shadow-md font-extrabold scale-[1.02]'
-                      : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 hover:bg-slate-800/40'
-                  }`}
-                >
-                  {filter.label}
-                </button>
-              );
-            })}
+            {/* Shifted & Minimalist Pipeline Filters */}
+            <div className="flex items-center gap-1 bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner">
+              {[
+                { id: 'all', label: 'All' },
+                { id: 'today', label: 'Today' },
+                { id: 'yesterday', label: 'Yesterday' },
+                { id: 'date-wise', label: 'Date' }
+              ].map(filter => {
+                const isActive = pipelineDateFilter === filter.id;
+                return (
+                  <button
+                    key={filter.id}
+                    type="button"
+                    onClick={() => {
+                      if (isActive) {
+                        setPipelineDateFilter('all');
+                      } else {
+                        setPipelineDateFilter(filter.id as any);
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-accent-purple text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                );
+              })}
+            </div>
 
             {pipelineDateFilter === 'date-wise' && (
-              <div className="flex flex-wrap items-center gap-3 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl ml-1 animate-fade-in text-left">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[9px] font-bold text-slate-500 uppercase font-mono">From:</span>
-                  <input
-                    type="date"
-                    value={filterStartDate}
-                    onChange={(e) => setFilterStartDate(e.target.value)}
-                    className="bg-transparent text-xs text-slate-100 font-extrabold outline-hidden border-0 p-0 cursor-pointer h-5 w-28 focus:ring-0"
-                  />
-                </div>
-                <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
-                  <span className="text-[9px] font-bold text-slate-500 uppercase font-mono">To:</span>
-                  <input
-                    type="date"
-                    value={filterEndDate}
-                    onChange={(e) => setFilterEndDate(e.target.value)}
-                    className="bg-transparent text-xs text-slate-100 font-extrabold outline-hidden border-0 p-0 cursor-pointer h-5 w-28 focus:ring-0"
-                  />
-                </div>
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-750 px-3 py-1.5 rounded-xl text-left animate-fade-in">
+                <input
+                  type="date"
+                  value={filterStartDate}
+                  onChange={(e) => setFilterStartDate(e.target.value)}
+                  className="bg-transparent text-[10px] text-slate-100 font-extrabold outline-none border-0 p-0 cursor-pointer h-4 w-24 focus:ring-0"
+                />
+                <span className="text-[9px] text-slate-500 font-bold font-mono">to</span>
+                <input
+                  type="date"
+                  value={filterEndDate}
+                  onChange={(e) => setFilterEndDate(e.target.value)}
+                  className="bg-transparent text-[10px] text-slate-100 font-extrabold outline-none border-0 p-0 cursor-pointer h-4 w-24 focus:ring-0"
+                />
+              </div>
+            )}
+
+            {pipelineDateFilter !== 'all' && (
+              <div className="text-[10px] text-slate-400 font-bold bg-slate-900 border border-slate-750 px-3 py-1.5 rounded-xl">
+                Filtered: <span className="text-accent-emerald font-black font-mono">{visibleLeads.length} matches</span>
               </div>
             )}
           </div>
-          
-          {pipelineDateFilter !== 'all' && (
-            <div className="sm:ml-auto text-[10px] text-slate-400 font-bold bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-850">
-              Filtered: <span className="text-accent-emerald font-black font-mono">{visibleLeads.length} matches</span>
-            </div>
-          )}
         </div>
 
         {/* View Layout Conditional Render */}
@@ -474,7 +468,7 @@ export default function LeadBoard({
                         onUpdateStage(leadId, col.id);
                       }
                     }}
-                    className={`group p-2.5 px-3.5 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-21 relative overflow-hidden ${
+                    className={`group p-2 px-3 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-[74px] relative overflow-hidden ${
                       isDraggedOver
                         ? 'border-accent-purple bg-accent-purple/10 scale-[1.03] ring-2 ring-accent-purple/40 shadow-lg'
                         : isSelected
@@ -483,19 +477,19 @@ export default function LeadBoard({
                     }`}
                   >
                     <div className="relative z-10 flex items-start justify-between w-full">
-                      <div className={`text-sm font-bold flex items-center justify-center w-7 h-7 rounded-lg border ${isSelected ? 'bg-slate-900/20 border-slate-700' : 'bg-slate-900 border-slate-800'}`}>
-                        <IconComponent className={`w-3.5 h-3.5 ${iconColor}`} />
+                      <div className={`text-sm font-bold flex items-center justify-center w-6.5 h-6.5 rounded-lg border ${isSelected ? 'bg-slate-900/20 border-slate-700' : 'bg-slate-900 border-slate-800'}`}>
+                        <IconComponent className={`w-3 h-3 ${iconColor}`} />
                       </div>
-                      <span className={`text-[9px] font-black px-2 py-0.5 rounded-md font-mono border ${badgeColor}`}>
+                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md font-mono border ${badgeColor}`}>
                         {colLeads.length} {colLeads.length === 1 ? 'Lead' : 'Leads'}
                       </span>
                     </div>
                     
                     <div className="relative z-10">
-                      <h3 className="font-black text-xs tracking-wide uppercase leading-none truncate">
+                      <h3 className="font-black text-[11px] tracking-wide uppercase leading-none truncate">
                         {col.title}
                       </h3>
-                      <p className={`text-[8px] font-bold mt-1.5 ${isSelected ? 'text-slate-200 opacity-90' : 'text-slate-500'}`}>
+                      <p className={`text-[8px] font-bold mt-1 ${isSelected ? 'text-slate-200 opacity-90' : 'text-slate-500'}`}>
                         {isSelected ? '● Selected' : 'Click to view'}
                       </p>
                     </div>

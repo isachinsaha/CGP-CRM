@@ -107,4 +107,11 @@ export interface Job {
   createdAt: string;
 }
 
+export interface ImportantUpdate {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
+
 

@@ -38,6 +38,7 @@
   --color-rose-400: #f43f5e;
   --color-teal-400: #2dd4bf;
   --color-sky-400: #38bdf8;
+  --color-update-bar-text: #0d0c10;
 }
 
 body {
@@ -78,6 +79,7 @@ html.light {
   --color-rose-400: #e11d48;
   --color-teal-400: #0d9488;
   --color-sky-400: #0284c7;
+  --color-update-bar-text: #ffffff;
 }
 
 /* Beautiful custom scrollbars for dark mode */
@@ -95,4 +97,20 @@ html.light {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-slate-600);
 }
+
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 40s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
 

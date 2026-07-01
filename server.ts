@@ -8,8 +8,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Load local database helper
-import { getLeads, addLead, saveLeads, getStats, getLeadById, getCoordinators, saveCoordinators, initializeCoordinatorsDatabase, getJobs, saveJobs } from './src/server/db.ts';
-import { Lead, Message, LeadStage, FitScore, Coordinator, Job } from './src/types.ts';
+import { getLeads, addLead, saveLeads, getStats, getLeadById, getCoordinators, saveCoordinators, initializeCoordinatorsDatabase, getJobs, saveJobs, getUpdates, saveUpdates } from './src/server/db.ts';
+import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate } from './src/types.ts';
 
 const app = express();
 const PORT = 3000;
@@ -834,6 +834,93 @@ app.delete('/api/jobs/:id', async (req, res) => {
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
+
+// ---------------- IMPORTANT UPDATES CRUD ENDPOINTS ----------------
+
+// GET all important updates
+app.get('/api/updates', async (req, res) => {
+  try {
+    const updates = await getUpdates();
+    res.json(updates);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST add a new update
+app.post('/api/updates', async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text) {
+      res.status(400).json({ error: 'Update text is required.' });
+      return;
+    }
+
+    const updates = await getUpdates();
+    const newUpdate: ImportantUpdate = {
+      id: `update_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      text: String(text).trim(),
+      createdAt: new Date().toISOString()
+    };
+
+    updates.unshift(newUpdate);
+    await saveUpdates(updates);
+
+    res.status(201).json(newUpdate);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// PUT update an existing update
+app.put('/api/updates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { text } = req.body;
+
+    if (!text) {
+      res.status(400).json({ error: 'Update text is required.' });
+      return;
+    }
+
+    const updates = await getUpdates();
+    const idx = updates.findIndex(u => u.id === id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Update not found' });
+      return;
+    }
+
+    updates[idx] = {
+      ...updates[idx],
+      text: String(text).trim()
+    };
+
+    await saveUpdates(updates);
+    res.json(updates[idx]);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// DELETE an update
+app.delete('/api/updates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = await getUpdates();
+    const filtered = updates.filter(u => u.id !== id);
+    if (updates.length === filtered.length) {
+      res.status(404).json({ error: 'Update not found' });
+      return;
+    }
+
+    await saveUpdates(filtered);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 
 
 // POST simulate incoming WhatsApp Meta ad Webhook lead
