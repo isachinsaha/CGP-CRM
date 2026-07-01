@@ -50,6 +50,16 @@ export default function LeadBoard({
   const [bucketToggle, setBucketToggle] = useState<'my' | 'all'>(userRole === 'agent' ? 'my' : 'all');
   const [draggedOverColumn, setDraggedOverColumn] = useState<string | null>(null);
 
+  // Date filter state: 'all' | 'today' | 'yesterday' | 'date-wise'
+  const [pipelineDateFilter, setPipelineDateFilter] = useState<'all' | 'today' | 'yesterday' | 'date-wise'>('all');
+  // From Date and To Date for custom range filtering
+  const [filterStartDate, setFilterStartDate] = useState<string>(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 7);
+    return date.toLocaleDateString('en-CA');
+  });
+  const [filterEndDate, setFilterEndDate] = useState<string>(() => new Date().toLocaleDateString('en-CA'));
+
   const COLUMNS: Column[] = [
     { id: 'new', title: 'New Inbound', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-slate-300 bg-slate-800 font-medium' },
     { id: 'contacted', title: 'Initial Contact', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-sky-400 bg-sky-950/40 font-medium' },
@@ -82,15 +92,51 @@ export default function LeadBoard({
     };
   };
 
-  // Filter leads based on agent bucket selection
+  // Filter leads based on agent bucket selection AND date filters
   const visibleLeads = React.useMemo(() => {
-    return leads.filter(lead => {
-      if (userRole === 'agent') {
-        return lead.assignedTo?.toLowerCase() === currentAgentId.toLowerCase();
+    let filtered = leads;
+
+    // Agent bucket filter
+    if (userRole === 'agent') {
+      filtered = filtered.filter(lead => lead.assignedTo?.toLowerCase() === currentAgentId.toLowerCase());
+    }
+
+    // Date range filter
+    if (pipelineDateFilter !== 'all') {
+      let startMs: number | null = null;
+      let endMs: number | null = null;
+
+      if (pipelineDateFilter === 'today') {
+        const todayStr = new Date().toLocaleDateString('en-CA');
+        startMs = new Date(todayStr + 'T00:00:00').getTime();
+        endMs = new Date(todayStr + 'T23:59:59').getTime();
+      } else if (pipelineDateFilter === 'yesterday') {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toLocaleDateString('en-CA');
+        startMs = new Date(yesterdayStr + 'T00:00:00').getTime();
+        endMs = new Date(yesterdayStr + 'T23:59:59').getTime();
+      } else if (pipelineDateFilter === 'date-wise') {
+        startMs = new Date(filterStartDate + 'T00:00:00').getTime();
+        endMs = new Date(filterEndDate + 'T23:59:59').getTime();
       }
-      return true;
-    });
-  }, [leads, userRole, currentAgentId]);
+
+      if (startMs !== null && endMs !== null) {
+        filtered = filtered.filter(lead => {
+          const datesToTry = [lead.createdAt, lead.updatedAt, lead.assignDate, lead.entryDate];
+          return datesToTry.some(dateStr => {
+            if (!dateStr) return false;
+            const dateObj = new Date(dateStr);
+            const ms = dateObj.getTime();
+            if (isNaN(ms)) return false;
+            return ms >= startMs! && ms <= endMs!;
+          });
+        });
+      }
+    }
+
+    return filtered;
+  }, [leads, userRole, currentAgentId, pipelineDateFilter, filterStartDate, filterEndDate]);
 
   // Lead Card Render Helper to avoid duplicate JSX
   const renderLeadCard = (lead: Lead) => {
@@ -291,6 +337,74 @@ export default function LeadBoard({
               Classic Kanban View
             </button>
           </div>
+        </div>
+
+        {/* Date Filter Bar Row */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6 bg-slate-900/40 p-3 rounded-2xl border border-slate-800/80">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black uppercase text-accent-purple tracking-widest font-mono">📅 Pipeline Filters:</span>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { id: 'all', label: 'All Candidates' },
+              { id: 'today', label: 'Today' },
+              { id: 'yesterday', label: 'Yesterday' },
+              { id: 'date-wise', label: 'Date Wise' }
+            ].map(filter => {
+              const isActive = pipelineDateFilter === filter.id;
+              return (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => {
+                    // "if i select on today it will show leads for today and if i unselect the today it will show all the leads"
+                    if (isActive) {
+                      setPipelineDateFilter('all');
+                    } else {
+                      setPipelineDateFilter(filter.id as any);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-accent-emerald text-slate-950 shadow-md font-extrabold scale-[1.02]'
+                      : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 hover:bg-slate-800/40'
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              );
+            })}
+
+            {pipelineDateFilter === 'date-wise' && (
+              <div className="flex flex-wrap items-center gap-3 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl ml-1 animate-fade-in text-left">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] font-bold text-slate-500 uppercase font-mono">From:</span>
+                  <input
+                    type="date"
+                    value={filterStartDate}
+                    onChange={(e) => setFilterStartDate(e.target.value)}
+                    className="bg-transparent text-xs text-slate-100 font-extrabold outline-hidden border-0 p-0 cursor-pointer h-5 w-28 focus:ring-0"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
+                  <span className="text-[9px] font-bold text-slate-500 uppercase font-mono">To:</span>
+                  <input
+                    type="date"
+                    value={filterEndDate}
+                    onChange={(e) => setFilterEndDate(e.target.value)}
+                    className="bg-transparent text-xs text-slate-100 font-extrabold outline-hidden border-0 p-0 cursor-pointer h-5 w-28 focus:ring-0"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {pipelineDateFilter !== 'all' && (
+            <div className="sm:ml-auto text-[10px] text-slate-400 font-bold bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-850">
+              Filtered: <span className="text-accent-emerald font-black font-mono">{visibleLeads.length} matches</span>
+            </div>
+          )}
         </div>
 
         {/* View Layout Conditional Render */}

@@ -99,7 +99,7 @@ app.post('/api/leads', async (req, res) => {
       return;
     }
 
-    const { name, phone, gender, age, origin, country, position, experience, assignedTo, importance, tags, source, project } = req.body;
+    const { name, phone, gender, age, origin, country, position, experience, assignedTo, importance, tags, source, project, adminRemarks } = req.body;
     if (!name || !phone) {
       res.status(400).json({ error: 'Name and Phone are required' });
       return;
@@ -126,7 +126,7 @@ app.post('/api/leads', async (req, res) => {
       country: country || 'Kuwait',
       position: position || 'General openings',
       experience: experience || 'Fresh criteria',
-      adminRemarks: '',
+      adminRemarks: adminRemarks || '',
       notes: '',
       assignedTo: assignedTo || '',
       importance: Number(importance) || 3,

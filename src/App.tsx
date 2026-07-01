@@ -21,10 +21,9 @@ import AiProfileMatcher from './components/AiProfileMatcher.tsx';
 import LeadModal from './components/LeadModal.tsx';
 import LoginScreen from './components/LoginScreen.tsx';
 import CoordinatorsManager from './components/CoordinatorsManager.tsx';
+import CGPLogo from './components/CGPLogo.tsx';
 
 // Import local assets
-// @ts-ignore
-import cgpLogo from './assets/images/cgp_logo_1782388689853.jpg';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'board' | 'list' | 'analytics' | 'jobs' | 'ai-matcher'>('board');
@@ -126,7 +125,8 @@ export default function App() {
     assignedTo: 'Joyce',
     importance: '3',
     source: 'Ads',
-    project: 'Napkin affairs'
+    project: 'Napkin affairs',
+    adminRemarks: ''
   });
   const [creatingProgress, setCreatingProgress] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -265,7 +265,8 @@ export default function App() {
           assignedTo: 'Joyce',
           importance: '3',
           source: 'Ads',
-          project: 'Napkin affairs'
+          project: 'Napkin affairs',
+          adminRemarks: ''
         });
         setEnrollTags([]);
         pullCrmData(true);
@@ -322,18 +323,8 @@ export default function App() {
           {/* Brand header */}
           <div className="flex items-center gap-3 text-left w-full lg:w-auto justify-between lg:justify-start">
             <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-xl flex items-center justify-center overflow-hidden bg-slate-950 text-white border border-slate-800 shadow-inner select-none shrink-0">
-                {!logoError ? (
-                  <img 
-                    src={cgpLogo} 
-                    alt="CGP Logo" 
-                    className="h-full w-full object-cover"
-                    referrerPolicy="no-referrer"
-                    onError={() => setLogoError(true)}
-                  />
-                ) : (
-                  <span className="font-black text-xs tracking-tighter">CGP</span>
-                )}
+              <div className="h-12 w-12 select-none shrink-0" id="cgp-header-logo-container">
+                <CGPLogo size={48} rounded="rounded-xl" />
               </div>
               <div>
                 <h1 className="font-black text-slate-50 tracking-wide text-sm sm:text-base leading-none flex items-center uppercase font-display">
@@ -490,13 +481,8 @@ export default function App() {
               transition={{ duration: 0.3 }}
               className="flex flex-col items-center max-w-sm text-center bg-slate-900 border border-slate-800 p-8 rounded-3xl shadow-2xl space-y-5"
             >
-              <div className="relative h-24 w-24 rounded-3xl overflow-hidden bg-slate-950 border border-slate-800 shadow-inner p-1 select-none animate-pulse">
-                <img 
-                  src={cgpLogo} 
-                  alt="Career Growth Placement" 
-                  className="h-full w-full object-cover rounded-2xl"
-                  referrerPolicy="no-referrer"
-                />
+              <div className="relative h-24 w-24 select-none animate-pulse" id="cgp-sync-logo-container">
+                <CGPLogo size={96} rounded="rounded-3xl" />
               </div>
               <div className="space-y-2">
                 <h3 className="text-sm font-black text-slate-100 tracking-wider uppercase font-display">CGP HR Solutions</h3>
@@ -917,6 +903,17 @@ export default function App() {
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div className="mt-1">
+                <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Admin Remarks / Initial Notes</label>
+                <textarea
+                  placeholder="e.g. Passport Ready, ECG, GNM, urgent placement requirements, etc."
+                  value={createFields.adminRemarks}
+                  onChange={(e) => setCreateFields({...createFields, adminRemarks: e.target.value})}
+                  rows={2}
+                  className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-100 focus:ring-1 focus:ring-emerald-500 focus:outline-none placeholder-slate-500 resize-none font-sans"
+                />
               </div>
 
               <div className="mt-1">

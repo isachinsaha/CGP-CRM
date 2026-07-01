@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Lock, User, Eye, EyeOff, ShieldCheck, PhoneCall, KeyRound, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
-// @ts-ignore
-import cgpLogo from '../assets/images/cgp_logo_1782388689853.jpg';
+import CGPLogo from './CGPLogo.tsx';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: { id: string; username: string; displayName: string; role: 'admin' | 'agent' }) => void;
@@ -75,13 +74,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 px-6 lg:px-8 font-sans selection:bg-accent-purple selection:text-white">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
         {/* Logo Container */}
-        <div className="inline-flex h-24 w-24 rounded-3xl overflow-hidden bg-slate-900 border border-slate-750 shadow-xl p-1 select-none animate-in zoom-in-95 duration-300">
-          <img 
-            src={cgpLogo} 
-            alt="CGP Logo" 
-            className="h-full w-full object-cover rounded-2xl"
-            referrerPolicy="no-referrer"
-          />
+        <div className="inline-flex h-28 w-28 select-none animate-in zoom-in-95 duration-300" id="cgp-login-logo-container">
+          <CGPLogo size={112} rounded="rounded-3xl" />
         </div>
         
         <h2 className="mt-4 text-2xl font-black text-slate-50 tracking-tight font-display uppercase">
