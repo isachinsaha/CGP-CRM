@@ -30,6 +30,26 @@ const UPDATES_FILE = path.join(DATA_DIR, 'updates.json');
 let db: any = null;
 let currentDbId: string = '(default)';
 
+// Helper to enforce timeouts on async Firestore promises so they never hang the server
+function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 20000): Promise<T> {
+  // Override low timeouts (like 2000ms) with a safe minimum of 20000ms to allow for cold starts and initial connection latency
+  const actualTimeout = Math.max(timeoutMs, 20000);
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Firestore operation timed out after ${actualTimeout}ms`));
+    }, actualTimeout);
+    promise
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
 function initFirestore() {
   try {
     const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -99,10 +119,18 @@ export async function initializeCoordinatorsDatabase() {
     }))
   ];
 
+  // ALWAYS write to local file first so we have a local copy and stay fully functional!
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(COORDINATORS_FILE)) {
+    fs.writeFileSync(COORDINATORS_FILE, JSON.stringify(defaultCoordinators, null, 2), 'utf-8');
+  }
+
   if (db) {
     try {
       const q = query(collection(db, 'coordinators'), limit(1));
-      const snapshot = await getDocs(q);
+      const snapshot = await runWithTimeout(getDocs(q), 2000);
       if (snapshot.empty) {
         console.log('[Firestore Client] Seeding default coordinators to cloud...');
         const batch = writeBatch(db);
@@ -110,21 +138,12 @@ export async function initializeCoordinatorsDatabase() {
           const docRef = doc(db, 'coordinators', c.id);
           batch.set(docRef, cleanForFirestore(c));
         });
-        await batch.commit();
+        await runWithTimeout(batch.commit(), 2000);
         console.log('[Firestore Client] Seeded coordinators successfully.');
       }
-      return;
     } catch (err: any) {
       console.error('[Firestore Client] Failed to check/seed coordinators, falling back to local file:', err);
     }
-  }
-
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(COORDINATORS_FILE)) {
-    fs.writeFileSync(COORDINATORS_FILE, JSON.stringify(defaultCoordinators, null, 2), 'utf-8');
   }
 }
 
@@ -133,7 +152,7 @@ export async function getCoordinators(): Promise<Coordinator[]> {
   await initializeCoordinatorsDatabase();
   if (db) {
     try {
-      const snapshot = await getDocs(collection(db, 'coordinators'));
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 2000);
       const coords: Coordinator[] = [];
       snapshot.forEach(docSnap => {
         coords.push(docSnap.data() as Coordinator);
@@ -170,10 +189,10 @@ export async function saveCoordinators(coordinators: Coordinator[]): Promise<voi
         const docRef = doc(db, 'coordinators', c.id);
         batch.set(docRef, cleanForFirestore(c));
       });
-      await batch.commit();
+      await runWithTimeout(batch.commit(), 2000);
 
       // Delete any removed coordinators
-      const snapshot = await getDocs(collection(db, 'coordinators'));
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 2000);
       const deleteBatch = writeBatch(db);
       let hasDeletes = false;
       snapshot.forEach(docSnap => {
@@ -183,7 +202,7 @@ export async function saveCoordinators(coordinators: Coordinator[]): Promise<voi
         }
       });
       if (hasDeletes) {
-        await deleteBatch.commit();
+        await runWithTimeout(deleteBatch.commit(), 2000);
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save coordinators to cloud:', err);
@@ -259,7 +278,7 @@ async function initializeDatabase() {
       remarks1: 'ASKED TO SHARE CV FOR BAKERY CHEF / NURSE POSITION',
       remarks2: 'Shared resume, checking credentials with Qatar Medical Council guidelines',
       remarks3: '',
-      stage: 'contacted',
+      stage: 'negotiating',
       budget: 1800,
       budgetRaw: '₹1,50,000 package',
       summary: 'Qualified nursing staff looking for overseas clinic openings. Intrigued by Qatar salary structures.',
@@ -328,7 +347,7 @@ async function initializeDatabase() {
       remarks1: 'NEED TO CALL TOMORROW (MARYADA)',
       remarks2: 'Spoke. Candidate requires local accommodation support.',
       remarks3: '',
-      stage: 'contacted',
+      stage: 'negotiating',
       budget: 1600,
       budgetRaw: '₹1,30,000 package',
       summary: 'Professional cook from Darjeeling inquiring about Arabic/Continental kitchen placement.',
@@ -466,10 +485,18 @@ async function initializeDatabase() {
     }
   ];
 
+  // ALWAYS write to local file first so we have a local copy and stay fully functional!
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(DATA_FILE)) {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(initialLeads, null, 2), 'utf-8');
+  }
+
   if (db) {
     try {
       const q = query(collection(db, 'leads'), limit(1));
-      const snapshot = await getDocs(q);
+      const snapshot = await runWithTimeout(getDocs(q), 2000);
       if (snapshot.empty) {
         console.log('[Firestore Client] Seeding default leads to cloud...');
         const batch = writeBatch(db);
@@ -477,54 +504,82 @@ async function initializeDatabase() {
           const docRef = doc(db, 'leads', l.id);
           batch.set(docRef, cleanForFirestore(l));
         });
-        await batch.commit();
+        await runWithTimeout(batch.commit(), 2000);
         console.log('[Firestore Client] Seeded leads successfully.');
       }
-      return;
     } catch (err: any) {
       console.error('[Firestore Client] Failed to check/seed leads:', err);
     }
-  }
-
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(initialLeads, null, 2), 'utf-8');
   }
 }
 
 // Read database
 export async function getLeads(): Promise<Lead[]> {
   await initializeDatabase();
+  let leads: Lead[] = [];
+  let fetchedFromCloud = false;
   if (db) {
     try {
       const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
-      const snapshot = await getDocs(q);
-      const leads: Lead[] = [];
+      const snapshot = await runWithTimeout(getDocs(q), 2000);
       snapshot.forEach(docSnap => {
         leads.push(docSnap.data() as Lead);
       });
-      return leads;
+      fetchedFromCloud = true;
     } catch (err: any) {
       console.error('[Firestore Client] Failed to get leads from cloud, falling back:', err);
     }
   }
-  try {
-    const data = fs.readFileSync(DATA_FILE, 'utf-8');
-    return JSON.parse(data) as Lead[];
-  } catch (err) {
-    console.error('Failed to read database', err);
-    return [];
+  if (!fetchedFromCloud) {
+    try {
+      const data = fs.readFileSync(DATA_FILE, 'utf-8');
+      leads = JSON.parse(data) as Lead[];
+    } catch (err) {
+      console.error('Failed to read database', err);
+      leads = [];
+    }
   }
+
+  // Auto-migrate "CGP-" prefix to "INQ-" and "contacted" stage to "negotiating" for all present leads!
+  let hasChanges = false;
+  leads = leads.map(l => {
+    let changed = false;
+    let serialNo = l.serialNo;
+    let stage = l.stage;
+
+    if (l.serialNo && l.serialNo.startsWith('CGP-')) {
+      changed = true;
+      serialNo = l.serialNo.replace('CGP-', 'INQ-');
+    }
+    if ((l.stage as string) === 'contacted') {
+      changed = true;
+      stage = 'negotiating';
+    }
+
+    if (changed) {
+      hasChanges = true;
+      return {
+        ...l,
+        serialNo,
+        stage
+      };
+    }
+    return l;
+  });
+
+  if (hasChanges) {
+    console.log('[Migration] Converting present leads CGP- serial numbers and stage contacted...');
+    saveLeads(leads).catch(err => console.error('Failed to save migrated leads:', err));
+  }
+
+  return leads;
 }
 
 // Find lead by id
 export async function getLeadById(id: string): Promise<Lead | undefined> {
   if (db) {
     try {
-      const docSnap = await getDoc(doc(db, 'leads', id));
+      const docSnap = await runWithTimeout(getDoc(doc(db, 'leads', id)), 2000);
       if (docSnap.exists()) {
         return docSnap.data() as Lead;
       }
@@ -555,10 +610,10 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
         const docRef = doc(db, 'leads', l.id);
         batch.set(docRef, cleanForFirestore(l));
       });
-      await batch.commit();
+      await runWithTimeout(batch.commit(), 2000);
 
       // Delete any removed leads
-      const snapshot = await getDocs(collection(db, 'leads'));
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'leads')), 2000);
       const deleteBatch = writeBatch(db);
       let hasDeletes = false;
       snapshot.forEach(docSnap => {
@@ -568,7 +623,7 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
         }
       });
       if (hasDeletes) {
-        await deleteBatch.commit();
+        await runWithTimeout(deleteBatch.commit(), 2000);
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save leads to cloud:', err);
@@ -581,7 +636,7 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
 export async function addLead(lead: Lead): Promise<void> {
   if (db) {
     try {
-      await setDoc(doc(db, 'leads', lead.id), cleanForFirestore(lead));
+      await runWithTimeout(setDoc(doc(db, 'leads', lead.id), cleanForFirestore(lead)), 2000);
     } catch (err: any) {
       console.error('[Firestore Client] Failed to add lead to cloud:', err);
     }
@@ -613,7 +668,6 @@ export async function getStats(): Promise<StatSummary> {
 
   const byStage: Record<LeadStage, number> = {
     new: 0,
-    contacted: 0,
     negotiating: 0,
     proposal: 0,
     won: 0,
@@ -703,10 +757,18 @@ export async function initializeJobsDatabase() {
     }
   ];
 
+  // ALWAYS write to local file first so we have a local copy and stay fully functional!
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(JOBS_FILE)) {
+    fs.writeFileSync(JOBS_FILE, JSON.stringify(defaultJobs, null, 2), 'utf-8');
+  }
+
   if (db) {
     try {
       const statusRef = doc(db, 'metadata', 'jobs_status');
-      const statusSnap = await getDoc(statusRef);
+      const statusSnap = await runWithTimeout(getDoc(statusRef), 2000);
       if (!statusSnap.exists()) {
         console.log('[Firestore Client] Seeding default jobs to cloud...');
         const batch = writeBatch(db);
@@ -715,21 +777,12 @@ export async function initializeJobsDatabase() {
           batch.set(docRef, cleanForFirestore(j));
         });
         batch.set(statusRef, { seeded: true, updatedAt: new Date().toISOString() });
-        await batch.commit();
+        await runWithTimeout(batch.commit(), 2000);
         console.log('[Firestore Client] Seeded jobs successfully.');
       }
-      return;
     } catch (err: any) {
       console.error('[Firestore Client] Failed to check/seed jobs, falling back to local file:', err);
     }
-  }
-
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(JOBS_FILE)) {
-    fs.writeFileSync(JOBS_FILE, JSON.stringify(defaultJobs, null, 2), 'utf-8');
   }
 }
 
@@ -738,7 +791,7 @@ export async function getJobs(): Promise<Job[]> {
   await initializeJobsDatabase();
   if (db) {
     try {
-      const snapshot = await getDocs(collection(db, 'jobs'));
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 2000);
       const jobs: Job[] = [];
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
@@ -811,10 +864,10 @@ export async function saveJobs(jobs: Job[]): Promise<void> {
         const docRef = doc(db, 'jobs', j.id);
         batch.set(docRef, cleanForFirestore(j));
       });
-      await batch.commit();
+      await runWithTimeout(batch.commit(), 2000);
 
       // Delete any removed jobs
-      const snapshot = await getDocs(collection(db, 'jobs'));
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 2000);
       const deleteBatch = writeBatch(db);
       let hasDeletes = false;
       snapshot.forEach(docSnap => {
@@ -824,11 +877,10 @@ export async function saveJobs(jobs: Job[]): Promise<void> {
         }
       });
       if (hasDeletes) {
-        await deleteBatch.commit();
+        await runWithTimeout(deleteBatch.commit(), 2000);
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save jobs to cloud:', err);
-      throw err;
     }
   }
 }
@@ -848,10 +900,18 @@ export async function initializeUpdatesDatabase() {
     }
   ];
 
+  // ALWAYS write to local file first so we have a local copy and stay fully functional!
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(UPDATES_FILE)) {
+    fs.writeFileSync(UPDATES_FILE, JSON.stringify(defaultUpdates, null, 2), 'utf-8');
+  }
+
   if (db) {
     try {
       const statusRef = doc(db, 'metadata', 'updates_status');
-      const statusSnap = await getDoc(statusRef);
+      const statusSnap = await runWithTimeout(getDoc(statusRef), 2000);
       if (!statusSnap.exists()) {
         console.log('[Firestore Client] Seeding default updates to cloud...');
         const batch = writeBatch(db);
@@ -860,21 +920,12 @@ export async function initializeUpdatesDatabase() {
           batch.set(docRef, cleanForFirestore(upd));
         });
         batch.set(statusRef, { seeded: true, updatedAt: new Date().toISOString() });
-        await batch.commit();
+        await runWithTimeout(batch.commit(), 2000);
         console.log('[Firestore Client] Seeded updates successfully.');
       }
-      return;
     } catch (err: any) {
       console.error('[Firestore Client] Failed to check/seed updates, falling back to local file:', err);
     }
-  }
-
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(UPDATES_FILE)) {
-    fs.writeFileSync(UPDATES_FILE, JSON.stringify(defaultUpdates, null, 2), 'utf-8');
   }
 }
 
@@ -883,7 +934,7 @@ export async function getUpdates(): Promise<ImportantUpdate[]> {
   await initializeUpdatesDatabase();
   if (db) {
     try {
-      const snapshot = await getDocs(collection(db, 'updates'));
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 2000);
       const updates: ImportantUpdate[] = [];
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
@@ -928,10 +979,10 @@ export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
         const docRef = doc(db, 'updates', u.id);
         batch.set(docRef, cleanForFirestore(u));
       });
-      await batch.commit();
+      await runWithTimeout(batch.commit(), 2000);
 
       // Delete any removed updates
-      const snapshot = await getDocs(collection(db, 'updates'));
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 2000);
       const deleteBatch = writeBatch(db);
       let hasDeletes = false;
       snapshot.forEach(docSnap => {
@@ -941,11 +992,10 @@ export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
         }
       });
       if (hasDeletes) {
-        await deleteBatch.commit();
+        await runWithTimeout(deleteBatch.commit(), 2000);
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save updates to cloud:', err);
-      throw err;
     }
   }
 }

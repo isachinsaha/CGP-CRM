@@ -1,4 +1,4 @@
-export type LeadStage = 'new' | 'contacted' | 'negotiating' | 'proposal' | 'won' | 'lost';
+export type LeadStage = 'new' | 'negotiating' | 'proposal' | 'won' | 'lost';
 
 export type FitScore = 'high' | 'medium' | 'low' | 'unqualified';
 
@@ -43,6 +43,7 @@ export interface Lead {
   campaign?: string;
   source?: string;
   project?: string;
+  callConnected?: string;
   tags?: string[];
   docPassportCopy?: boolean;
   docResume?: boolean;

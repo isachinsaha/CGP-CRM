@@ -110,6 +110,7 @@ export default function LeadModal({
     remarks1: initialLead.remarks1 || '',
     remarks2: initialLead.remarks2 || '',
     remarks3: initialLead.remarks3 || '',
+    callConnected: initialLead.callConnected || 'connected',
     source: initialLead.source || '',
     project: initialLead.project || '',
     docPassportCopy: !!initialLead.docPassportCopy,
@@ -153,6 +154,7 @@ export default function LeadModal({
       remarks1: initialLead.remarks1 || '',
       remarks2: initialLead.remarks2 || '',
       remarks3: initialLead.remarks3 || '',
+      callConnected: initialLead.callConnected || 'connected',
       source: initialLead.source || '',
       project: initialLead.project || '',
       docPassportCopy: !!initialLead.docPassportCopy,
@@ -175,13 +177,13 @@ export default function LeadModal({
         [name]: value
       };
       
-      // Auto-move stage from 'new' to 'contacted' when the 1'st remark is logged
+      // Auto-move stage from 'new' to 'negotiating' when the 1'st remark is logged
       if (
         prev.stage === 'new' &&
         ['remarks1', 'remarks2', 'remarks3'].includes(name) &&
         value.trim() !== ''
       ) {
-        updated.stage = 'contacted';
+        updated.stage = 'negotiating';
       }
       
       return updated;
@@ -191,6 +193,16 @@ export default function LeadModal({
   // Submit profile updates to backend server
   const saveProfileEdits = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+
+    // Validation for "Not Connected" calls - Callback task must be scheduled
+    if (formFields.callConnected === 'not_connected') {
+      const activeTasksCount = (lead.tasks || []).filter(t => !t.completed).length;
+      if (activeTasksCount === 0) {
+        alert("Action Required: When the call is marked as 'Not Connected', you must schedule a callback task/reminder in the right panel before saving.");
+        return;
+      }
+    }
+
     setSavingForm(true);
     setSaveSuccess(false);
 
@@ -452,9 +464,8 @@ export default function LeadModal({
                 className="text-[11px] font-extrabold rounded bg-slate-950 text-slate-300 px-2 py-1 border-none focus:outline-none cursor-pointer"
               >
                 <option value="new">New Inbound</option>
-                <option value="contacted">Initial Contact</option>
                 <option value="negotiating">In Discussion</option>
-                <option value="proposal">Office Visited</option>
+                <option value="proposal">Office Visited/Interview attendant</option>
                 <option value="won">Closed Won</option>
                 <option value="lost">Closed Lost</option>
               </select>
@@ -704,7 +715,7 @@ export default function LeadModal({
                         <span className={`h-4.5 w-4.5 rounded-md flex items-center justify-center border text-[10px] font-black ${lead.docOfficeVisited ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-900 border-slate-750 text-slate-500'}`}>
                           {lead.docOfficeVisited ? '✓' : ''}
                         </span>
-                        <span className={`font-bold ${lead.docOfficeVisited ? 'text-slate-100' : 'text-slate-500'}`}>Office Visited</span>
+                        <span className={`font-bold ${lead.docOfficeVisited ? 'text-slate-100' : 'text-slate-500'}`}>Office Visites/Online Interview</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className={`h-4.5 w-4.5 rounded-md flex items-center justify-center border text-[10px] font-black ${lead.docOthers ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-900 border-slate-750 text-slate-500'}`}>
@@ -833,7 +844,6 @@ export default function LeadModal({
                       <input
                         type="text"
                         name="name"
-                        disabled={isSubAgent}
                         value={formFields.name}
                         onChange={handleFieldChange}
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-extrabold uppercase"
@@ -857,7 +867,6 @@ export default function LeadModal({
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Gender</label>
                       <select
                         name="gender"
-                        disabled={isSubAgent}
                         value={formFields.gender}
                         onChange={handleFieldChange}
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 cursor-pointer uppercase font-bold"
@@ -873,7 +882,6 @@ export default function LeadModal({
                       <input
                         type="number"
                         name="age"
-                        disabled={isSubAgent}
                         value={formFields.age}
                         onChange={handleFieldChange}
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-mono font-bold"
@@ -885,7 +893,6 @@ export default function LeadModal({
                         type="text"
                         name="origin"
                         placeholder="e.g. DARJEELING"
-                        disabled={isSubAgent}
                         value={formFields.origin}
                         onChange={handleFieldChange}
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-semibold uppercase"
@@ -902,7 +909,6 @@ export default function LeadModal({
                         type="text"
                         name="country"
                         placeholder="e.g. QATAR"
-                        disabled={isSubAgent}
                         value={formFields.country}
                         onChange={handleFieldChange}
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 text-slate-100 font-bold uppercase"
@@ -950,7 +956,6 @@ export default function LeadModal({
                         type="text"
                         name="position"
                         placeholder="e.g. WAITSTAND / Nurse"
-                        disabled={isSubAgent}
                         value={formFields.position}
                         onChange={handleFieldChange}
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-medium uppercase"
@@ -962,7 +967,6 @@ export default function LeadModal({
                         type="text"
                         name="experience"
                         placeholder="e.g. FRESHER"
-                        disabled={isSubAgent}
                         value={formFields.experience}
                         onChange={handleFieldChange}
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400"
@@ -985,6 +989,7 @@ export default function LeadModal({
                         <option value="Organic">Organic 🌱</option>
                         <option value="Website">Website 🌐</option>
                         <option value="Instagram">Instagram 📸</option>
+                        <option value="Referral">Referral 🤝</option>
                         <option value="Other">Other</option>
                       </select>
                     </div>
@@ -992,15 +997,13 @@ export default function LeadModal({
                     <div>
                       <div className="flex justify-between items-center mb-0.5">
                         <label className="block text-[11px] font-semibold text-slate-400">Hiring Project</label>
-                        {!isSubAgent && (
-                          <button
-                            type="button"
-                            onClick={() => setIsAddingProject(!isAddingProject)}
-                            className="text-[10px] font-extrabold text-emerald-500 hover:text-emerald-400 cursor-pointer"
-                          >
-                            {isAddingProject ? 'Cancel' : '+ Add Project'}
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingProject(!isAddingProject)}
+                          className="text-[10px] font-extrabold text-emerald-500 hover:text-emerald-400 cursor-pointer"
+                        >
+                          {isAddingProject ? 'Cancel' : '+ Add Project'}
+                        </button>
                       </div>
                       {isAddingProject ? (
                         <div className="flex gap-1.5">
@@ -1032,7 +1035,6 @@ export default function LeadModal({
                       ) : (
                         <select
                           name="project"
-                          disabled={isSubAgent}
                           value={formFields.project}
                           onChange={handleFieldChange}
                           className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-semibold uppercase cursor-pointer"
@@ -1074,7 +1076,7 @@ export default function LeadModal({
                         onChange={(e) => setFormFields(prev => ({ ...prev, docOfficeVisited: e.target.checked }))}
                         className="h-4 w-4 rounded border-slate-700 text-indigo-400 focus:ring-indigo-500 cursor-pointer bg-slate-950"
                       />
-                      <span>Office Visited Status</span>
+                      <span>Office Visites/Online Interview Status</span>
                     </label>
                     <label className="flex items-center gap-2.5 cursor-pointer select-none text-xs font-bold text-slate-300">
                       <input
@@ -1087,43 +1089,32 @@ export default function LeadModal({
                     </label>
                   </div>
 
-                  {/* 4. TELECALLER REMARKS (FULLY EDITABLE FOR ALL SEATS) */}
-                  <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest border-b border-slate-750 pb-1 pt-2">4. Live Telecaller Call Comments</h4>
+                  {/* 4. TELECALLER CALL STATUS */}
+                  <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest border-b border-slate-750 pb-1 pt-2">4. Live Telecaller Call Status</h4>
                   <div className="space-y-3">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-400 mb-0.5">📞 Call Remarks Column 1 (First Contact outcome)</label>
-                      <input
-                        type="text"
-                        name="remarks1"
-                        placeholder="Write first phone call comments..."
-                        value={formFields.remarks1}
+                    <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-750/80 space-y-2">
+                      <label className="block text-[11px] font-bold text-slate-300 flex items-center gap-1 uppercase tracking-wider">
+                        <span>📞 Call Outcome / Connected Status</span>
+                        <span className="text-rose-400 font-extrabold">*</span>
+                      </label>
+                      <select
+                        name="callConnected"
+                        value={formFields.callConnected}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono font-medium text-slate-200"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-400 mb-0.5">📞 Call Remarks Column 2 (Follow up outcome)</label>
-                      <input
-                        type="text"
-                        name="remarks2"
-                        placeholder="Write follow up phone comments..."
-                        value={formFields.remarks2}
-                        onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono font-medium text-slate-200"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-400 mb-0.5">📞 Call Remarks Column 3 (Final Resolution outcome)</label>
-                      <input
-                        type="text"
-                        name="remarks3"
-                        placeholder="Write final decision comments..."
-                        value={formFields.remarks3}
-                        onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-2 rounded-lg bg-white border border-slate-200 focus:ring-1 focus:ring-slate-900 focus:outline-none font-mono font-medium text-slate-800"
-                      />
+                        className={`w-full text-xs px-3 py-2 rounded-lg border font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer ${
+                          formFields.callConnected === 'not_connected'
+                            ? 'bg-rose-950/30 border-rose-800 text-rose-300'
+                            : 'bg-slate-900 border-slate-700 text-slate-100'
+                        }`}
+                      >
+                        <option value="connected">Connected ✅</option>
+                        <option value="not_connected">Not Connected (Mandatory Callback Task) ❌</option>
+                      </select>
+                      {formFields.callConnected === 'not_connected' && (
+                        <p className="text-[10px] text-rose-400 font-bold flex items-center gap-1 animate-pulse">
+                          ⚠️ Error: Please schedule a callback task under "Actions & Reminders" on the right before saving.
+                        </p>
+                      )}
                     </div>
 
                     <div>
@@ -1256,6 +1247,48 @@ export default function LeadModal({
           {/* Right Column: Dynamic Action Hub (Timeline, Task Center, AISensy Templates) */}
           <div className="w-1/2 flex flex-col h-full bg-slate-900/10 relative justify-between border-l border-slate-750">
             
+            {/* Main Lead Remarks Box */}
+            <div className="p-4 bg-slate-950/30 border-b border-slate-750 space-y-3 shrink-0 text-left">
+              <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5 font-display">
+                <MessageSquare className="h-4.5 w-4.5 text-accent-purple" /> Live Telecaller Remarks
+              </h4>
+              <div className="grid grid-cols-1 gap-2.5">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">📞 Call Remarks Column 1 (First Contact Outcome)</label>
+                  <input
+                    type="text"
+                    name="remarks1"
+                    placeholder="Write first phone call comments..."
+                    value={formFields.remarks1}
+                    onChange={handleFieldChange}
+                    className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono font-medium text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">📞 Call Remarks Column 2 (Follow up Outcome)</label>
+                  <input
+                    type="text"
+                    name="remarks2"
+                    placeholder="Write follow up phone comments..."
+                    value={formFields.remarks2}
+                    onChange={handleFieldChange}
+                    className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono font-medium text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">📞 Call Remarks Column 3 (Final Resolution Outcome)</label>
+                  <input
+                    type="text"
+                    name="remarks3"
+                    placeholder="Write final decision comments..."
+                    value={formFields.remarks3}
+                    onChange={handleFieldChange}
+                    className="w-full text-xs px-3 py-1.5 rounded-lg bg-white border border-slate-200 focus:ring-1 focus:ring-slate-900 focus:outline-none font-mono font-medium text-slate-800 font-extrabold"
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* Header / Tabs switcher */}
             <div className="flex p-2 bg-slate-900/50 border-b border-slate-750 sticky top-0 z-20 shrink-0 gap-2">
               <button

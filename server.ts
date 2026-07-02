@@ -109,7 +109,7 @@ app.post('/api/leads', async (req, res) => {
     
     // Auto increment serial number
     const sequence = leads.length + 1;
-    const serialNo = `CGP-${1000 + sequence}`;
+    const serialNo = `INQ-${1000 + sequence}`;
 
     const cleanNameId = String(name).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
     const newLead = {
@@ -212,7 +212,7 @@ app.post('/api/leads/bulk', async (req, res) => {
       }
 
       const sequence = currentLeads.length + newLeadsToAdd.length + 1;
-      const serialNo = `CGP-${1000 + sequence}`;
+      const serialNo = `INQ-${1000 + sequence}`;
 
       const itemTags = Array.isArray(tags) 
         ? tags 
@@ -537,7 +537,7 @@ app.put('/api/leads/:id', async (req, res) => {
       stage, notes, name, phone, email, budget, fitScore, campaign,
       serialNo, entryDate, assignDate, gender, age, origin, country,
       position, experience, adminRemarks, assignedTo, importance,
-      remarks1, remarks2, remarks3, tasks, timeline, tags, source, project,
+      remarks1, remarks2, remarks3, callConnected, tasks, timeline, tags, source, project,
       docPassportCopy, docResume, docOfficeVisited, docOthers, reminderEnabled
     } = req.body;
     const leads = await getLeads();
@@ -583,18 +583,18 @@ app.put('/api/leads/:id', async (req, res) => {
       lead.assignDate = new Date().toISOString().split('T')[0];
     }
 
-    // Auto-move stage from 'new' (New Inbound) to 'contacted' (Initial Contact) when the 1'st remark is logged
+    // Auto-move stage from 'new' (New Inbound) to 'negotiating' (In Discussion) when the 1'st remark is logged
     if (lead.stage === 'new') {
       const isAddingRemark = 
         (remarks1 !== undefined && remarks1.trim() !== '' && !lead.remarks1) ||
         (remarks2 !== undefined && remarks2.trim() !== '' && !lead.remarks2) ||
         (remarks3 !== undefined && remarks3.trim() !== '' && !lead.remarks3);
       if (isAddingRemark) {
-        lead.stage = 'contacted';
+        lead.stage = 'negotiating';
         lead.timeline.push({
           id: `tl_${Date.now()}_auto_stage`,
           type: 'status',
-          text: `Pipeline stage auto-updated to "INITIAL CONTACT" due to first remark logged`,
+          text: `Pipeline stage auto-updated to "IN DISCUSSION" due to first remark logged`,
           actor,
           timestamp: new Date().toISOString()
         });
@@ -656,6 +656,7 @@ app.put('/api/leads/:id', async (req, res) => {
     if (importance !== undefined) lead.importance = Number(importance);
     if (source !== undefined) lead.source = source;
     if (project !== undefined) lead.project = project;
+    if (callConnected !== undefined) lead.callConnected = callConnected;
 
     // Document received status flags
     if (docPassportCopy !== undefined) lead.docPassportCopy = Boolean(docPassportCopy);
@@ -1044,7 +1045,7 @@ Extract:
     // Save newly created lead
     const leads = await getLeads();
     const sequence = leads.length + 1;
-    const serialNo = `CGP-${1000 + sequence}`;
+    const serialNo = `INQ-${1000 + sequence}`;
 
     const cleanNameId = String(aiAnalysis.name).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
     const newLeadId = generateUniqueLeadId(leads, cleanNameId);

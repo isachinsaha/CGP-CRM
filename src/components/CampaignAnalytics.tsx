@@ -116,7 +116,7 @@ export default function CampaignAnalytics({
       const agentLeads = intervalLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase());
       const total = agentLeads.length;
       const won = agentLeads.filter(l => l.stage === 'won').length;
-      const progress = agentLeads.filter(l => ['contacted', 'negotiating', 'proposal'].includes(l.stage)).length;
+      const progress = agentLeads.filter(l => ['negotiating', 'proposal'].includes(l.stage)).length;
       const lost = agentLeads.filter(l => l.stage === 'lost').length;
       
       const conversionRate = total > 0 ? Math.round((won / total) * 100) : 0;
@@ -308,7 +308,7 @@ export default function CampaignAnalytics({
       const agentLeads = activeLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase());
       const total = agentLeads.length;
       const won = agentLeads.filter(l => l.stage === 'won').length;
-      const progress = agentLeads.filter(l => ['contacted', 'negotiating', 'proposal'].includes(l.stage)).length;
+      const progress = agentLeads.filter(l => ['negotiating', 'proposal'].includes(l.stage)).length;
       const lost = agentLeads.filter(l => l.stage === 'lost').length;
       const assignedToday = agentLeads.filter(l => isAssignedToday(l.assignDate));
 
@@ -394,7 +394,7 @@ export default function CampaignAnalytics({
       const agentLeads = customLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase());
       const total = agentLeads.length;
       const won = agentLeads.filter(l => l.stage === 'won').length;
-      const progress = agentLeads.filter(l => ['contacted', 'negotiating', 'proposal'].includes(l.stage)).length;
+      const progress = agentLeads.filter(l => ['negotiating', 'proposal'].includes(l.stage)).length;
       const lost = agentLeads.filter(l => l.stage === 'lost').length;
       const assignedInPeriod = agentLeads.filter(l => isWithinRange(l.assignDate));
 
@@ -1224,9 +1224,8 @@ export default function CampaignAnalytics({
           <div className="space-y-2.5">
             {[
               { label: 'New Lead Inbound', key: 'new', color: 'bg-slate-600 hover:bg-slate-500' },
-              { label: 'Initial Contacted', key: 'contacted', color: 'bg-sky-650 hover:bg-sky-600' },
               { label: 'In Negotiation', key: 'negotiating', color: 'bg-amber-600 hover:bg-amber-500' },
-              { label: 'Office Visited', key: 'proposal', color: 'bg-purple-650 hover:bg-purple-600' },
+              { label: 'Office Visited/Interview attendant', key: 'proposal', color: 'bg-purple-650 hover:bg-purple-600' },
               { label: 'Closed Converted', key: 'won', color: 'bg-accent-emerald hover:bg-emerald-500' },
               { label: 'Unqualified / Lost', key: 'lost', color: 'bg-slate-700 hover:bg-slate-650' }
             ].map((funnel, idx) => {

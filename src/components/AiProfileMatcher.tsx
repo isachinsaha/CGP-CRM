@@ -165,7 +165,7 @@ Other details: ${selected.otherTerms || 'None'}`;
       const updatedLead: Lead = {
         ...lead,
         project: isCurrentlyAssigned ? "" : projectTitle,
-        stage: (!isCurrentlyAssigned && lead.stage === 'new') ? 'contacted' : lead.stage, // automatically engage them!
+        stage: (!isCurrentlyAssigned && lead.stage === 'new') ? 'negotiating' : lead.stage, // automatically engage them!
         updatedAt: new Date().toISOString()
       };
 

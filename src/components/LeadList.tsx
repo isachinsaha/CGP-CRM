@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
 import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Bell, Download, Sparkles, TrendingUp, X, UploadCloud } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -34,12 +34,20 @@ export default function LeadList({
   const [countryFilter, setCountryFilter] = useState('All');
   const [coordinatorFilter, setCoordinatorFilter] = useState('All');
   const [fitScoreFilter, setFitScoreFilter] = useState('All');
-  const [importanceFilter, setImportanceFilter] = useState('All');
   const [tagFilter, setTagFilter] = useState('All');
   const [projectFilter, setProjectFilter] = useState('All');
   const [dateFilter, setDateFilter] = useState('All'); // 'All', 'Today', 'Yesterday', 'Last7Days', 'Last30Days', 'Custom'
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // Reset pagination to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, countryFilter, projectFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter]);
   
   // Spreadsheet Quick Grid Inline Edit Mode Switch
   const [isInlineEdit, setIsInlineEdit] = useState(false);
@@ -384,11 +392,6 @@ export default function LeadList({
       // 4. Inbound Quality Fit score filter
       const matchesFit = fitScoreFilter === 'All' || lead.fitScore === fitScoreFilter;
 
-      // 5. Importance Rating filter
-      const matchesImportance = 
-        importanceFilter === 'All' || 
-        (lead.importance !== undefined && String(lead.importance) === importanceFilter);
-
       // 6. Dynamic Tags filter
       const matchesTag = tagFilter === 'All' || (lead.tags && lead.tags.includes(tagFilter));
 
@@ -435,9 +438,15 @@ export default function LeadList({
         coordinatorFilter === 'All' || 
         (coordinatorFilter === 'Unassigned' ? !lead.assignedTo : (lead.assignedTo?.toLowerCase() === coordinatorFilter.toLowerCase() || lead.assignedTo === coordinatorFilter));
 
-      return matchesSearch && matchesCountry && matchesProject && matchesFit && matchesImportance && matchesTag && matchesDate && matchesCoordinator;
+      return matchesSearch && matchesCountry && matchesProject && matchesFit && matchesTag && matchesDate && matchesCoordinator;
     });
-  }, [leads, searchQuery, countryFilter, projectFilter, fitScoreFilter, importanceFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter]);
+  }, [leads, searchQuery, countryFilter, projectFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter]);
+
+  // Paginated leads for page-wise viewport listing
+  const paginatedLeads = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredLeads.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredLeads, currentPage]);
 
   // Bulk Re-assignment API Caller
   const handleBulkReassign = async () => {
@@ -518,7 +527,6 @@ export default function LeadList({
   const getStageHeader = (stage: LeadStage) => {
     switch (stage) {
       case 'new': return 'bg-slate-800 text-slate-300 border border-slate-700';
-      case 'contacted': return 'bg-sky-950/40 text-sky-400 border border-sky-900/30';
       case 'negotiating': return 'bg-amber-950/40 text-amber-400 border border-amber-900/30';
       case 'proposal': return 'bg-purple-950/40 text-purple-400 border border-purple-900/30';
       case 'won': return 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/30 font-bold';
@@ -630,20 +638,6 @@ export default function LeadList({
             <option value="medium">🥈 Medium Fit Quality</option>
             <option value="low">🥉 Low Fit Quality</option>
             <option value="unqualified">🛑 Unqualified / Spam</option>
-          </select>
-
-          {/* Importance filter */}
-          <select
-            value={importanceFilter}
-            onChange={(e) => setImportanceFilter(e.target.value)}
-            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer"
-          >
-            <option value="All">All Importance stars</option>
-            <option value="5">⭐⭐⭐⭐⭐ 5 Stars (Urgent)</option>
-            <option value="4">⭐⭐⭐⭐ 4 Stars (High)</option>
-            <option value="3">⭐⭐⭐ 3 Stars (Medium)</option>
-            <option value="2">⭐⭐ 2 Stars (Fair)</option>
-            <option value="1">⭐ 1 Star (Low)</option>
           </select>
 
           {/* Date Wise Filter */}
@@ -1052,16 +1046,16 @@ export default function LeadList({
           </div>
         )}
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[620px] overflow-y-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-slate-900/50 border-b border-slate-750 text-left select-none">
                 <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider w-10 text-center">
                   <input
                     type="checkbox"
-                    checked={filteredLeads.length > 0 && filteredLeads.map(l => l.id).every(id => selectedLeadIds.includes(id))}
+                    checked={paginatedLeads.length > 0 && paginatedLeads.map(l => l.id).every(id => selectedLeadIds.includes(id))}
                     onChange={() => {
-                      const visibleIds = filteredLeads.map(l => l.id);
+                      const visibleIds = paginatedLeads.map(l => l.id);
                       const isAllSelected = visibleIds.length > 0 && visibleIds.every(id => selectedLeadIds.includes(id));
                       if (isAllSelected) {
                         setSelectedLeadIds(prev => prev.filter(id => !visibleIds.includes(id)));
@@ -1079,7 +1073,6 @@ export default function LeadList({
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">Country</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[150px]">Position Opening</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[210px]">Docs Received Status</th>
-                <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Importance</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[130px]">Coordinator (Telecaller)</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[170px]">Remarks 1 (First Call)</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[170px]">Remarks 2 (Follow-up)</th>
@@ -1088,8 +1081,8 @@ export default function LeadList({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-750/60">
-              {filteredLeads.length > 0 ? (
-                filteredLeads.map((lead) => {
+              {paginatedLeads.length > 0 ? (
+                paginatedLeads.map((lead) => {
                   const isSavingThis = savingId === lead.id;
                   return (
                     <tr
@@ -1182,9 +1175,8 @@ export default function LeadList({
                           className={`text-[10px] font-bold rounded px-2.5 py-1 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer ${getStageHeader(lead.stage)}`}
                         >
                           <option value="new">New Inbound</option>
-                          <option value="contacted">Initial Contact</option>
                           <option value="negotiating">In Discussion</option>
-                          <option value="proposal">Office Visited</option>
+                          <option value="proposal">Office Visited/Interview attendant</option>
                           <option value="won">Closed Won</option>
                           <option value="lost">Closed Lost</option>
                         </select>
@@ -1192,18 +1184,18 @@ export default function LeadList({
 
                       {/* 3. Target Country */}
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <span className="text-[10px] font-extrabold text-slate-300 bg-slate-800 px-2 py-1 rounded border border-slate-700 uppercase flex items-center gap-1.5 w-fit">
+                        <span className="text-[10px] font-extrabold text-slate-300 bg-slate-800 px-2 py-1 rounded border border-slate-700 uppercase flex items-center gap-1.5 w-fit" title={lead.country || 'Pending'}>
                           {lead.country && getCountryFlagUrl(lead.country) ? (
                             <img 
                               src={getCountryFlagUrl(lead.country)} 
                               alt="" 
-                              className="w-4 h-3 object-cover rounded-2xs inline-block shadow-2xs"
+                              className="w-4 h-3 object-cover rounded-2xs inline-block shadow-2xs shrink-0"
                               referrerPolicy="no-referrer"
                             />
                           ) : (
-                            <span>🌐</span>
+                            <span className="shrink-0">🌐</span>
                           )}
-                          {lead.country || 'Pending'}
+                          <span className="truncate max-w-[100px] inline-block">{lead.country || 'Pending'}</span>
                         </span>
                       </td>
 
@@ -1274,31 +1266,6 @@ export default function LeadList({
                             />
                             <span className={lead.docOthers ? "text-accent-emerald font-extrabold" : ""}>Others</span>
                           </label>
-                        </div>
-                      </td>
-
-                      {/* 5. Star Importance Rating (Interactive in Inline edit!) */}
-                      <td className="px-4 py-3 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-0.5">
-                          {Array.from({ length: 5 }).map((_, i) => (
-                            <Star 
-                              key={i} 
-                              onClick={() => {
-                                if (!isSubAgent) {
-                                  handleInlineUpdate(lead.id, { importance: i + 1 });
-                                }
-                              }}
-                              className={`h-3.5 w-3.5 transition-all ${
-                                isInlineEdit && !isSubAgent 
-                                  ? 'cursor-pointer hover:scale-125 hover:text-amber-500 text-slate-500' 
-                                  : 'text-slate-750'
-                              } ${
-                                i < (lead.importance || 3) 
-                                  ? 'text-amber-500 fill-amber-500' 
-                                  : 'text-slate-700'
-                              }`} 
-                            />
-                          ))}
                         </div>
                       </td>
 
@@ -1454,6 +1421,72 @@ export default function LeadList({
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        {filteredLeads.length > itemsPerPage && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border-t border-slate-750 bg-slate-900/50 rounded-b-xl select-none">
+            <div className="text-xs text-slate-400 font-semibold">
+              Showing <span className="text-slate-200 font-bold">{Math.min(filteredLeads.length, (currentPage - 1) * itemsPerPage + 1)}</span> to{' '}
+              <span className="text-slate-200 font-bold">{Math.min(filteredLeads.length, currentPage * itemsPerPage)}</span> of{' '}
+              <span className="text-slate-200 font-bold">{filteredLeads.length}</span> candidates
+            </div>
+            
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs border border-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+              >
+                Previous
+              </button>
+              
+              {Array.from({ length: Math.ceil(filteredLeads.length / itemsPerPage) }).map((_, idx) => {
+                const pageNum = idx + 1;
+                const totalPages = Math.ceil(filteredLeads.length / itemsPerPage);
+                if (
+                  pageNum === 1 ||
+                  pageNum === totalPages ||
+                  Math.abs(pageNum - currentPage) <= 1
+                ) {
+                  return (
+                    <button
+                      key={pageNum}
+                      type="button"
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`h-7 w-7 rounded flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
+                        currentPage === pageNum
+                          ? 'bg-accent-purple border-accent-purple text-white shadow-md shadow-accent-purple/20 scale-105'
+                          : 'bg-slate-850 border-slate-750 text-slate-400 hover:bg-slate-750 hover:text-slate-200'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                }
+                
+                if (pageNum === 2 || pageNum === totalPages - 1) {
+                  return (
+                    <span key={pageNum} className="text-slate-500 font-bold px-1 select-none text-xs">
+                      ...
+                    </span>
+                  );
+                }
+                
+                return null;
+              })}
+              
+              <button
+                type="button"
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, Math.ceil(filteredLeads.length / itemsPerPage)))}
+                disabled={currentPage === Math.ceil(filteredLeads.length / itemsPerPage)}
+                className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs border border-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
     </div>

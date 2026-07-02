@@ -63,9 +63,8 @@ export default function LeadBoard({
 
   const COLUMNS: Column[] = [
     { id: 'new', title: 'New Inbound', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-slate-300 bg-slate-800 font-medium' },
-    { id: 'contacted', title: 'Initial Contact', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-sky-400 bg-sky-950/40 font-medium' },
     { id: 'negotiating', title: 'In Discussion', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-amber-400 bg-amber-950/40 font-medium' },
-    { id: 'proposal', title: 'Office Visited', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-purple-400 bg-purple-950/40 font-medium' },
+    { id: 'proposal', title: 'Office Visited/Interview attendant', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-purple-400 bg-purple-950/40 font-medium' },
     { id: 'won', title: 'Closed Won', color: 'border-emerald-900/40 bg-emerald-950/15', headerColor: 'text-emerald-400 bg-emerald-950/40 font-semibold' },
     { id: 'lost', title: 'Closed Lost', color: 'border-slate-750 bg-slate-900/20', headerColor: 'text-slate-400 bg-slate-800' }
   ];
@@ -85,7 +84,7 @@ export default function LeadBoard({
   };
 
   const getStageNeighbors = (current: LeadStage): { prev: LeadStage | null; next: LeadStage | null } => {
-    const list: LeadStage[] = ['new', 'contacted', 'negotiating', 'proposal', 'won', 'lost'];
+    const list: LeadStage[] = ['new', 'negotiating', 'proposal', 'won', 'lost'];
     const idx = list.indexOf(current);
     return {
       prev: idx > 0 ? list[idx - 1] : null,
@@ -413,8 +412,7 @@ export default function LeadBoard({
                 
                 // Map icons dynamically
                 let IconComponent = Inbox;
-                if (col.id === 'contacted') IconComponent = MessageSquare;
-                else if (col.id === 'negotiating') IconComponent = Briefcase;
+                if (col.id === 'negotiating') IconComponent = Briefcase;
                 else if (col.id === 'proposal') IconComponent = Calendar;
                 else if (col.id === 'won') IconComponent = ShieldCheck;
                 else if (col.id === 'lost') IconComponent = X;
@@ -428,10 +426,6 @@ export default function LeadBoard({
                   selectedClass = isSelected ? 'bg-slate-800 border-slate-500 text-slate-100 shadow-md ring-2 ring-slate-500/20' : '';
                   badgeColor = isSelected ? 'bg-slate-900/30 text-slate-100 border-slate-500/30' : 'bg-slate-900 text-slate-300 border-slate-750';
                   if (isSelected) iconColor = 'text-slate-100';
-                } else if (col.id === 'contacted') {
-                  selectedClass = isSelected ? 'bg-sky-950/80 border-sky-500 text-slate-100 shadow-md ring-2 ring-sky-500/20' : '';
-                  badgeColor = isSelected ? 'bg-sky-400/20 text-sky-400 border-sky-400/30' : 'bg-sky-950/40 text-sky-400 border-sky-900/30';
-                  if (isSelected) iconColor = 'text-sky-400';
                 } else if (col.id === 'negotiating') {
                   selectedClass = isSelected ? 'bg-amber-950/80 border-amber-500 text-slate-100 shadow-md ring-2 ring-amber-500/20' : '';
                   badgeColor = isSelected ? 'bg-amber-400/20 text-amber-400 border-amber-400/30' : 'bg-amber-950/40 text-amber-400 border-amber-900/30';

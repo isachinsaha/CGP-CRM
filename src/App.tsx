@@ -783,6 +783,7 @@ export default function App() {
                     <option value="Organic">Organic 🌱</option>
                     <option value="Website">Website 🌐</option>
                     <option value="Instagram">Instagram 📸</option>
+                    <option value="Referral">Referral 🤝</option>
                     <option value="Other">Other / Unknown</option>
                   </select>
                 </div>
