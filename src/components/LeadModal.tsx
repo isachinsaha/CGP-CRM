@@ -442,6 +442,11 @@ export default function LeadModal({
               <p className="text-xs text-slate-400 font-mono mt-0.5">
                 Serial No: <span className="text-slate-200 font-bold">{lead.serialNo || 'Pending'}</span> 
                 {' • '} Phone: <span className="text-slate-200 font-bold">{lead.phone}</span> 
+                {lead.alternateNo && (
+                  <>
+                    {' • '} Alt: <span className="text-slate-200 font-bold">{lead.alternateNo}</span>
+                  </>
+                )}
                 {lead.assignedTo && (
                   <>
                     {' • '} Coordinator:{' '}

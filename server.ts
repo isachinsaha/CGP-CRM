@@ -99,9 +99,9 @@ app.post('/api/leads', async (req, res) => {
       return;
     }
 
-    const { name, phone, gender, age, origin, country, position, experience, assignedTo, importance, tags, source, project, adminRemarks } = req.body;
-    if (!name || !phone) {
-      res.status(400).json({ error: 'Name and Phone are required' });
+    const { name, phone, alternateNo, gender, age, origin, country, position, experience, assignedTo, importance, tags, source, project, adminRemarks } = req.body;
+    if (!phone) {
+      res.status(400).json({ error: 'Phone number is required' });
       return;
     }
 
@@ -111,14 +111,16 @@ app.post('/api/leads', async (req, res) => {
     const sequence = leads.length + 1;
     const serialNo = `INQ-${1000 + sequence}`;
 
-    const cleanNameId = String(name).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
+    const finalName = name && name.trim() ? name.trim() : 'Unnamed Candidate';
+    const cleanNameId = String(finalName).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
     const newLead = {
       id: generateUniqueLeadId(leads, cleanNameId),
       serialNo,
       entryDate: new Date().toISOString().split('T')[0],
       assignDate: assignedTo ? new Date().toISOString().split('T')[0] : '',
-      name,
+      name: finalName,
       phone,
+      alternateNo: alternateNo || '',
       email: '',
       gender: gender || 'M',
       age: Number(age) || 24,
@@ -138,7 +140,7 @@ app.post('/api/leads', async (req, res) => {
       budget: 1500,
       budgetRaw: 'Medium range opening commission',
       campaign: `${country || 'General'} Direct Intake Program`,
-      summary: `Manually enrolled candidate ${name} seeking ${position || 'placement'} openings in ${country || 'abroad'}.`,
+      summary: `Manually enrolled candidate ${finalName} seeking ${position || 'placement'} openings in ${country || 'abroad'}.`,
       requirements: [position || 'placement', country || 'visa'].filter(Boolean),
       nextAction: 'Dial contact number to verify documentation status.',
       tags: tags || [],
@@ -534,7 +536,7 @@ app.get('/api/leads/:id', async (req, res) => {
 app.put('/api/leads/:id', async (req, res) => {
   try {
     const { 
-      stage, notes, name, phone, email, budget, fitScore, campaign,
+      stage, notes, name, phone, alternateNo, email, budget, fitScore, campaign,
       serialNo, entryDate, assignDate, gender, age, origin, country,
       position, experience, adminRemarks, assignedTo, importance,
       remarks1, remarks2, remarks3, callConnected, tasks, timeline, tags, source, project,
@@ -643,6 +645,7 @@ app.put('/api/leads/:id', async (req, res) => {
     if (campaign !== undefined) lead.campaign = campaign;
 
     // Career Growth Placement Custom Attributes
+    if (alternateNo !== undefined) lead.alternateNo = alternateNo;
     if (serialNo !== undefined) lead.serialNo = serialNo;
     if (entryDate !== undefined) lead.entryDate = entryDate;
     if (assignDate !== undefined) lead.assignDate = assignDate;

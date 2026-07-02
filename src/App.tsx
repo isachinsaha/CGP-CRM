@@ -131,7 +131,8 @@ export default function App() {
   const [createFields, setCreateFields] = useState({
     name: '',
     phone: '',
-    gender: 'M',
+    alternateNo: '',
+    gender: 'Not defined',
     age: '24',
     origin: '',
     country: 'Kuwait',
@@ -244,8 +245,8 @@ export default function App() {
   // Submit manual candidate enroll
   const handleCreateLead = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!createFields.name || !createFields.phone) {
-      alert('Please fill out Name and Mobile number fields.');
+    if (!createFields.phone) {
+      alert('Please fill out Mobile number field.');
       return;
     }
     setCreatingProgress(true);
@@ -271,7 +272,8 @@ export default function App() {
         setCreateFields({
           name: '',
           phone: '',
-          gender: 'M',
+          alternateNo: '',
+          gender: 'Not defined',
           age: '24',
           origin: '',
           country: 'Kuwait',
@@ -598,27 +600,36 @@ export default function App() {
 
             {/* From body */}
             <form onSubmit={handleCreateLead} className="p-5.5 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-2.5">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Candidate Name *</label>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Candidate Name</label>
                   <input
                     type="text"
-                    required
                     placeholder="e.g. DEWAS BHUJEL"
                     value={createFields.name}
                     onChange={(e) => setCreateFields({...createFields, name: e.target.value})}
-                    className="w-full text-xs px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-100 focus:ring-1 focus:ring-emerald-500 focus:outline-none uppercase font-bold placeholder-slate-500"
+                    className="w-full text-xs px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-100 focus:ring-1 focus:ring-emerald-500 focus:outline-none uppercase font-bold placeholder-slate-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Candidate Mobile No *</label>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Mobile No *</label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. +91 98765 43210"
+                    placeholder="e.g. +91 98765"
                     value={createFields.phone}
                     onChange={(e) => setCreateFields({...createFields, phone: e.target.value})}
-                    className="w-full text-xs px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-100 focus:ring-1 focus:ring-emerald-500 focus:outline-none font-mono placeholder-slate-500"
+                    className="w-full text-xs px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-100 focus:ring-1 focus:ring-emerald-500 focus:outline-none font-mono placeholder-slate-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Alternative No</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. +91 98765"
+                    value={createFields.alternateNo}
+                    onChange={(e) => setCreateFields({...createFields, alternateNo: e.target.value})}
+                    className="w-full text-xs px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-100 focus:ring-1 focus:ring-emerald-500 focus:outline-none font-mono placeholder-slate-500"
                   />
                 </div>
               </div>
@@ -633,6 +644,7 @@ export default function App() {
                   >
                     <option value="M">Male (M)</option>
                     <option value="F">Female (F)</option>
+                    <option value="Not defined">Not defined</option>
                   </select>
                 </div>
                 <div>
@@ -909,6 +921,35 @@ export default function App() {
                   >
                     + Add Tag
                   </button>
+                </div>
+
+                {/* Intelligent Clickable Tag Suggestions */}
+                <div className="mt-1.5 flex flex-wrap gap-1.5 items-center">
+                  <span className="text-[10px] text-slate-500 font-extrabold uppercase mr-1">Suggestions:</span>
+                  {(newEnrollTagInput.trim() === '' 
+                    ? tagsList.slice(0, 8)
+                    : tagsList.filter(t => t.toLowerCase().includes(newEnrollTagInput.toLowerCase()))
+                  )
+                    .filter(t => !enrollTags.includes(t))
+                    .slice(0, 8)
+                    .map((tag, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          if (!enrollTags.includes(tag)) {
+                            setEnrollTags([...enrollTags, tag]);
+                          }
+                          setNewEnrollTagInput('');
+                        }}
+                        className="text-[10px] bg-slate-900 hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 font-extrabold px-2 py-0.5 rounded border border-slate-800 hover:border-emerald-900 transition-all cursor-pointer"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  {newEnrollTagInput.trim() !== '' && tagsList.filter(t => t.toLowerCase().includes(newEnrollTagInput.toLowerCase())).filter(t => !enrollTags.includes(t)).length === 0 && (
+                    <span className="text-[10px] text-slate-500 italic">No matching tags. Press Enter or click Add to create.</span>
+                  )}
                 </div>
 
                 {enrollTags.length > 0 && (
