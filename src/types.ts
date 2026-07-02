@@ -1,4 +1,4 @@
-export type LeadStage = 'new' | 'negotiating' | 'proposal' | 'won' | 'lost';
+export type LeadStage = 'new' | 'negotiating' | 'rotations' | 'proposal' | 'won' | 'lost';
 
 export type FitScore = 'high' | 'medium' | 'low' | 'unqualified';
 
@@ -17,6 +17,7 @@ export interface Lead {
   name: string;
   gender: string; // e.g. 'M', 'F', 'MALE', 'FEMALE'
   phone: string;
+  alternateNo?: string;
   age: string | number;
   origin: string; // e.g. "Darjeeling", "Siliguri", "Sikkim"
   country: string; // e.g. "QATAR", "JAPAN", "DUBAI", "GERMANY"

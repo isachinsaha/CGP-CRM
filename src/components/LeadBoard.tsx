@@ -13,7 +13,8 @@ import {
   Inbox,
   X,
   LayoutGrid,
-  Trello 
+  Trello,
+  RotateCw
 } from 'lucide-react';
 import { getCountryFlagUrl } from '../utils';
 import ImportantUpdatesBar from './ImportantUpdatesBar.tsx';
@@ -64,7 +65,8 @@ export default function LeadBoard({
   const COLUMNS: Column[] = [
     { id: 'new', title: 'New Inbound', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-slate-300 bg-slate-800 font-medium' },
     { id: 'negotiating', title: 'In Discussion', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-amber-400 bg-amber-950/40 font-medium' },
-    { id: 'proposal', title: 'Office Visited/Interview attendant', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-purple-400 bg-purple-950/40 font-medium' },
+    { id: 'rotations', title: 'In Rotations', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-indigo-400 bg-indigo-950/40 font-medium animate-pulse' },
+    { id: 'proposal', title: 'Office Visited/Interview Attended', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-purple-400 bg-purple-950/40 font-medium' },
     { id: 'won', title: 'Closed Won', color: 'border-emerald-900/40 bg-emerald-950/15', headerColor: 'text-emerald-400 bg-emerald-950/40 font-semibold' },
     { id: 'lost', title: 'Closed Lost', color: 'border-slate-750 bg-slate-900/20', headerColor: 'text-slate-400 bg-slate-800' }
   ];
@@ -84,7 +86,7 @@ export default function LeadBoard({
   };
 
   const getStageNeighbors = (current: LeadStage): { prev: LeadStage | null; next: LeadStage | null } => {
-    const list: LeadStage[] = ['new', 'negotiating', 'proposal', 'won', 'lost'];
+    const list: LeadStage[] = ['new', 'negotiating', 'rotations', 'proposal', 'won', 'lost'];
     const idx = list.indexOf(current);
     return {
       prev: idx > 0 ? list[idx - 1] : null,
@@ -413,6 +415,7 @@ export default function LeadBoard({
                 // Map icons dynamically
                 let IconComponent = Inbox;
                 if (col.id === 'negotiating') IconComponent = Briefcase;
+                else if (col.id === 'rotations') IconComponent = RotateCw;
                 else if (col.id === 'proposal') IconComponent = Calendar;
                 else if (col.id === 'won') IconComponent = ShieldCheck;
                 else if (col.id === 'lost') IconComponent = X;
@@ -430,6 +433,10 @@ export default function LeadBoard({
                   selectedClass = isSelected ? 'bg-amber-950/80 border-amber-500 text-slate-100 shadow-md ring-2 ring-amber-500/20' : '';
                   badgeColor = isSelected ? 'bg-amber-400/20 text-amber-400 border-amber-400/30' : 'bg-amber-950/40 text-amber-400 border-amber-900/30';
                   if (isSelected) iconColor = 'text-amber-400';
+                } else if (col.id === 'rotations') {
+                  selectedClass = isSelected ? 'bg-indigo-950/80 border-indigo-500 text-slate-100 shadow-md ring-2 ring-indigo-500/20' : '';
+                  badgeColor = isSelected ? 'bg-indigo-400/20 text-indigo-400 border-indigo-400/30' : 'bg-indigo-950/40 text-indigo-400 border-indigo-900/30';
+                  if (isSelected) iconColor = 'text-indigo-400';
                 } else if (col.id === 'proposal') {
                   selectedClass = isSelected ? 'bg-purple-950/80 border-purple-500 text-slate-100 shadow-md ring-2 ring-purple-500/20' : '';
                   badgeColor = isSelected ? 'bg-purple-400/20 text-purple-400 border-purple-400/30' : 'bg-purple-950/40 text-purple-400 border-purple-900/30';
@@ -462,7 +469,7 @@ export default function LeadBoard({
                         onUpdateStage(leadId, col.id);
                       }
                     }}
-                    className={`group p-2 px-3 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-[74px] relative overflow-hidden ${
+                    className={`group p-2 px-3 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-[92px] relative overflow-hidden ${
                       isDraggedOver
                         ? 'border-accent-purple bg-accent-purple/10 scale-[1.03] ring-2 ring-accent-purple/40 shadow-lg'
                         : isSelected
@@ -472,18 +479,18 @@ export default function LeadBoard({
                   >
                     <div className="relative z-10 flex items-start justify-between w-full">
                       <div className={`text-sm font-bold flex items-center justify-center w-6.5 h-6.5 rounded-lg border ${isSelected ? 'bg-slate-900/20 border-slate-700' : 'bg-slate-900 border-slate-800'}`}>
-                        <IconComponent className={`w-3 h-3 ${iconColor}`} />
+                        <IconComponent className={`w-3.5 h-3.5 ${iconColor}`} />
                       </div>
-                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md font-mono border ${badgeColor}`}>
+                      <span className={`text-[11px] font-black px-2 py-0.5 rounded-md font-mono border ${badgeColor}`}>
                         {colLeads.length} {colLeads.length === 1 ? 'Lead' : 'Leads'}
                       </span>
                     </div>
                     
-                    <div className="relative z-10">
-                      <h3 className="font-black text-[11px] tracking-wide uppercase leading-none truncate">
+                    <div className="relative z-10 mt-1">
+                      <h3 className={`font-black text-[10px] tracking-wide uppercase leading-tight line-clamp-2 ${isSelected ? 'text-slate-100' : 'text-slate-200'}`}>
                         {col.title}
                       </h3>
-                      <p className={`text-[8px] font-bold mt-1 ${isSelected ? 'text-slate-200 opacity-90' : 'text-slate-500'}`}>
+                      <p className={`text-[9px] font-bold mt-0.5 ${isSelected ? 'text-slate-100 opacity-90' : 'text-slate-400'}`}>
                         {isSelected ? '● Selected' : 'Click to view'}
                       </p>
                     </div>
@@ -532,7 +539,7 @@ export default function LeadBoard({
             <div className="absolute inset-0 bg-gradient-to-r from-accent-purple/5 via-transparent to-accent-emerald/5 pointer-events-none rounded-2xl" />
             
             {/* Grid Columns */}
-            <div className="flex gap-4 overflow-x-auto pb-4 w-full relative z-10" id="kanban-pipeline-columns">
+            <div className="flex gap-4 overflow-x-auto pb-4 w-full relative z-10 xl:justify-between" id="kanban-pipeline-columns">
               {COLUMNS.map(col => {
                 const colLeads = visibleLeads.filter(l => l.stage === col.id);
                 const isDraggedOver = draggedOverColumn === col.id;
@@ -553,15 +560,15 @@ export default function LeadBoard({
                         onUpdateStage(leadId, col.id);
                       }
                     }}
-                    className={`rounded-2xl border p-4 flex flex-col min-h-[580px] w-[270px] lg:w-[285px] shrink-0 h-full text-left shadow-md transition-all duration-200 ${
+                    className={`rounded-2xl border p-3.5 flex flex-col min-h-[580px] w-[240px] sm:w-[260px] lg:w-[280px] xl:w-auto xl:flex-1 shrink-0 h-full text-left shadow-md transition-all duration-200 ${
                       isDraggedOver 
                         ? 'border-accent-purple bg-accent-purple/10 scale-[1.01] shadow-xl ring-2 ring-accent-purple/20' 
                         : 'border-slate-750 bg-slate-900/90'
                     }`}
                   >
                     {/* Column Header */}
-                    <div className="flex items-center justify-between mb-4 border-b border-slate-750 pb-2.5">
-                      <span className={`text-[11px] font-black uppercase tracking-wider px-2.5 py-1 rounded-md ${col.headerColor}`}>
+                    <div className="flex items-center justify-between mb-4 border-b border-slate-750 pb-2.5 min-h-[44px]">
+                      <span className={`text-[9px] sm:text-[9.5px] font-black uppercase tracking-tight px-2 py-1 rounded-md leading-normal break-words inline-block ${col.headerColor}`}>
                         {col.title} ({colLeads.length})
                       </span>
                     </div>

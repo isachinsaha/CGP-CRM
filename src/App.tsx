@@ -21,6 +21,7 @@ import AiProfileMatcher from './components/AiProfileMatcher.tsx';
 import LeadModal from './components/LeadModal.tsx';
 import LoginScreen from './components/LoginScreen.tsx';
 import CoordinatorsManager from './components/CoordinatorsManager.tsx';
+import MetadataManager from './components/MetadataManager.tsx';
 import CGPLogo from './components/CGPLogo.tsx';
 import ImportantUpdatesBar from './components/ImportantUpdatesBar.tsx';
 
@@ -35,6 +36,7 @@ export default function App() {
   // Dynamic coordinators list loaded from server
   const [coordinatorsList, setCoordinatorsList] = useState<Coordinator[]>([]);
   const [isCoordManagerOpen, setIsCoordManagerOpen] = useState(false);
+  const [isMetadataManagerOpen, setIsMetadataManagerOpen] = useState(false);
 
   // Authentication & session state
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string; displayName: string; role: 'admin' | 'agent' } | null>(() => {
@@ -99,6 +101,14 @@ export default function App() {
     const saved = localStorage.getItem('crm_projects');
     return saved ? JSON.parse(saved) : ['Napkin affairs', 'Alltoobi', 'Lulu hypermarket', 'General Intake'];
   });
+  const [tagsList, setTagsList] = useState<string[]>(() => {
+    const saved = localStorage.getItem('crm_tags');
+    return saved ? JSON.parse(saved) : [
+      'Chef', 'Nurse', 'Waiter', 'Waitress', 'Driver', 'Accountant', 
+      'Manager', 'Sales', 'Developer', 'Electrician', 'Plumber', 
+      'Receptionist', 'Housekeeper', 'Security', 'Painter', 'Mechanic', 'Operator'
+    ];
+  });
 
   useEffect(() => {
     localStorage.setItem('crm_countries', JSON.stringify(countries));
@@ -111,6 +121,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('crm_projects', JSON.stringify(projects));
   }, [projects]);
+
+  useEffect(() => {
+    localStorage.setItem('crm_tags', JSON.stringify(tagsList));
+  }, [tagsList]);
 
   // Manual Enrolling Dialog State for Admin power
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -377,14 +391,25 @@ export default function App() {
 
             {/* Admin-only Coordinator Manager Toggle */}
             {userRole === 'admin' && (
-              <button
-                onClick={() => setIsCoordManagerOpen(true)}
-                className="text-xs font-black px-3.5 py-2 bg-accent-purple hover:bg-accent-purple/90 text-white rounded-xl transition-all flex items-center gap-1.5 shadow-md shadow-accent-purple/10 cursor-pointer uppercase tracking-wider"
-                title="Manage Staff & Credentials"
-              >
-                <Users className="h-3.5 w-3.5" />
-                <span>Manage Staff</span>
-              </button>
+              <>
+                <button
+                  onClick={() => setIsCoordManagerOpen(true)}
+                  className="text-xs font-black px-3.5 py-2 bg-accent-purple hover:bg-accent-purple/90 text-white rounded-xl transition-all flex items-center gap-1.5 shadow-md shadow-accent-purple/10 cursor-pointer uppercase tracking-wider"
+                  title="Manage Staff & Credentials"
+                >
+                  <Users className="h-3.5 w-3.5" />
+                  <span>Manage Staff</span>
+                </button>
+
+                <button
+                  onClick={() => setIsMetadataManagerOpen(true)}
+                  className="text-xs font-black px-3.5 py-2 bg-slate-850 hover:bg-slate-800 border border-slate-750 hover:border-slate-600 text-slate-200 rounded-xl transition-all flex items-center gap-1.5 shadow-md cursor-pointer uppercase tracking-wider"
+                  title="Manage Tags, Hiring Projects, Countries & Positions"
+                >
+                  <Layers className="h-3.5 w-3.5 text-accent-purple" />
+                  <span>Manage Options</span>
+                </button>
+              </>
             )}
 
             {/* Theme Toggle Button */}
@@ -976,6 +1001,10 @@ export default function App() {
           currentAgentId={currentAgentId}
           allLeads={leads}
           coordinators={coordinatorsList}
+          projects={projects}
+          countries={countries}
+          positions={positions}
+          tagsList={tagsList}
         />
       )}
 
@@ -985,6 +1014,22 @@ export default function App() {
           userRole={userRole}
           onClose={() => setIsCoordManagerOpen(false)}
           onCoordinatorsChanged={() => pullCrmData(true)}
+        />
+      )}
+
+      {/* CRM Metadata Manager (Tags, Hiring Projects, Countries, Positions) */}
+      {isMetadataManagerOpen && (
+        <MetadataManager
+          userRole={userRole}
+          onClose={() => setIsMetadataManagerOpen(false)}
+          tagsList={tagsList}
+          projects={projects}
+          countries={countries}
+          positions={positions}
+          onUpdateTagsList={setTagsList}
+          onUpdateProjects={setProjects}
+          onUpdateCountries={setCountries}
+          onUpdatePositions={setPositions}
         />
       )}
 

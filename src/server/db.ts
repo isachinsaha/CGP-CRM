@@ -669,6 +669,7 @@ export async function getStats(): Promise<StatSummary> {
   const byStage: Record<LeadStage, number> = {
     new: 0,
     negotiating: 0,
+    rotations: 0,
     proposal: 0,
     won: 0,
     lost: 0

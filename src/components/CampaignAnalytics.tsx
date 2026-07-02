@@ -52,11 +52,100 @@ export default function CampaignAnalytics({
   const [reportTab, setReportTab] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('daily');
   const [customStartDate, setCustomStartDate] = useState<string>('2025-01-01');
   const [customEndDate, setCustomEndDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [selectedCoordFilter, setSelectedCoordFilter] = useState<string>('All');
+
+  // Selected coordinator display name for filtering
+  const selectedCoordinatorName = useMemo(() => {
+    if (userRole === 'agent' && currentAgentId) {
+      const found = coordinators.find(c => c.username?.toLowerCase() === currentAgentId.toLowerCase() || c.displayName?.toLowerCase() === currentAgentId.toLowerCase());
+      return found ? found.displayName : currentAgentId;
+    }
+    return selectedCoordFilter; // 'All' or a specific coordinator's displayName
+  }, [userRole, currentAgentId, selectedCoordFilter, coordinators]);
+
+  // Filter leads based on the selected coordinator filter
+  const { campaignAttributionFiltered, pipelineStagesFiltered, filteredLeadsCount } = useMemo(() => {
+    // Filter leads for the chosen coordinator (or all active leads if 'All' is selected)
+    const filteredLeadsForCharts = selectedCoordinatorName === 'All'
+      ? leads
+      : leads.filter(l => l.assignedTo?.toLowerCase() === selectedCoordinatorName.toLowerCase() || l.assignedTo === selectedCoordinatorName);
+
+    // 1. Compute Pipeline Funnel Stages
+    const pipelineStages: Record<string, number> = {
+      new: 0,
+      negotiating: 0,
+      rotations: 0,
+      proposal: 0,
+      won: 0,
+      lost: 0
+    };
+
+    filteredLeadsForCharts.forEach(l => {
+      if (pipelineStages[l.stage] !== undefined) {
+        pipelineStages[l.stage]++;
+      }
+    });
+
+    // 2. Compute Target Country Attribution
+    const countryMap: Record<string, { count: number; value: number }> = {};
+    filteredLeadsForCharts.forEach(l => {
+      const country = l.country || 'OTHER';
+      const cleanCountryName = country.toUpperCase().trim();
+      if (!cleanCountryName) return;
+      if (!countryMap[cleanCountryName]) {
+        countryMap[cleanCountryName] = { count: 0, value: 0 };
+      }
+      countryMap[cleanCountryName].count++;
+      if (l.stage !== 'lost') {
+        countryMap[cleanCountryName].value += (l.budget || 0);
+      }
+    });
+
+    const campaignAttribution = Object.entries(countryMap).map(([campaign, data]) => ({
+      campaign: `${campaign} Openings`,
+      count: data.count,
+      value: data.value
+    })).sort((a, b) => b.count - a.count);
+
+    return {
+      campaignAttributionFiltered: campaignAttribution,
+      pipelineStagesFiltered: pipelineStages,
+      filteredLeadsCount: filteredLeadsForCharts.length
+    };
+  }, [leads, selectedCoordinatorName]);
 
   // Help calculate percentage safely
   const calculatePercent = (value: number, total: number) => {
     if (total === 0) return 0;
     return Math.round((value / total) * 100);
+  };
+
+  // Helper to calculate the target achievement ratio for a single lead
+  const calculateLeadTargetRatio = (lead: Lead): number => {
+    if (lead.stage === 'new') return 0;
+    if (lead.stage === 'negotiating' || lead.stage === 'rotations') {
+      // Stage: In Discussion / In Rotations. If 3rd remarks is given by telecaller, achievement is 40%, otherwise 15%
+      if (lead.remarks3 && lead.remarks3.trim().length > 0) {
+        return 40;
+      }
+      return 15;
+    }
+    if (lead.stage === 'proposal') {
+      // Stage: Office Visited/Interview Attended, achievement is 65%
+      return 65;
+    }
+    if (lead.stage === 'won') {
+      // Stage: Won, achievement is 100%
+      return 100;
+    }
+    return 0; // Stage: lost or anything else is 0%
+  };
+
+  // Helper to calculate the average target achievement ratio for an array of leads
+  const calculateAverageTargetRatio = (agentLeads: Lead[]): number => {
+    if (agentLeads.length === 0) return 0;
+    const sum = agentLeads.reduce((acc, lead) => acc + calculateLeadTargetRatio(lead), 0);
+    return Math.round(sum / agentLeads.length);
   };
 
   const activeLeads = useMemo(() => {
@@ -120,6 +209,7 @@ export default function CampaignAnalytics({
       const lost = agentLeads.filter(l => l.stage === 'lost').length;
       
       const conversionRate = total > 0 ? Math.round((won / total) * 100) : 0;
+      const targetAchievementRatio = calculateAverageTargetRatio(agentLeads);
 
       return {
         name,
@@ -127,9 +217,10 @@ export default function CampaignAnalytics({
         won,
         progress,
         lost,
-        conversionRate
+        conversionRate,
+        targetAchievementRatio
       };
-    }).sort((a, b) => b.conversionRate - a.conversionRate || b.won - a.won);
+    }).sort((a, b) => b.targetAchievementRatio - a.targetAchievementRatio || b.conversionRate - a.conversionRate || b.won - a.won);
   }, [activeLeads, reportTab, coordinators, customStartDate, customEndDate]);
 
   const totalLeadsCount = activeLeads.length;
@@ -311,6 +402,7 @@ export default function CampaignAnalytics({
       const progress = agentLeads.filter(l => ['negotiating', 'proposal'].includes(l.stage)).length;
       const lost = agentLeads.filter(l => l.stage === 'lost').length;
       const assignedToday = agentLeads.filter(l => isAssignedToday(l.assignDate));
+      const targetAchievementRatio = calculateAverageTargetRatio(agentLeads);
 
       return {
         name,
@@ -319,9 +411,10 @@ export default function CampaignAnalytics({
         progress,
         lost,
         assignedToday,
-        conversionRate: calculatePercent(won, total)
+        conversionRate: calculatePercent(won, total),
+        targetAchievementRatio
       };
-    }).sort((a, b) => b.won - a.won || b.total - a.total); // Sort by won, then total
+    }).sort((a, b) => b.targetAchievementRatio - a.targetAchievementRatio || b.won - a.won || b.total - a.total); // Sort primarily by target achievement ratio
 
     return {
       count: monthlyLeads.length,
@@ -397,6 +490,7 @@ export default function CampaignAnalytics({
       const progress = agentLeads.filter(l => ['negotiating', 'proposal'].includes(l.stage)).length;
       const lost = agentLeads.filter(l => l.stage === 'lost').length;
       const assignedInPeriod = agentLeads.filter(l => isWithinRange(l.assignDate));
+      const targetAchievementRatio = calculateAverageTargetRatio(agentLeads);
 
       return {
         name,
@@ -405,9 +499,10 @@ export default function CampaignAnalytics({
         progress,
         lost,
         assignedInPeriod,
-        conversionRate: calculatePercent(won, total)
+        conversionRate: calculatePercent(won, total),
+        targetAchievementRatio
       };
-    }).sort((a, b) => b.won - a.won || b.total - a.total);
+    }).sort((a, b) => b.targetAchievementRatio - a.targetAchievementRatio || b.won - a.won || b.total - a.total);
 
     return {
       createdCount: customLeadsCreated.length,
@@ -502,6 +597,98 @@ export default function CampaignAnalytics({
     );
   };
 
+  const renderTargetAchievementGraph = () => {
+    return (
+      <div className="mt-4 p-5 bg-slate-950 rounded-2xl border border-slate-850 text-left">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div>
+            <h4 className="text-xs font-black uppercase text-slate-200 tracking-wider flex items-center gap-1.5 font-display">
+              <span className="w-2 h-2 rounded-full bg-accent-emerald animate-pulse" />
+              Coordinators Weighted Target Achievement Ratio Report ({reportTab} view)
+            </h4>
+            <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+              Weighted performance metric based on pipeline stages: Inbound (0%), In Discussion + 3rd Remarks (40%), Office Visited/Interview Attended (60%), Closed Won (100%).
+            </p>
+          </div>
+          <div className="text-[10px] font-bold text-accent-emerald bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-900/30 shrink-0 self-start sm:self-center uppercase font-mono">
+            Target Achievement Goal: 50%+ Weighted
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {coordinatorIntervalStats.map((coord) => {
+            const ratio = coord.targetAchievementRatio || 0;
+            // Color strategy
+            let barColor = 'bg-linear-to-r from-amber-500 to-orange-500';
+            let textColor = 'text-amber-400';
+            let badgeBg = 'bg-amber-950/40 border-amber-900/30';
+            let grade = 'Needs Improvement ⚠️';
+            
+            if (ratio >= 80) {
+              barColor = 'bg-linear-to-r from-emerald-400 to-accent-emerald';
+              textColor = 'text-accent-emerald';
+              badgeBg = 'bg-emerald-950/40 border-emerald-900/30';
+              grade = 'Outstanding 🏆';
+            } else if (ratio >= 50) {
+              barColor = 'bg-linear-to-r from-teal-400 to-teal-500';
+              textColor = 'text-teal-400';
+              badgeBg = 'bg-teal-950/40 border-teal-900/30';
+              grade = 'On Track ✨';
+            } else if (ratio >= 25) {
+              barColor = 'bg-linear-to-r from-purple-400 to-accent-purple';
+              textColor = 'text-accent-purple';
+              badgeBg = 'bg-purple-950/40 border-purple-900/30';
+              grade = 'Nurturing Leads';
+            } else if (coord.total === 0) {
+              barColor = 'bg-slate-800';
+              textColor = 'text-slate-500';
+              badgeBg = 'bg-slate-900 border-slate-800';
+              grade = 'No Leads Handled';
+            }
+
+            return (
+              <div 
+                key={coord.name} 
+                className="p-3.5 bg-slate-900 rounded-xl border border-slate-800 flex flex-col justify-between hover:border-slate-750 transition duration-150"
+              >
+                <div className="flex items-center justify-between mb-1.5 font-sans">
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-5 w-5 bg-slate-950 text-slate-300 rounded-md flex items-center justify-center text-[9px] font-black uppercase border border-slate-850">
+                      {coord.name.charAt(0)}
+                    </span>
+                    <span className="text-xs font-black text-slate-200 uppercase tracking-tight font-display">{coord.name}</span>
+                  </div>
+                  
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] text-slate-400 font-bold font-mono">
+                      {grade}
+                    </span>
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${badgeBg} ${textColor}`}>
+                      {ratio}% Target
+                    </span>
+                  </div>
+                </div>
+
+                {/* Horizontal Bar Visualizer */}
+                <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden relative border border-slate-850">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                    style={{ width: `${coord.total > 0 ? ratio : 0}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between mt-2 text-[9px] font-bold text-slate-450 uppercase font-mono">
+                  <span>Total Leads: {coord.total}</span>
+                  <span>Conversion: {coord.conversionRate}%</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6" id="consultancy-reports-dashboard">
       
@@ -561,9 +748,9 @@ export default function CampaignAnalytics({
         </div>
 
         {reminderLeads.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[300px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 max-h-[300px] overflow-y-auto pr-1">
             {reminderLeads.map((lead) => (
-              <div key={lead.id} className="p-3.5 bg-slate-850 rounded-xl border border-slate-750 flex gap-3 items-start group hover:bg-slate-900/50 transition-all shadow-xs">
+              <div key={lead.id} className="p-2.5 bg-slate-850 rounded-xl border border-slate-750 flex gap-2 items-start group hover:bg-slate-900/50 transition-all shadow-xs">
                 <button
                   type="button"
                   onClick={() => handleToggleReminder(lead.id, lead.reminderEnabled)}
@@ -630,7 +817,7 @@ export default function CampaignAnalytics({
         </div>
 
         {pendingTasks.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[300px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 max-h-[300px] overflow-y-auto pr-1">
             {pendingTasks.map((task) => {
               const taskDate = new Date(task.dueDate);
               const today = new Date();
@@ -653,7 +840,7 @@ export default function CampaignAnalytics({
               }
 
               return (
-                <div key={task.id} className="p-3.5 bg-slate-850 border border-slate-755 flex gap-3 items-start group hover:bg-slate-900/50 transition-all rounded-xl shadow-xs">
+                <div key={task.id} className="p-2.5 bg-slate-850 border border-slate-755 flex gap-2 items-start group hover:bg-slate-900/50 transition-all rounded-xl shadow-xs">
                   <button
                     type="button"
                     onClick={() => handleCompleteTask(task.leadId, task.id)}
@@ -823,7 +1010,10 @@ export default function CampaignAnalytics({
               )}
             </div>
           </div>
-          {renderConversionGraph()}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {renderConversionGraph()}
+            {renderTargetAchievementGraph()}
+          </div>
         </div>
       )}
 
@@ -881,7 +1071,10 @@ export default function CampaignAnalytics({
               </div>
             </div>
           </div>
-          {renderConversionGraph()}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {renderConversionGraph()}
+            {renderTargetAchievementGraph()}
+          </div>
         </div>
       )}
 
@@ -915,6 +1108,7 @@ export default function CampaignAnalytics({
                     <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-center text-rose-400 select-none">Lost / Unqualified</th>
                     <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-center text-accent-emerald select-none">Visa-Cleared (Won)</th>
                     <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-right select-none">Conversion</th>
+                    <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-right text-accent-emerald select-none">Target Achievement</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/40 bg-slate-900">
@@ -963,6 +1157,9 @@ export default function CampaignAnalytics({
                         <td className="px-5 py-3 text-xs text-right font-extrabold text-slate-300 font-mono">
                           {agent.conversionRate}%
                         </td>
+                        <td className="px-5 py-3 text-xs text-right font-black text-accent-emerald font-mono bg-emerald-950/5">
+                          {agent.targetAchievementRatio}%
+                        </td>
                       </tr>
                     );
                   })}
@@ -970,7 +1167,10 @@ export default function CampaignAnalytics({
               </table>
             </div>
           </div>
-          {renderConversionGraph()}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {renderConversionGraph()}
+            {renderTargetAchievementGraph()}
+          </div>
         </div>
       )}
 
@@ -1108,6 +1308,7 @@ export default function CampaignAnalytics({
                     <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-center text-rose-400 select-none">Lost / Unqualified</th>
                     <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-center text-accent-emerald select-none">Visa-Cleared (Won)</th>
                     <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-right select-none">Conversion</th>
+                    <th className="px-5 py-3 text-xs font-bold text-slate-400 uppercase text-right text-accent-emerald select-none">Target Achievement</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/40 bg-slate-900">
@@ -1156,6 +1357,9 @@ export default function CampaignAnalytics({
                         <td className="px-5 py-3 text-xs text-right font-extrabold text-slate-300 font-mono">
                           {agent.conversionRate}%
                         </td>
+                        <td className="px-5 py-3 text-xs text-right font-black text-accent-emerald font-mono bg-emerald-950/5">
+                          {agent.targetAchievementRatio}%
+                        </td>
                       </tr>
                     );
                   })}
@@ -1164,10 +1368,47 @@ export default function CampaignAnalytics({
             </div>
           </div>
 
-          {/* Conversion Graph */}
-          {renderConversionGraph()}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {renderConversionGraph()}
+            {renderTargetAchievementGraph()}
+          </div>
         </div>
       )}
+      </div>
+
+      {/* Visual Attributions & Pipeline breakdown Header & Filter */}
+      <div className="bg-slate-900/60 p-4.5 rounded-2xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md mb-6 select-none">
+        <div>
+          <h3 className="text-xs font-black uppercase text-slate-300 tracking-wider font-display">
+            Attribution & Pipeline Analytics
+          </h3>
+          <p className="text-[10px] text-slate-450 font-bold mt-0.5">
+            {selectedCoordinatorName === 'All' 
+              ? `Aggregate target countries and pipeline stages breakdown for all active leads.`
+              : `Target countries and pipeline stages breakdown for leads handled by ${selectedCoordinatorName}.`
+            }
+          </p>
+        </div>
+
+        {userRole === 'admin' ? (
+          <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl shrink-0">
+            <span className="text-[10px] font-bold text-slate-450 uppercase font-mono">View Coordinator:</span>
+            <select
+              value={selectedCoordFilter}
+              onChange={(e) => setSelectedCoordFilter(e.target.value)}
+              className="bg-transparent text-xs text-slate-200 font-extrabold outline-none border-0 p-0 cursor-pointer focus:ring-0 uppercase font-display"
+            >
+              <option value="All" className="bg-slate-950 text-slate-200">All Coordinators</option>
+              {coordinators.filter(c => c.role === 'agent').map(c => (
+                <option key={c.id} value={c.displayName} className="bg-slate-950 text-slate-200">{c.displayName}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-950/40 text-accent-purple text-[10px] font-black uppercase tracking-wider rounded-xl border border-purple-900/30 font-display">
+            <span>Coordinator: {selectedCoordinatorName}</span>
+          </div>
+        )}
       </div>
 
       {/* Visual Attributions & Pipeline breakdown */}
@@ -1180,9 +1421,9 @@ export default function CampaignAnalytics({
             Active Consultancy Target Country Attribution
           </h3>
           <div className="space-y-4">
-            {stats.byCampaign && stats.byCampaign.length > 0 ? (
-              stats.byCampaign.map((camp, idx) => {
-                const maxCount = Math.max(...stats.byCampaign.map(c => c.count), 1);
+            {campaignAttributionFiltered && campaignAttributionFiltered.length > 0 ? (
+              campaignAttributionFiltered.map((camp, idx) => {
+                const maxCount = Math.max(...campaignAttributionFiltered.map(c => c.count), 1);
                 const percentLength = Math.round((camp.count / maxCount) * 100);
                 return (
                   <div key={idx} className="space-y-1 text-left">
@@ -1225,17 +1466,18 @@ export default function CampaignAnalytics({
             {[
               { label: 'New Lead Inbound', key: 'new', color: 'bg-slate-600 hover:bg-slate-500' },
               { label: 'In Negotiation', key: 'negotiating', color: 'bg-amber-600 hover:bg-amber-500' },
-              { label: 'Office Visited/Interview attendant', key: 'proposal', color: 'bg-purple-650 hover:bg-purple-600' },
+              { label: 'In Rotations', key: 'rotations', color: 'bg-indigo-600 hover:bg-indigo-500' },
+              { label: 'Office Visited/Interview attendant', key: 'proposal', color: 'bg-purple-650 hover:bg-purple-605' },
               { label: 'Closed Converted', key: 'won', color: 'bg-accent-emerald hover:bg-emerald-500' },
               { label: 'Unqualified / Lost', key: 'lost', color: 'bg-slate-700 hover:bg-slate-650' }
             ].map((funnel, idx) => {
-              const count = stats.byStage[funnel.key as any] || 0;
-              const maxVal = Math.max(...Object.values(stats.byStage), 1);
-              const pct = calculatePercent(count, stats.totalLeads);
+              const count = pipelineStagesFiltered[funnel.key as any] || 0;
+              const maxVal = Math.max(...(Object.values(pipelineStagesFiltered) as number[]), 1);
+              const pct = calculatePercent(count, filteredLeadsCount);
               const barWidth = Math.max(10, calculatePercent(count, maxVal));
               return (
                 <div key={idx} className="flex items-center gap-3">
-                  <div className="w-28 text-xs font-semibold text-slate-400 text-right truncate">
+                  <div className="w-28 text-xs font-semibold text-slate-450 text-right truncate">
                     {funnel.label}
                   </div>
                   <div className="flex-1 h-8 bg-slate-950 rounded-lg flex items-center px-1 overflow-hidden border border-slate-850">

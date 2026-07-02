@@ -15,6 +15,10 @@ interface LeadModalProps {
   currentAgentId: string;
   allLeads?: Lead[];
   coordinators?: Coordinator[];
+  projects?: string[];
+  countries?: string[];
+  positions?: string[];
+  tagsList?: string[];
 }
 
 export default function LeadModal({ 
@@ -24,7 +28,11 @@ export default function LeadModal({
   userRole, 
   currentAgentId,
   allLeads = [],
-  coordinators = []
+  coordinators = [],
+  projects: propProjects,
+  countries: propCountries,
+  positions: propPositions,
+  tagsList
 }: LeadModalProps) {
   const [lead, setLead] = useState<Lead>(initialLead);
   const [activeLeftTab, setActiveLeftTab] = useState<'ai' | 'profile'>('ai');
@@ -42,7 +50,7 @@ export default function LeadModal({
   // Collect all unique existing tags dynamically from all current leads + bootstrap defaults
   const allExistingTags = useMemo(() => {
     const tagsSet = new Set<string>();
-    const defaults = [
+    const defaults = tagsList && tagsList.length > 0 ? tagsList : [
       'Chef', 'Nurse', 'Waiter', 'Waitress', 'Driver', 'Accountant', 
       'Manager', 'Sales', 'Developer', 'Electrician', 'Plumber', 
       'Receptionist', 'Housekeeper', 'Security', 'Painter', 'Mechanic', 'Operator'
@@ -73,11 +81,18 @@ export default function LeadModal({
   }, [tagInputVal, allExistingTags, tags]);
 
   const [projects, setProjects] = useState<string[]>(() => {
+    if (propProjects && propProjects.length > 0) return propProjects;
     const saved = localStorage.getItem('crm_projects');
     return saved ? JSON.parse(saved) : ['Napkin affairs', 'Alltoobi', 'Lulu hypermarket', 'General Intake'];
   });
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+
+  useEffect(() => {
+    if (propProjects && propProjects.length > 0) {
+      setProjects(propProjects);
+    }
+  }, [propProjects]);
 
   useEffect(() => {
     localStorage.setItem('crm_projects', JSON.stringify(projects));
@@ -87,6 +102,7 @@ export default function LeadModal({
   const [formFields, setFormFields] = useState({
     name: initialLead.name,
     phone: initialLead.phone,
+    alternateNo: initialLead.alternateNo || '',
     email: initialLead.email || '',
     campaign: initialLead.campaign || '',
     budget: initialLead.budget,
@@ -131,6 +147,7 @@ export default function LeadModal({
     setFormFields({
       name: initialLead.name,
       phone: initialLead.phone,
+      alternateNo: initialLead.alternateNo || '',
       email: initialLead.email || '',
       campaign: initialLead.campaign || '',
       budget: initialLead.budget,
@@ -465,7 +482,8 @@ export default function LeadModal({
               >
                 <option value="new">New Inbound</option>
                 <option value="negotiating">In Discussion</option>
-                <option value="proposal">Office Visited/Interview attendant</option>
+                <option value="rotations">In Rotations</option>
+                <option value="proposal">Office Visited/Interview Attended</option>
                 <option value="won">Closed Won</option>
                 <option value="lost">Closed Lost</option>
               </select>
@@ -838,7 +856,7 @@ export default function LeadModal({
 
                   {/* 2. DEMOGRAPHICS */}
                   <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider border-b border-slate-750 pb-1 pt-2">2. Candidate Information</h4>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Candidate Name</label>
                       <input
@@ -860,6 +878,16 @@ export default function LeadModal({
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-mono font-bold"
                       />
                     </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Alternative No (Optional)</label>
+                      <input
+                        type="text"
+                        name="alternateNo"
+                        value={formFields.alternateNo}
+                        onChange={handleFieldChange}
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-mono"
+                      />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-3 gap-3">
@@ -875,6 +903,7 @@ export default function LeadModal({
                         <option value="FEMALE">Female (FEMALE)</option>
                         <option value="M">Male (M)</option>
                         <option value="F">Female (F)</option>
+                        <option value="Not defined">Not defined</option>
                       </select>
                     </div>
                     <div>
@@ -905,14 +934,17 @@ export default function LeadModal({
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Target Country</label>
-                      <input
-                        type="text"
+                      <select
                         name="country"
-                        placeholder="e.g. QATAR"
                         value={formFields.country}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 text-slate-100 font-bold uppercase"
-                      />
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 text-slate-100 font-bold uppercase cursor-pointer"
+                      >
+                        <option value="">-- Select Country --</option>
+                        {(propCountries && propCountries.length > 0 ? propCountries : ['Kuwait', 'Dubai', 'Qatar', 'Germany', 'Japan', 'Albania']).map((c, idx) => (
+                          <option key={idx} value={c}>{c}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Coordinator</label>
@@ -952,14 +984,17 @@ export default function LeadModal({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Target Position / Line</label>
-                      <input
-                        type="text"
+                      <select
                         name="position"
-                        placeholder="e.g. WAITSTAND / Nurse"
                         value={formFields.position}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-medium uppercase"
-                      />
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-medium uppercase cursor-pointer"
+                      >
+                        <option value="">-- Select Position --</option>
+                        {(propPositions && propPositions.length > 0 ? propPositions : ['Waiter', 'Waitress', 'Chef', 'Nurse', 'Cleaner', 'Driver', 'Electrician']).map((p, idx) => (
+                          <option key={idx} value={p}>{p}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Experience Criteria</label>
@@ -1248,42 +1283,45 @@ export default function LeadModal({
           <div className="w-1/2 flex flex-col h-full bg-slate-900/10 relative justify-between border-l border-slate-750">
             
             {/* Main Lead Remarks Box */}
-            <div className="p-4 bg-slate-950/30 border-b border-slate-750 space-y-3 shrink-0 text-left">
-              <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5 font-display">
-                <MessageSquare className="h-4.5 w-4.5 text-accent-purple" /> Live Telecaller Remarks
+            <div className="p-4 bg-slate-950/40 border-b border-slate-750 space-y-3.5 shrink-0 text-left shadow-inner">
+              <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2 font-display">
+                <MessageSquare className="h-4 w-4 text-accent-purple" /> Live Telecaller Remarks
               </h4>
-              <div className="grid grid-cols-1 gap-2.5">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">📞 Call Remarks Column 1 (First Contact Outcome)</label>
+              <div className="grid grid-cols-1 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-[9.5px] font-black text-slate-400 uppercase tracking-wide">📞 Remarks 1 — First Contact Outcome</label>
                   <input
                     type="text"
                     name="remarks1"
                     placeholder="Write first phone call comments..."
                     value={formFields.remarks1}
                     onChange={handleFieldChange}
-                    className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono font-medium text-slate-200"
+                    className="w-full text-xs px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-750 focus:ring-1 focus:ring-accent-purple focus:border-accent-purple focus:outline-none font-mono font-medium text-slate-200 transition-all"
                   />
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">📞 Call Remarks Column 2 (Follow up Outcome)</label>
+                <div className="space-y-1">
+                  <label className="block text-[9.5px] font-black text-slate-400 uppercase tracking-wide">📞 Remarks 2 — Follow-up Outcome</label>
                   <input
                     type="text"
                     name="remarks2"
                     placeholder="Write follow up phone comments..."
                     value={formFields.remarks2}
                     onChange={handleFieldChange}
-                    className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono font-medium text-slate-200"
+                    className="w-full text-xs px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-750 focus:ring-1 focus:ring-accent-purple focus:border-accent-purple focus:outline-none font-mono font-medium text-slate-200 transition-all"
                   />
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">📞 Call Remarks Column 3 (Final Resolution Outcome)</label>
+                <div className="space-y-1">
+                  <label className="block text-[9.5px] font-black text-amber-400 uppercase tracking-wide flex items-center gap-1">
+                    <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                    <span>📞 Remarks 3 — Final Resolution Outcome</span>
+                  </label>
                   <input
                     type="text"
                     name="remarks3"
                     placeholder="Write final decision comments..."
                     value={formFields.remarks3}
                     onChange={handleFieldChange}
-                    className="w-full text-xs px-3 py-1.5 rounded-lg bg-white border border-slate-200 focus:ring-1 focus:ring-slate-900 focus:outline-none font-mono font-medium text-slate-800 font-extrabold"
+                    className="w-full text-xs px-3.5 py-2 rounded-xl bg-slate-900 border-2 border-amber-500/50 text-amber-300 placeholder-amber-600/40 focus:ring-1 focus:ring-amber-500 focus:border-amber-500 focus:outline-none font-mono font-black transition-all shadow-md shadow-amber-950/20"
                   />
                 </div>
               </div>

@@ -528,6 +528,7 @@ export default function LeadList({
     switch (stage) {
       case 'new': return 'bg-slate-800 text-slate-300 border border-slate-700';
       case 'negotiating': return 'bg-amber-950/40 text-amber-400 border border-amber-900/30';
+      case 'rotations': return 'bg-indigo-950/40 text-indigo-400 border border-indigo-900/30';
       case 'proposal': return 'bg-purple-950/40 text-purple-400 border border-purple-900/30';
       case 'won': return 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/30 font-bold';
       case 'lost': return 'bg-slate-800 text-slate-400 border border-slate-700';
@@ -1069,7 +1070,7 @@ export default function LeadList({
                 </th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider w-20 text-center whitespace-nowrap">Serial No</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[170px]">Applicant Candidate</th>
-                <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">Pipeline Stage</th>
+                <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[110px]">Pipeline Stage</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">Country</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[150px]">Position Opening</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[210px]">Docs Received Status</th>
@@ -1168,15 +1169,16 @@ export default function LeadList({
                       </td>
 
                       {/* 10. Pipeline Stage select box */}
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                         <select
                           value={lead.stage}
                           onChange={(e) => onUpdateStage(lead.id, e.target.value as LeadStage)}
-                          className={`text-[10px] font-bold rounded px-2.5 py-1 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer ${getStageHeader(lead.stage)}`}
+                          className={`text-[9px] font-bold rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer w-[102px] truncate ${getStageHeader(lead.stage)}`}
                         >
                           <option value="new">New Inbound</option>
                           <option value="negotiating">In Discussion</option>
-                          <option value="proposal">Office Visited/Interview attendant</option>
+                          <option value="rotations">In Rotations</option>
+                          <option value="proposal">Office Visited/Interview Attended</option>
                           <option value="won">Closed Won</option>
                           <option value="lost">Closed Lost</option>
                         </select>

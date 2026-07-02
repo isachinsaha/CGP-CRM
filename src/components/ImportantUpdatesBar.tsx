@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, RefreshCw, Volume2 } from 'lucide-react';
+import { AlertCircle, RefreshCw, Volume2, Copy, Check } from 'lucide-react';
 import { ImportantUpdate } from '../types';
 
 interface ImportantUpdatesBarProps {
@@ -10,6 +10,13 @@ interface ImportantUpdatesBarProps {
 export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpdatesBarProps) {
   const [updates, setUpdates] = useState<ImportantUpdate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   const fetchUpdates = async (retries = 1) => {
     try {
@@ -83,17 +90,14 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
     return null; // Don't show if empty
   }
 
-  // Create duplicate content for continuous seamless scrolling
-  const marqueeText = updates.map(u => u.text).join('   |   ★   |   ');
-
   return (
     <div 
       id="important-updates-bar" 
-      className="bg-emerald-500/5 border border-emerald-500/15 rounded-2xl overflow-hidden flex items-center h-12 shadow-sm shadow-emerald-500/5 select-none relative"
+      className="bg-emerald-500/5 border border-emerald-500/15 rounded-2xl overflow-hidden flex items-center h-12 shadow-sm shadow-emerald-500/5 select-text relative"
     >
       {/* Left fixed banner label */}
       <div 
-        className="bg-emerald-600 px-4.5 h-full flex items-center gap-2 font-black text-[11px] tracking-wider uppercase shrink-0 z-10 shadow-md"
+        className="bg-emerald-600 px-4.5 h-full flex items-center gap-2 font-black text-[11px] tracking-wider uppercase shrink-0 z-10 shadow-md select-none"
         style={{ color: 'var(--color-update-bar-text)' }}
       >
         <span className="relative flex h-2 w-2">
@@ -112,26 +116,68 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
 
       {/* Marquee Container */}
       <div className="flex-1 overflow-hidden relative h-full flex items-center">
-        <div className="animate-marquee flex items-center gap-12 text-xs font-black text-emerald-500 tracking-wide">
+        <div className="animate-marquee flex items-center gap-12 text-xs font-black text-emerald-500 tracking-wide hover:[animation-play-state:paused]">
           {/* Main updates content */}
           <div className="flex items-center gap-12 whitespace-nowrap">
-            {updates.map((update, idx) => (
-              <span key={`orig-${update.id || idx}`} className="flex items-center gap-4">
-                <span className="text-emerald-600/60 font-mono text-[10px]">({new Date(update.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})})</span>
-                <span>{update.text}</span>
-                <span className="text-emerald-700/50 text-base font-bold">★</span>
-              </span>
-            ))}
+            {updates.map((update, idx) => {
+              const isCopied = copiedId === `orig-${update.id || idx}`;
+              return (
+                <span key={`orig-${update.id || idx}`} className="flex items-center gap-4 select-text group/update">
+                  <span className="text-emerald-600/60 font-mono text-[10px]">({new Date(update.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})})</span>
+                  <span>{update.text}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(update.text, `orig-${update.id || idx}`)}
+                    className="p-1 px-2 rounded bg-emerald-950/50 hover:bg-emerald-800/40 text-emerald-400 hover:text-white transition-all cursor-pointer flex items-center justify-center gap-1 border border-emerald-900/30 text-[9px] font-black uppercase tracking-wider select-none"
+                    title="Copy update text/link"
+                  >
+                    {isCopied ? (
+                      <>
+                        <Check className="h-3 w-3 text-emerald-400 stroke-[3px]" />
+                        <span className="text-[8px] font-mono text-emerald-400">Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3 w-3 text-emerald-500 group-hover/update:scale-110" />
+                        <span className="text-[8px] font-mono text-emerald-500 group-hover/update:text-emerald-350">Copy</span>
+                      </>
+                    )}
+                  </button>
+                  <span className="text-emerald-700/50 text-base font-bold">★</span>
+                </span>
+              );
+            })}
           </div>
           {/* Duplicate content to create the continuous loop */}
           <div className="flex items-center gap-12 whitespace-nowrap" aria-hidden="true">
-            {updates.map((update, idx) => (
-              <span key={`dup-${update.id || idx}`} className="flex items-center gap-4">
-                <span className="text-emerald-600/60 font-mono text-[10px]">({new Date(update.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})})</span>
-                <span>{update.text}</span>
-                <span className="text-emerald-700/50 text-base font-bold">★</span>
-              </span>
-            ))}
+            {updates.map((update, idx) => {
+              const isCopied = copiedId === `dup-${update.id || idx}`;
+              return (
+                <span key={`dup-${update.id || idx}`} className="flex items-center gap-4 select-text group/update-dup">
+                  <span className="text-emerald-600/60 font-mono text-[10px]">({new Date(update.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})})</span>
+                  <span>{update.text}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(update.text, `dup-${update.id || idx}`)}
+                    className="p-1 px-2 rounded bg-emerald-950/50 hover:bg-emerald-800/40 text-emerald-400 hover:text-white transition-all cursor-pointer flex items-center justify-center gap-1 border border-emerald-900/30 text-[9px] font-black uppercase tracking-wider select-none"
+                    title="Copy update text/link"
+                  >
+                    {isCopied ? (
+                      <>
+                        <Check className="h-3 w-3 text-emerald-400 stroke-[3px]" />
+                        <span className="text-[8px] font-mono text-emerald-400">Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3 w-3 text-emerald-500 group-hover/update-dup:scale-110" />
+                        <span className="text-[8px] font-mono text-emerald-500 group-hover/update-dup:text-emerald-350">Copy</span>
+                      </>
+                    )}
+                  </button>
+                  <span className="text-emerald-700/50 text-base font-bold">★</span>
+                </span>
+              );
+            })}
           </div>
         </div>
       </div>
