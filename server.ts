@@ -68,6 +68,18 @@ function generateUniqueLeadId(leads: Lead[], cleanNameId: string): string {
   return `${baseId}_${counter}`;
 }
 
+// Helper to format candidate names with spaces between CamelCase or snake_case words
+function formatCandidateNameBackend(name: string): string {
+  if (!name) return 'Unnamed Candidate';
+  // 1. If camelCase (e.g. ImNameren), add a space (Im Nameren)
+  let formatted = String(name).replace(/([a-z])([A-Z])/g, '$1 $2');
+  // 2. Replace multiple spaces/underscores/dashes with a single space
+  formatted = formatted.replace(/[_-]+/g, ' ');
+  // 3. Strip duplicate spaces
+  formatted = formatted.replace(/\s+/g, ' ');
+  return formatted.trim();
+}
+
 // ---------------- SERVER API ROUTES ----------------
 
 // Health check and environment info
@@ -80,11 +92,198 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// GET all leads
+// GET all leads with server-side pagination, searching, and filtering
 app.get('/api/leads', async (req, res) => {
   try {
-    const leads = await getLeads();
-    res.json(leads);
+    const rawLeads = await getLeads();
+
+    // 1. Compute dynamic metadata from all unfiltered leads
+    const countriesSet = new Set<string>();
+    const projectsSet = new Set<string>();
+    const tagsSet = new Set<string>();
+
+    rawLeads.forEach(l => {
+      if (l.country) countriesSet.add(l.country);
+      if (l.project) projectsSet.add(l.project);
+      if (l.tags && Array.isArray(l.tags)) {
+        l.tags.forEach(t => {
+          if (t && t.trim()) tagsSet.add(t.trim());
+        });
+      }
+    });
+
+    const meta = {
+      countries: Array.from(countriesSet).sort(),
+      projects: Array.from(projectsSet).sort(),
+      tags: Array.from(tagsSet).sort()
+    };
+
+    // 2. Parse query parameters
+    const {
+      page = '1',
+      limit = '100',
+      search = '',
+      country = 'All',
+      project = 'All',
+      fitScore = 'All',
+      tag = 'All',
+      dateFilter = 'All',
+      customStartDate = '',
+      customEndDate = '',
+      coordinator = 'All',
+      stage = 'All',
+      bucket = 'all',
+      agentId = '',
+      userRole = '',
+      all = 'false'
+    } = req.query as Record<string, string>;
+
+    const pageNum = parseInt(page, 10) || 1;
+    const limitNum = parseInt(limit, 10) || 100;
+
+    // 3. Apply multi-layer filters
+    let filteredLeads = rawLeads.filter(lead => {
+      // A. Bucket / Agent filter
+      if (userRole === 'agent' || bucket === 'my') {
+        const agentUsername = String(agentId || '').trim().toLowerCase();
+        if (agentUsername) {
+          const assignedUsername = String(lead.assignedTo || '').trim().toLowerCase();
+          if (assignedUsername !== agentUsername) {
+            return false;
+          }
+        }
+      }
+
+      // B. Search keyword match
+      if (search) {
+        const query = search.toLowerCase().trim();
+        const matchesSearch = 
+          (lead.name && lead.name.toLowerCase().includes(query)) ||
+          (lead.phone && lead.phone.includes(query)) ||
+          (lead.email && lead.email.toLowerCase().includes(query)) ||
+          (lead.country && lead.country.toLowerCase().includes(query)) ||
+          (lead.position && lead.position.toLowerCase().includes(query)) ||
+          (lead.origin && lead.origin.toLowerCase().includes(query)) ||
+          (lead.remarks1 && lead.remarks1.toLowerCase().includes(query)) ||
+          (lead.remarks2 && lead.remarks2.toLowerCase().includes(query)) ||
+          (lead.remarks3 && lead.remarks3.toLowerCase().includes(query)) ||
+          (lead.tags && lead.tags.some(t => t.toLowerCase().includes(query))) ||
+          (lead.source && lead.source.toLowerCase().includes(query)) ||
+          (lead.project && lead.project.toLowerCase().includes(query));
+        if (!matchesSearch) return false;
+      }
+
+      // C. Country Interest filter
+      if (country && country !== 'All') {
+        if (lead.country !== country) return false;
+      }
+
+      // D. Project filter
+      if (project && project !== 'All') {
+        if (lead.project !== project) return false;
+      }
+
+      // E. Fit score filter
+      if (fitScore && fitScore !== 'All') {
+        if (lead.fitScore !== fitScore) return false;
+      }
+
+      // F. Tag filter
+      if (tag && tag !== 'All') {
+        if (!lead.tags || !lead.tags.includes(tag)) return false;
+      }
+
+      // G. Coordinator / Telecaller filter
+      if (coordinator && coordinator !== 'All') {
+        if (coordinator === 'Unassigned') {
+          if (lead.assignedTo) return false;
+        } else {
+          const leadCoord = String(lead.assignedTo || '').trim().toLowerCase();
+          const filterCoord = String(coordinator).trim().toLowerCase();
+          if (leadCoord !== filterCoord) return false;
+        }
+      }
+
+      // H. Pipeline Stage filter
+      if (stage && stage !== 'All') {
+        if (lead.stage !== stage) return false;
+      }
+
+      // I. Date wise filter
+      if (dateFilter && dateFilter !== 'All') {
+        const leadTime = new Date(lead.createdAt).getTime();
+        if (isNaN(leadTime)) return true; // fallback to include
+
+        const startOfDay = (d: Date) => {
+          const r = new Date(d);
+          r.setHours(0, 0, 0, 0);
+          return r.getTime();
+        };
+        const endOfDay = (d: Date) => {
+          const r = new Date(d);
+          r.setHours(23, 59, 59, 999);
+          return r.getTime();
+        };
+
+        const today = new Date();
+        if (dateFilter === 'Today') {
+          const start = startOfDay(today);
+          const end = endOfDay(today);
+          if (leadTime < start || leadTime > end) return false;
+        } else if (dateFilter === 'Yesterday') {
+          const yesterday = new Date();
+          yesterday.setDate(today.getDate() - 1);
+          const start = startOfDay(yesterday);
+          const end = endOfDay(yesterday);
+          if (leadTime < start || leadTime > end) return false;
+        } else if (dateFilter === 'Last7Days') {
+          const sevenDaysAgo = new Date();
+          sevenDaysAgo.setDate(today.getDate() - 7);
+          const start = startOfDay(sevenDaysAgo);
+          const end = endOfDay(today);
+          if (leadTime < start || leadTime > end) return false;
+        } else if (dateFilter === 'Last30Days') {
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(today.getDate() - 30);
+          const start = startOfDay(thirtyDaysAgo);
+          const end = endOfDay(today);
+          if (leadTime < start || leadTime > end) return false;
+        } else if (dateFilter === 'Custom') {
+          const start = customStartDate ? startOfDay(new Date(customStartDate)) : 0;
+          const end = customEndDate ? endOfDay(new Date(customEndDate)) : Infinity;
+          if (leadTime < start || leadTime > end) return false;
+        }
+      }
+
+      return true;
+    });
+
+    // 4. Return complete or paginated payload
+    if (all === 'true') {
+      res.json({
+        leads: filteredLeads,
+        totalCount: filteredLeads.length,
+        totalPages: 1,
+        page: 1,
+        limit: filteredLeads.length,
+        meta
+      });
+      return;
+    }
+
+    const totalCount = filteredLeads.length;
+    const totalPages = Math.ceil(totalCount / limitNum) || 1;
+    const startIndex = (pageNum - 1) * limitNum;
+    const paginatedLeads = filteredLeads.slice(startIndex, startIndex + limitNum);
+
+    res.json({
+      leads: paginatedLeads,
+      totalCount,
+      totalPages,
+      page: pageNum,
+      limit: limitNum,
+      meta
+    });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -111,7 +310,8 @@ app.post('/api/leads', async (req, res) => {
     const sequence = leads.length + 1;
     const serialNo = `INQ-${1000 + sequence}`;
 
-    const finalName = name && name.trim() ? name.trim() : 'Unnamed Candidate';
+    const rawName = name && name.trim() ? name.trim() : 'Unnamed Candidate';
+    const finalName = formatCandidateNameBackend(rawName);
     const cleanNameId = String(finalName).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
     const newLead = {
       id: generateUniqueLeadId(leads, cleanNameId),
@@ -206,10 +406,11 @@ app.post('/api/leads/bulk', async (req, res) => {
       }
 
       const cleanPhone = String(phone).trim();
+      const formattedName = formatCandidateNameBackend(name);
       const duplicateExists = currentLeads.some((l: any) => String(l.phone).trim() === cleanPhone) || 
                               newLeadsToAdd.some((l: any) => String(l.phone).trim() === cleanPhone);
       if (duplicateExists) {
-        skipped.push(`${name} (${phone}): Already exists in database.`);
+        skipped.push(`${formattedName} (${phone}): Already exists in database.`);
         return;
       }
 
@@ -222,7 +423,7 @@ app.post('/api/leads/bulk', async (req, res) => {
           ? tags.split(',').map((t: string) => t.trim()).filter(Boolean) 
           : [];
 
-      const cleanNameId = String(name).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
+      const cleanNameId = String(formattedName).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
       const d = new Date();
       const day = String(d.getDate()).padStart(2, '0');
       const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -233,7 +434,7 @@ app.post('/api/leads/bulk', async (req, res) => {
         serialNo,
         entryDate: new Date().toISOString().split('T')[0],
         assignDate: assignedTo ? new Date().toISOString().split('T')[0] : '',
-        name: String(name).trim(),
+        name: formattedName,
         phone: cleanPhone,
         email: '',
         gender: gender || 'M',

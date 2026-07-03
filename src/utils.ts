@@ -258,3 +258,18 @@ export const getCountryFlagUrl = (countryName: string): string => {
   }
   return '';
 };
+
+/**
+ * Ensures a candidate name is beautifully formatted with spaces between CamelCase, snake_case or squished patterns.
+ */
+export const formatCandidateName = (name: string): string => {
+  if (!name) return '';
+  // Convert camelCase like "ImNameren" -> "Im Nameren"
+  let formatted = name.replace(/([a-z])([A-Z])/g, '$1 $2');
+  // Convert snake_case or dashes like "IM_NAMEREN" or "IM-NAMEREN" -> "IM NAMEREN"
+  formatted = formatted.replace(/[_-]+/g, ' ');
+  // Strip excessive spaces
+  formatted = formatted.replace(/\s+/g, ' ');
+  return formatted.trim();
+};
+

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
 import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Bell, Download, Sparkles, TrendingUp, X, UploadCloud } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { getCountryFlagUrl } from '../utils';
+import { getCountryFlagUrl, formatCandidateName } from '../utils';
 
 interface LeadListProps {
   leads: Lead[];
@@ -13,6 +13,16 @@ interface LeadListProps {
   currentAgentId: string;
   onRefreshData?: () => void;
   coordinators?: Coordinator[];
+
+  // Server-side pagination & filter overrides
+  totalLeadsCount?: number;
+  totalPagesCount?: number;
+  currentPageOverride?: number;
+  onPageChange?: (page: number) => void;
+  onFiltersChange?: (newFilters: any) => void;
+  metaCountries?: string[];
+  metaProjects?: string[];
+  metaTags?: string[];
 }
 
 const COORDINATORS = [
@@ -28,7 +38,15 @@ export default function LeadList({
   userRole, 
   currentAgentId,
   onRefreshData,
-  coordinators = []
+  coordinators = [],
+  totalLeadsCount = 0,
+  totalPagesCount = 1,
+  currentPageOverride,
+  onPageChange,
+  onFiltersChange,
+  metaCountries = [],
+  metaProjects = [],
+  metaTags = []
 }: LeadListProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [countryFilter, setCountryFilter] = useState('All');
@@ -42,13 +60,8 @@ export default function LeadList({
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const itemsPerPage = 100; // Load 50-100 items at a time as requested!
 
-  // Reset pagination to first page when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, countryFilter, projectFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter]);
-  
   // Spreadsheet Quick Grid Inline Edit Mode Switch
   const [isInlineEdit, setIsInlineEdit] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -79,6 +92,43 @@ export default function LeadList({
     error?: string;
   } | null>(null);
 
+  // Sync currentPage from override if present
+  useEffect(() => {
+    if (currentPageOverride !== undefined) {
+      setCurrentPage(currentPageOverride);
+    }
+  }, [currentPageOverride]);
+
+  // Reset pagination to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, countryFilter, projectFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter]);
+
+  // Synchronize filter updates back to parent if server-side filtering is enabled
+  useEffect(() => {
+    if (onFiltersChange) {
+      onFiltersChange({
+        search: searchQuery,
+        country: countryFilter,
+        coordinator: coordinatorFilter,
+        fitScore: fitScoreFilter,
+        tag: tagFilter,
+        project: projectFilter,
+        dateFilter: dateFilter,
+        customStartDate,
+        customEndDate,
+        bucket: bucketToggle
+      });
+    }
+  }, [searchQuery, countryFilter, coordinatorFilter, fitScoreFilter, tagFilter, projectFilter, dateFilter, customStartDate, customEndDate, bucketToggle]);
+
+  // Synchronize page index back to parent
+  useEffect(() => {
+    if (onPageChange) {
+      onPageChange(currentPage);
+    }
+  }, [currentPage]);
+
   const mapImportedRow = (row: any) => {
     // Helper to extract values leniently
     const getValue = (keys: string[]) => {
@@ -91,7 +141,14 @@ export default function LeadList({
       return undefined;
     };
 
-    const name = getValue(['applicantname', 'name', 'candidate', 'candidatename']);
+    let name = getValue(['applicantname', 'name', 'candidate', 'candidatename']);
+    if (!name) {
+      const firstName = getValue(['firstname', 'first_name', 'first', 'givenname']);
+      const lastName = getValue(['lastname', 'last_name', 'last', 'surname']);
+      if (firstName || lastName) {
+        name = `${firstName || ''} ${lastName || ''}`.trim();
+      }
+    }
     const phone = getValue(['phone', 'whatsappmobileno', 'mobileno', 'whatsapp', 'candidatemobileno']);
     const gender = getValue(['gender', 'sex']) || 'M';
     const age = Number(getValue(['age', 'years'])) || 24;
