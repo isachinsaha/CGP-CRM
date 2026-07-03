@@ -47,6 +47,26 @@ export default function App() {
   const userRole = currentUser?.role || 'agent';
   const currentAgentId = currentUser?.username || 'unassigned';
 
+  // Server-side pagination & filter states
+  const [totalLeadsCount, setTotalLeadsCount] = useState(0);
+  const [totalPagesCount, setTotalPagesCount] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [metaCountries, setMetaCountries] = useState<string[]>([]);
+  const [metaProjects, setMetaProjects] = useState<string[]>([]);
+  const [metaTags, setMetaTags] = useState<string[]>([]);
+  const [filters, setFilters] = useState<any>({
+    search: '',
+    country: 'All',
+    coordinator: 'All',
+    fitScore: 'All',
+    tag: 'All',
+    project: 'All',
+    dateFilter: 'All',
+    customStartDate: '',
+    customEndDate: '',
+    bucket: 'all'
+  });
+
   // Environment metadata
   const [apiMode, setApiMode] = useState<'live' | 'simulation'>('simulation');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -126,6 +146,49 @@ export default function App() {
     localStorage.setItem('crm_tags', JSON.stringify(tagsList));
   }, [tagsList]);
 
+  const updateMetadataOnServer = async (updated: { countries?: string[]; positions?: string[]; projects?: string[]; tagsList?: string[] }) => {
+    if (userRole !== 'admin') return;
+    const body = {
+      countries: updated.countries || countries,
+      positions: updated.positions || positions,
+      projects: updated.projects || projects,
+      tagsList: updated.tagsList || tagsList
+    };
+    try {
+      await fetch('/api/metadata', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId
+        },
+        body: JSON.stringify(body)
+      });
+    } catch (err) {
+      console.error('Error syncing CRM metadata to server:', err);
+    }
+  };
+
+  const handleUpdateCountries = (newCountries: string[]) => {
+    setCountries(newCountries);
+    updateMetadataOnServer({ countries: newCountries });
+  };
+
+  const handleUpdatePositions = (newPositions: string[]) => {
+    setPositions(newPositions);
+    updateMetadataOnServer({ positions: newPositions });
+  };
+
+  const handleUpdateProjects = (newProjects: string[]) => {
+    setProjects(newProjects);
+    updateMetadataOnServer({ projects: newProjects });
+  };
+
+  const handleUpdateTagsList = (newTags: string[]) => {
+    setTagsList(newTags);
+    updateMetadataOnServer({ tagsList: newTags });
+  };
+
   // Manual Enrolling Dialog State for Admin power
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [createFields, setCreateFields] = useState({
@@ -163,15 +226,47 @@ export default function App() {
   const pullCrmData = async (silent = false) => {
     if (!silent) setIsRefreshing(true);
     try {
-      // 1. Fetch active job leads list
-      const leadsRes = await fetch('/api/leads');
+      // 1. Fetch active job leads list with server-side queries & pagination parameters
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        limit: '100', // Load 100 items at a time as requested!
+        search: filters.search || '',
+        country: filters.country || 'All',
+        coordinator: filters.coordinator || 'All',
+        fitScore: filters.fitScore || 'All',
+        tag: filters.tag || 'All',
+        project: filters.project || 'All',
+        dateFilter: filters.dateFilter || 'All',
+        customStartDate: filters.customStartDate || '',
+        customEndDate: filters.customEndDate || '',
+        bucket: userRole === 'agent' ? 'my' : (filters.bucket || 'all'),
+        agentId: currentAgentId,
+        userRole: userRole,
+        all: activeTab !== 'list' ? 'true' : 'false'
+      });
+
+      const leadsRes = await fetch(`/api/leads?${params.toString()}`);
       if (leadsRes.ok) {
         const leadsData = await leadsRes.json();
-        setLeads(leadsData);
+        const leadsArray = Array.isArray(leadsData) ? leadsData : (leadsData.leads || []);
+        setLeads(leadsArray);
+        
+        if (!Array.isArray(leadsData)) {
+          setTotalLeadsCount(leadsData.totalCount || 0);
+          setTotalPagesCount(leadsData.totalPages || 1);
+          if (leadsData.meta) {
+            if (leadsData.meta.countries) setMetaCountries(leadsData.meta.countries);
+            if (leadsData.meta.projects) setMetaProjects(leadsData.meta.projects);
+            if (leadsData.meta.tags) setMetaTags(leadsData.meta.tags);
+          }
+        } else {
+          setTotalLeadsCount(leadsData.length);
+          setTotalPagesCount(1);
+        }
         
         // Match active modal with fresh server changes
         if (selectedLead) {
-          const updated = leadsData.find((l: Lead) => l.id === selectedLead.id);
+          const updated = leadsArray.find((l: Lead) => l.id === selectedLead.id);
           if (updated) setSelectedLead(updated);
         }
       }
@@ -196,6 +291,16 @@ export default function App() {
         const healthData = await healthRes.json();
         setApiMode(healthData.aiMode);
       }
+
+      // 4. Fetch dynamic CRM metadata options from server
+      const metaRes = await fetch('/api/metadata');
+      if (metaRes.ok) {
+        const metaData = await metaRes.json();
+        if (metaData.countries) setCountries(metaData.countries);
+        if (metaData.positions) setPositions(metaData.positions);
+        if (metaData.projects) setProjects(metaData.projects);
+        if (metaData.tagsList) setTagsList(metaData.tagsList);
+      }
     } catch (err) {
       console.error('Failed to sync placement entries from Express REST routes:', err);
     } finally {
@@ -206,7 +311,7 @@ export default function App() {
 
   useEffect(() => {
     pullCrmData();
-  }, []);
+  }, [currentPage, filters, activeTab]);
 
   // Update lead stage pipeline state
   const handleUpdateStage = async (id: string, stage: LeadStage) => {
@@ -544,6 +649,14 @@ export default function App() {
                 currentAgentId={currentAgentId}
                 onRefreshData={() => pullCrmData(true)}
                 coordinators={coordinatorsList}
+                totalLeadsCount={totalLeadsCount}
+                totalPagesCount={totalPagesCount}
+                currentPageOverride={currentPage}
+                onPageChange={setCurrentPage}
+                onFiltersChange={setFilters}
+                metaCountries={metaCountries}
+                metaProjects={metaProjects}
+                metaTags={metaTags}
               />
             )}
 
@@ -698,7 +811,7 @@ export default function App() {
                           if (newCountryName.trim()) {
                             const trimmed = newCountryName.trim();
                             if (!countries.includes(trimmed)) {
-                              setCountries([...countries, trimmed]);
+                              handleUpdateCountries([...countries, trimmed]);
                             }
                             setCreateFields(prev => ({ ...prev, country: trimmed }));
                             setNewCountryName('');
@@ -753,7 +866,7 @@ export default function App() {
                           if (newPositionName.trim()) {
                             const trimmed = newPositionName.trim();
                             if (!positions.includes(trimmed)) {
-                              setPositions([...positions, trimmed]);
+                              handleUpdatePositions([...positions, trimmed]);
                             }
                             setCreateFields(prev => ({ ...prev, position: trimmed }));
                             setNewPositionName('');
@@ -854,7 +967,7 @@ export default function App() {
                           if (newProjectName.trim()) {
                             const trimmed = newProjectName.trim();
                             if (!projects.includes(trimmed)) {
-                              setProjects([...projects, trimmed]);
+                              handleUpdateProjects([...projects, trimmed]);
                             }
                             setCreateFields(prev => ({ ...prev, project: trimmed }));
                             setNewProjectName('');
@@ -1067,10 +1180,10 @@ export default function App() {
           projects={projects}
           countries={countries}
           positions={positions}
-          onUpdateTagsList={setTagsList}
-          onUpdateProjects={setProjects}
-          onUpdateCountries={setCountries}
-          onUpdatePositions={setPositions}
+          onUpdateTagsList={handleUpdateTagsList}
+          onUpdateProjects={handleUpdateProjects}
+          onUpdateCountries={handleUpdateCountries}
+          onUpdatePositions={handleUpdatePositions}
         />
       )}
 

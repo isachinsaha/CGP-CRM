@@ -386,24 +386,33 @@ export default function LeadList({
 
   // Extract unique target countries dynamically for filtering options
   const targetCountriesList = useMemo(() => {
+    if (metaCountries && metaCountries.length > 0) {
+      return ['All', ...metaCountries];
+    }
     const set = new Set<string>();
     leads.forEach(l => {
       if (l.country) set.add(l.country);
     });
     return ['All', ...Array.from(set)];
-  }, [leads]);
+  }, [leads, metaCountries]);
 
   // Extract unique target projects dynamically for filtering options
   const targetProjectsList = useMemo(() => {
+    if (metaProjects && metaProjects.length > 0) {
+      return ['All', ...metaProjects];
+    }
     const set = new Set<string>();
     leads.forEach(l => {
       if (l.project) set.add(l.project);
     });
     return ['All', ...Array.from(set)];
-  }, [leads]);
+  }, [leads, metaProjects]);
 
   // Extract unique candidate tags dynamically for filter options
   const availableTagsList = useMemo(() => {
+    if (metaTags && metaTags.length > 0) {
+      return ['All', ...metaTags];
+    }
     const set = new Set<string>();
     leads.forEach(l => {
       if (l.tags && Array.isArray(l.tags)) {
@@ -413,10 +422,13 @@ export default function LeadList({
       }
     });
     return ['All', ...Array.from(set)];
-  }, [leads]);
+  }, [leads, metaTags]);
 
   // Handle comprehensive search & multi-layer filters
   const filteredLeads = useMemo(() => {
+    if (onFiltersChange) {
+      return leads;
+    }
     return leads.filter(lead => {
       // 1. Coordinator bucket constraint: force MY seats only if Agent role!
       if (userRole === 'agent') {
@@ -497,13 +509,16 @@ export default function LeadList({
 
       return matchesSearch && matchesCountry && matchesProject && matchesFit && matchesTag && matchesDate && matchesCoordinator;
     });
-  }, [leads, searchQuery, countryFilter, projectFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter]);
+  }, [leads, searchQuery, countryFilter, projectFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter, onFiltersChange]);
 
   // Paginated leads for page-wise viewport listing
   const paginatedLeads = useMemo(() => {
+    if (onPageChange) {
+      return leads;
+    }
     const startIndex = (currentPage - 1) * itemsPerPage;
     return filteredLeads.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredLeads, currentPage]);
+  }, [filteredLeads, currentPage, onPageChange, leads]);
 
   // Bulk Re-assignment API Caller
   const handleBulkReassign = async () => {
@@ -1179,7 +1194,7 @@ export default function LeadList({
                       <td className="px-4 py-3 max-w-[200px]">
                         <div>
                           <div className={`font-extrabold text-slate-100 uppercase truncate ${!isInlineEdit && 'group-hover:text-accent-emerald transition-colors'} flex items-center gap-1.5 font-display`}>
-                            <span>{lead.name}</span>
+                            <span>{formatCandidateName(lead.name)}</span>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1482,12 +1497,22 @@ export default function LeadList({
         </div>
 
         {/* Pagination Controls */}
-        {filteredLeads.length > itemsPerPage && (
+        {((onPageChange && totalPagesCount > 1) || (!onPageChange && filteredLeads.length > itemsPerPage)) && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border-t border-slate-750 bg-slate-900/50 rounded-b-xl select-none">
             <div className="text-xs text-slate-400 font-semibold">
-              Showing <span className="text-slate-200 font-bold">{Math.min(filteredLeads.length, (currentPage - 1) * itemsPerPage + 1)}</span> to{' '}
-              <span className="text-slate-200 font-bold">{Math.min(filteredLeads.length, currentPage * itemsPerPage)}</span> of{' '}
-              <span className="text-slate-200 font-bold">{filteredLeads.length}</span> candidates
+              Showing <span className="text-slate-200 font-bold">{
+                onPageChange 
+                  ? (totalLeadsCount === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1)
+                  : Math.min(filteredLeads.length, (currentPage - 1) * itemsPerPage + 1)
+              }</span> to{' '}
+              <span className="text-slate-200 font-bold">{
+                onPageChange
+                  ? Math.min(totalLeadsCount, currentPage * itemsPerPage)
+                  : Math.min(filteredLeads.length, currentPage * itemsPerPage)
+              }</span> of{' '}
+              <span className="text-slate-200 font-bold">{
+                onPageChange ? totalLeadsCount : filteredLeads.length
+              }</span> candidates
             </div>
             
             <div className="flex items-center gap-1.5">
@@ -1500,9 +1525,9 @@ export default function LeadList({
                 Previous
               </button>
               
-              {Array.from({ length: Math.ceil(filteredLeads.length / itemsPerPage) }).map((_, idx) => {
+              {Array.from({ length: onPageChange ? totalPagesCount : Math.ceil(filteredLeads.length / itemsPerPage) }).map((_, idx) => {
                 const pageNum = idx + 1;
-                const totalPages = Math.ceil(filteredLeads.length / itemsPerPage);
+                const totalPages = onPageChange ? totalPagesCount : Math.ceil(filteredLeads.length / itemsPerPage);
                 if (
                   pageNum === 1 ||
                   pageNum === totalPages ||
@@ -1537,8 +1562,8 @@ export default function LeadList({
               
               <button
                 type="button"
-                onClick={() => setCurrentPage(prev => Math.min(prev + 1, Math.ceil(filteredLeads.length / itemsPerPage)))}
-                disabled={currentPage === Math.ceil(filteredLeads.length / itemsPerPage)}
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, onPageChange ? totalPagesCount : Math.ceil(filteredLeads.length / itemsPerPage)))}
+                disabled={currentPage === (onPageChange ? totalPagesCount : Math.ceil(filteredLeads.length / itemsPerPage))}
                 className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs border border-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 Next

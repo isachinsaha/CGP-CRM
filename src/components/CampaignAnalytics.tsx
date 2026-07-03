@@ -5,6 +5,7 @@ import {
   UserCheck, Inbox, Calendar, Users, Award, ShieldAlert, Clock, MapPin, CheckCircle,
   CheckSquare2, Square, AlertCircle, ListTodo, User, Bell
 } from 'lucide-react';
+import { formatCandidateName } from '../utils';
 
 interface CampaignAnalyticsProps {
   stats: StatSummary;
@@ -765,7 +766,7 @@ export default function CampaignAnalytics({
                       onClick={() => onSelectLead?.(lead)}
                       className="text-xs font-black text-slate-100 leading-tight group-hover:text-accent-purple transition-colors cursor-pointer hover:underline break-words uppercase"
                     >
-                      {lead.name}
+                      {formatCandidateName(lead.name)}
                     </p>
                     <span className="text-[9px] bg-slate-900 border border-slate-800 px-1.5 py-0.2 rounded text-slate-300 font-mono font-bold uppercase shrink-0">
                       ✈️ {lead.country || 'QATAR'}
@@ -1138,7 +1139,7 @@ export default function CampaignAnalytics({
                                 📢 {agent.assignedToday.length} Assigned
                               </span>
                               <div className="text-[11px] text-slate-200 font-bold leading-tight">
-                                {agent.assignedToday.map((lead: Lead) => lead.name).join(', ')}
+                                {agent.assignedToday.map((lead: Lead) => formatCandidateName(lead.name)).join(', ')}
                               </div>
                             </div>
                           ) : (
@@ -1338,7 +1339,7 @@ export default function CampaignAnalytics({
                                 📢 {agent.assignedInPeriod.length} Assigned
                               </span>
                               <div className="text-[11px] text-slate-200 font-bold leading-tight line-clamp-2">
-                                {agent.assignedInPeriod.map((lead: Lead) => lead.name).join(', ')}
+                                {agent.assignedInPeriod.map((lead: Lead) => formatCandidateName(lead.name)).join(', ')}
                               </div>
                             </div>
                           ) : (

@@ -5,7 +5,7 @@ import {
   Calendar, Clipboard, Check, Star, ListTodo, History, 
   Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Bell, Plus
 } from 'lucide-react';
-import { getCountryFlagUrl } from '../utils';
+import { getCountryFlagUrl, formatCandidateName } from '../utils';
 
 interface LeadModalProps {
   lead: Lead;
@@ -419,7 +419,7 @@ export default function LeadModal({
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-extrabold text-slate-100 text-lg">{lead.name}</h3>
+                <h3 className="font-extrabold text-slate-100 text-lg">{formatCandidateName(lead.name)}</h3>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase border ${getFitStyle(lead.fitScore)}`}>
                   {lead.fitScore} Fit
                 </span>

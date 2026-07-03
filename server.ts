@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Load local database helper
-import { getLeads, addLead, saveLeads, getStats, getLeadById, getCoordinators, saveCoordinators, initializeCoordinatorsDatabase, getJobs, saveJobs, getUpdates, saveUpdates } from './src/server/db.ts';
+import { getLeads, addLead, saveLeads, getStats, getLeadById, getCoordinators, saveCoordinators, initializeCoordinatorsDatabase, getJobs, saveJobs, getUpdates, saveUpdates, getMetadata, saveMetadata } from './src/server/db.ts';
 import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate } from './src/types.ts';
 
 const app = express();
@@ -541,6 +541,39 @@ app.post('/api/login', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ success: false, error: (err as Error).message });
+  }
+});
+
+// GET /api/metadata - Get dynamic metadata options (countries, positions, projects, tagsList)
+app.get('/api/metadata', async (req, res) => {
+  try {
+    const meta = await getMetadata();
+    res.json(meta);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /api/metadata - Update dynamic metadata options (countries, positions, projects, tagsList)
+app.post('/api/metadata', async (req, res) => {
+  try {
+    const role = req.headers['x-user-role'] || 'user';
+    if (role !== 'admin') {
+      res.status(403).json({ error: 'Forbidden: Only administrators can update CRM metadata.' });
+      return;
+    }
+
+    const { countries, positions, projects, tagsList } = req.body;
+    if (!Array.isArray(countries) || !Array.isArray(positions) || !Array.isArray(projects) || !Array.isArray(tagsList)) {
+      res.status(400).json({ error: 'Payload must contain countries, positions, projects, and tagsList as arrays.' });
+      return;
+    }
+
+    const updatedMeta = { countries, positions, projects, tagsList };
+    await saveMetadata(updatedMeta);
+    res.json({ success: true, metadata: updatedMeta });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 

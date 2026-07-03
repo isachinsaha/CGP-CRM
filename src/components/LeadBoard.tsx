@@ -16,7 +16,7 @@ import {
   Trello,
   RotateCw
 } from 'lucide-react';
-import { getCountryFlagUrl } from '../utils';
+import { getCountryFlagUrl, formatCandidateName } from '../utils';
 import ImportantUpdatesBar from './ImportantUpdatesBar.tsx';
 
 interface LeadBoardProps {
@@ -186,7 +186,7 @@ export default function LeadBoard({
         </div>
 
         {/* Name / Phone */}
-        <h4 className="font-black text-slate-100 text-sm tracking-tight uppercase font-display">{lead.name}</h4>
+        <h4 className="font-black text-slate-100 text-sm tracking-tight uppercase font-display">{formatCandidateName(lead.name)}</h4>
         <div className="flex items-center justify-between mt-1 pb-1.5 border-b border-slate-750/80">
           <span className="text-[10px] text-slate-400 font-bold font-mono">{lead.phone}</span>
           <span className="text-[9px] bg-slate-800 border border-slate-750 font-bold px-1.5 py-0.5 rounded text-slate-300 uppercase font-mono">
@@ -517,7 +517,7 @@ export default function LeadBoard({
                 </div>
 
                 {/* Grid layout of lead cards under the selected stage */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 py-1">
                   {visibleLeads.filter(l => l.stage === selectedStage).length > 0 ? (
                     visibleLeads.filter(l => l.stage === selectedStage).map((lead) => renderLeadCard(lead))
                   ) : (
@@ -574,7 +574,7 @@ export default function LeadBoard({
                     </div>
 
                     {/* Leads Stack */}
-                    <div className="space-y-3.5 flex-1 overflow-y-auto max-h-[550px] scrollbar-none">
+                    <div className="space-y-3.5 flex-1 overflow-y-auto max-h-[550px] scrollbar-none py-2 px-0.5">
                       {colLeads.length > 0 ? (
                         colLeads.map(lead => renderLeadCard(lead))
                       ) : (

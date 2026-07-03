@@ -24,6 +24,7 @@ const DATA_FILE = path.join(DATA_DIR, 'leads.json');
 const COORDINATORS_FILE = path.join(DATA_DIR, 'coordinators.json');
 const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
 const UPDATES_FILE = path.join(DATA_DIR, 'updates.json');
+const METADATA_FILE = path.join(DATA_DIR, 'metadata.json');
 
 // Initialize client-side Firebase Firestore with standard Web SDK
 // This bypasses GCP Service Account IAM permissions propagation issues on shared databases!
@@ -997,6 +998,100 @@ export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save updates to cloud:', err);
+    }
+  }
+}
+
+export interface CgpMetadata {
+  countries: string[];
+  positions: string[];
+  projects: string[];
+  tagsList: string[];
+}
+
+export async function initializeMetadataDatabase() {
+  const defaultMetadata: CgpMetadata = {
+    countries: ['Kuwait', 'Dubai', 'Qatar', 'Germany', 'Japan', 'Albania'],
+    positions: ['Waiter', 'Waitress', 'Chef', 'Nurse', 'Cleaner', 'Driver', 'Electrician'],
+    projects: ['Napkin affairs', 'Alltoobi', 'Lulu hypermarket', 'General Intake'],
+    tagsList: [
+      'Chef', 'Nurse', 'Waiter', 'Waitress', 'Driver', 'Accountant', 
+      'Manager', 'Sales', 'Developer', 'Electrician', 'Plumber', 
+      'Receptionist', 'Housekeeper', 'Security', 'Painter', 'Mechanic', 'Operator'
+    ]
+  };
+
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(METADATA_FILE)) {
+    fs.writeFileSync(METADATA_FILE, JSON.stringify(defaultMetadata, null, 2), 'utf-8');
+  }
+
+  if (db) {
+    try {
+      const docRef = doc(db, 'metadata', 'options');
+      const docSnap = await runWithTimeout(getDoc(docRef), 2000);
+      if (!docSnap.exists()) {
+        console.log('[Firestore Client] Seeding default metadata to cloud...');
+        await runWithTimeout(setDoc(docRef, cleanForFirestore(defaultMetadata)), 2000);
+        console.log('[Firestore Client] Seeded metadata successfully.');
+      }
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to check/seed metadata, falling back to local file:', err);
+    }
+  }
+}
+
+export async function getMetadata(): Promise<CgpMetadata> {
+  await initializeMetadataDatabase();
+  if (db) {
+    try {
+      const docSnap = await runWithTimeout(getDoc(doc(db, 'metadata', 'options')), 2000);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        return {
+          countries: Array.isArray(data.countries) ? data.countries : [],
+          positions: Array.isArray(data.positions) ? data.positions : [],
+          projects: Array.isArray(data.projects) ? data.projects : [],
+          tagsList: Array.isArray(data.tagsList) ? data.tagsList : []
+        };
+      }
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to fetch metadata from cloud, falling back to local file:', err);
+    }
+  }
+  try {
+    const data = fs.readFileSync(METADATA_FILE, 'utf-8');
+    return JSON.parse(data) as CgpMetadata;
+  } catch (err) {
+    console.error('Failed to read metadata file', err);
+    return {
+      countries: ['Kuwait', 'Dubai', 'Qatar', 'Germany', 'Japan', 'Albania'],
+      positions: ['Waiter', 'Waitress', 'Chef', 'Nurse', 'Cleaner', 'Driver', 'Electrician'],
+      projects: ['Napkin affairs', 'Alltoobi', 'Lulu hypermarket', 'General Intake'],
+      tagsList: [
+        'Chef', 'Nurse', 'Waiter', 'Waitress', 'Driver', 'Accountant', 
+        'Manager', 'Sales', 'Developer', 'Electrician', 'Plumber', 
+        'Receptionist', 'Housekeeper', 'Security', 'Painter', 'Mechanic', 'Operator'
+      ]
+    };
+  }
+}
+
+export async function saveMetadata(metadata: CgpMetadata): Promise<void> {
+  await initializeMetadataDatabase();
+  try {
+    fs.writeFileSync(METADATA_FILE, JSON.stringify(metadata, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to write metadata file', err);
+  }
+
+  if (db) {
+    try {
+      await runWithTimeout(setDoc(doc(db, 'metadata', 'options'), cleanForFirestore(metadata)), 2000);
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to save metadata to cloud:', err);
     }
   }
 }
