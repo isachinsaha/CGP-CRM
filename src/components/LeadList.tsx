@@ -54,6 +54,7 @@ export default function LeadList({
   const [fitScoreFilter, setFitScoreFilter] = useState('All');
   const [tagFilter, setTagFilter] = useState('All');
   const [projectFilter, setProjectFilter] = useState('All');
+  const [genderFilter, setGenderFilter] = useState('All');
   const [dateFilter, setDateFilter] = useState('All'); // 'All', 'Today', 'Yesterday', 'Last7Days', 'Last30Days', 'Custom'
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -102,7 +103,7 @@ export default function LeadList({
   // Reset pagination to first page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, countryFilter, projectFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter]);
+  }, [searchQuery, countryFilter, projectFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter]);
 
   // Synchronize filter updates back to parent if server-side filtering is enabled
   useEffect(() => {
@@ -117,10 +118,11 @@ export default function LeadList({
         dateFilter: dateFilter,
         customStartDate,
         customEndDate,
-        bucket: bucketToggle
+        bucket: bucketToggle,
+        gender: genderFilter
       });
     }
-  }, [searchQuery, countryFilter, coordinatorFilter, fitScoreFilter, tagFilter, projectFilter, dateFilter, customStartDate, customEndDate, bucketToggle]);
+  }, [searchQuery, countryFilter, coordinatorFilter, fitScoreFilter, tagFilter, projectFilter, genderFilter, dateFilter, customStartDate, customEndDate, bucketToggle]);
 
   // Synchronize page index back to parent
   useEffect(() => {
@@ -507,9 +509,21 @@ export default function LeadList({
         coordinatorFilter === 'All' || 
         (coordinatorFilter === 'Unassigned' ? !lead.assignedTo : (lead.assignedTo?.toLowerCase() === coordinatorFilter.toLowerCase() || lead.assignedTo === coordinatorFilter));
 
-      return matchesSearch && matchesCountry && matchesProject && matchesFit && matchesTag && matchesDate && matchesCoordinator;
+      // 8.5 Gender Filter
+      let matchesGender = true;
+      if (genderFilter !== 'All') {
+        const g = String(lead.gender || '').toUpperCase().trim();
+        const filterG = String(genderFilter).toUpperCase().trim();
+        if (filterG === 'MALE' || filterG === 'M') {
+          matchesGender = g === 'M' || g === 'MALE';
+        } else if (filterG === 'FEMALE' || filterG === 'F') {
+          matchesGender = g === 'F' || g === 'FEMALE';
+        }
+      }
+
+      return matchesSearch && matchesCountry && matchesProject && matchesFit && matchesTag && matchesDate && matchesCoordinator && matchesGender;
     });
-  }, [leads, searchQuery, countryFilter, projectFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter, onFiltersChange]);
+  }, [leads, searchQuery, countryFilter, projectFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter, onFiltersChange]);
 
   // Paginated leads for page-wise viewport listing
   const paginatedLeads = useMemo(() => {
@@ -711,6 +725,17 @@ export default function LeadList({
             <option value="medium">🥈 Medium Fit Quality</option>
             <option value="low">🥉 Low Fit Quality</option>
             <option value="unqualified">🛑 Unqualified / Spam</option>
+          </select>
+
+          {/* Gender Filter */}
+          <select
+            value={genderFilter}
+            onChange={(e) => setGenderFilter(e.target.value)}
+            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
+          >
+            <option value="All">All Genders</option>
+            <option value="Male">👦 Male</option>
+            <option value="Female">👧 Female</option>
           </select>
 
           {/* Date Wise Filter */}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lead, LeadStage } from '../types.ts';
+import { Lead, LeadStage, Coordinator } from '../types.ts';
 import { 
   TrendingUp, 
   ArrowRight, 
@@ -25,6 +25,7 @@ interface LeadBoardProps {
   onUpdateStage: (id: string, stage: LeadStage) => void;
   userRole: 'admin' | 'agent';
   currentAgentId: string;
+  coordinators?: Coordinator[];
 }
 
 interface Column {
@@ -39,7 +40,8 @@ export default function LeadBoard({
   onSelectLead, 
   onUpdateStage, 
   userRole, 
-  currentAgentId 
+  currentAgentId,
+  coordinators = []
 }: LeadBoardProps) {
   
   // View mode switcher: 'hub' (container tabs view like Active Jobs Hub) or 'board' (classic kanban)
@@ -51,6 +53,9 @@ export default function LeadBoard({
   // Bucket filtering for agents
   const [bucketToggle, setBucketToggle] = useState<'my' | 'all'>(userRole === 'agent' ? 'my' : 'all');
   const [draggedOverColumn, setDraggedOverColumn] = useState<string | null>(null);
+
+  // Coordinator filter state (for Admin View)
+  const [coordinatorFilter, setCoordinatorFilter] = useState('All');
 
   // Date filter state: 'all' | 'today' | 'yesterday' | 'date-wise'
   const [pipelineDateFilter, setPipelineDateFilter] = useState<'all' | 'today' | 'yesterday' | 'date-wise'>('all');
@@ -103,6 +108,15 @@ export default function LeadBoard({
       filtered = filtered.filter(lead => lead.assignedTo?.toLowerCase() === currentAgentId.toLowerCase());
     }
 
+    // Coordinator Filter (only in Admin view)
+    if (userRole === 'admin' && coordinatorFilter !== 'All') {
+      if (coordinatorFilter === 'Unassigned') {
+        filtered = filtered.filter(lead => !lead.assignedTo);
+      } else {
+        filtered = filtered.filter(lead => lead.assignedTo?.toLowerCase() === coordinatorFilter.toLowerCase() || lead.assignedTo === coordinatorFilter);
+      }
+    }
+
     // Date range filter
     if (pipelineDateFilter !== 'all') {
       let startMs: number | null = null;
@@ -138,7 +152,7 @@ export default function LeadBoard({
     }
 
     return filtered;
-  }, [leads, userRole, currentAgentId, pipelineDateFilter, filterStartDate, filterEndDate]);
+  }, [leads, userRole, currentAgentId, coordinatorFilter, pipelineDateFilter, filterStartDate, filterEndDate]);
 
   // Lead Card Render Helper to avoid duplicate JSX
   const renderLeadCard = (lead: Lead) => {
@@ -328,7 +342,7 @@ export default function LeadBoard({
                 }`}
               >
                 <LayoutGrid className="h-3 w-3" />
-                Pipeline Hub View
+                Pipeline View
               </button>
               <button
                 type="button"
@@ -340,9 +354,24 @@ export default function LeadBoard({
                 }`}
               >
                 <Trello className="h-3 w-3" />
-                Classic Kanban View
+                Classic View
               </button>
             </div>
+
+            {/* Coordinator Filter - only in Admin View */}
+            {userRole === 'admin' && (
+              <select
+                value={coordinatorFilter}
+                onChange={(e) => setCoordinatorFilter(e.target.value)}
+                className="text-[10px] px-3 py-1.5 rounded-xl border border-slate-750 bg-slate-900 text-accent-purple font-black focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase shadow-inner"
+              >
+                <option value="All">👤 All Coordinators</option>
+                <option value="Unassigned">👤 Unassigned</option>
+                {coordinators.filter(c => c.role === 'agent').map(coord => (
+                  <option key={coord.id} value={coord.username}>👤 {coord.displayName.toUpperCase()}</option>
+                ))}
+              </select>
+            )}
 
             {/* Shifted & Minimalist Pipeline Filters */}
             <div className="flex items-center gap-1 bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner">

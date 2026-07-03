@@ -12,9 +12,13 @@ import {
   query, 
   orderBy, 
   limit, 
-  writeBatch
+  writeBatch,
+  setLogLevel
 } from 'firebase/firestore';
 import { Lead, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate } from '../types.ts';
+
+// Configure Firebase SDK to only log errors, suppressing gRPC connection warnings
+setLogLevel('error');
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 if (!fs.existsSync(DATA_DIR)) {

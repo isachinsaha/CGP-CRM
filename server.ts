@@ -135,7 +135,8 @@ app.get('/api/leads', async (req, res) => {
       bucket = 'all',
       agentId = '',
       userRole = '',
-      all = 'false'
+      all = 'false',
+      gender = 'All'
     } = req.query as Record<string, string>;
 
     const pageNum = parseInt(page, 10) || 1;
@@ -252,6 +253,17 @@ app.get('/api/leads', async (req, res) => {
           const start = customStartDate ? startOfDay(new Date(customStartDate)) : 0;
           const end = customEndDate ? endOfDay(new Date(customEndDate)) : Infinity;
           if (leadTime < start || leadTime > end) return false;
+        }
+      }
+
+      // J. Gender-wise filter
+      if (gender && gender !== 'All') {
+        const g = String(lead.gender || '').toUpperCase().trim();
+        const filterG = String(gender).toUpperCase().trim();
+        if (filterG === 'MALE' || filterG === 'M') {
+          if (g !== 'M' && g !== 'MALE') return false;
+        } else if (filterG === 'FEMALE' || filterG === 'F') {
+          if (g !== 'F' && g !== 'FEMALE') return false;
         }
       }
 

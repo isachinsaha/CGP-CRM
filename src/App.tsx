@@ -64,7 +64,8 @@ export default function App() {
     dateFilter: 'All',
     customStartDate: '',
     customEndDate: '',
-    bucket: 'all'
+    bucket: 'all',
+    gender: 'All'
   });
 
   // Environment metadata
@@ -242,7 +243,8 @@ export default function App() {
         bucket: userRole === 'agent' ? 'my' : (filters.bucket || 'all'),
         agentId: currentAgentId,
         userRole: userRole,
-        all: activeTab !== 'list' ? 'true' : 'false'
+        all: activeTab !== 'list' ? 'true' : 'false',
+        gender: filters.gender || 'All'
       });
 
       const leadsRes = await fetch(`/api/leads?${params.toString()}`);
@@ -636,6 +638,7 @@ export default function App() {
                 onUpdateStage={handleUpdateStage}
                 userRole={userRole}
                 currentAgentId={currentAgentId}
+                coordinators={coordinatorsList}
               />
             )}
 
