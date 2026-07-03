@@ -531,7 +531,7 @@ Other details: ${selected.otherTerms || 'None'}`;
 
                       {/* Candidate Name & Info */}
                       <div className="space-y-1 text-left">
-                        <h4 className="font-extrabold text-slate-100 text-sm tracking-tight uppercase font-display group-hover/card:text-accent-purple transition-colors">
+                        <h4 className="font-extrabold text-slate-100 text-[13px] tracking-normal uppercase font-sans group-hover/card:text-accent-purple transition-colors">
                           {match.name}
                         </h4>
                         <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold font-mono">

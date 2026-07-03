@@ -856,9 +856,20 @@ export default function CampaignAnalytics({
                     </p>
                     <div className="space-y-1">
                       <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
-                        <User className="h-3 w-3 text-slate-500" />
-                        <span className="truncate uppercase font-black text-slate-300">{task.leadName}</span>
-                        <span className="text-[9px] bg-slate-900 border border-slate-800 px-1 py-0.2 rounded text-slate-300 font-mono">
+                        <User className="h-3 w-3 text-slate-500 font-bold" />
+                        <span 
+                          onClick={() => {
+                            const foundLead = activeLeads.find(l => l.id === task.leadId);
+                            if (foundLead) {
+                              onSelectLead?.(foundLead);
+                            }
+                          }}
+                          className="truncate uppercase font-black text-slate-300 hover:text-accent-purple hover:underline cursor-pointer transition-colors"
+                          title="View Candidate Profile"
+                        >
+                          {task.leadName}
+                        </span>
+                        <span className="text-[9px] bg-slate-900 border border-slate-800 px-1 py-0.2 rounded text-slate-300 font-mono font-bold shrink-0">
                           ✈️ {task.leadCountry}
                         </span>
                       </div>

@@ -6,37 +6,37 @@
   --font-display: "Outfit", "Plus Jakarta Sans", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
-  --color-slate-950: #06050b;
-  --color-slate-900: #0c0919;
-  --color-slate-850: #120e24;
-  --color-slate-800: #181330;
-  --color-slate-750: #201b3e;
-  --color-slate-700: #2b2552;
-  --color-slate-600: #42397a;
-  --color-slate-500: #6257aa;
-  --color-slate-400: #9185cb;
-  --color-slate-300: #beb5e5;
-  --color-slate-200: #ded8f5;
-  --color-slate-100: #f3effa;
-  --color-slate-50: #faf9ff;
+  --color-slate-950: #000000;
+  --color-slate-900: #050508;
+  --color-slate-850: #0b0b10;
+  --color-slate-800: #121218;
+  --color-slate-750: #1b1b22;
+  --color-slate-700: #25252e;
+  --color-slate-600: #3a3a46;
+  --color-slate-500: #5c5c6b;
+  --color-slate-400: #888899;
+  --color-slate-300: #bebecc;
+  --color-slate-200: #dedee6;
+  --color-slate-100: #f1f1f5;
+  --color-slate-50: #fafafc;
   
-  --color-accent-purple: #8b5cf6;
+  --color-accent-purple: #10b981;
   --color-accent-blue: #3b82f6;
   --color-accent-teal: #06b6d4;
   --color-accent-emerald: #10b981;
 
-  --color-purple-950: #150f33;
-  --color-indigo-950: #120f33;
-  --color-indigo-900: #1f1854;
-  --color-indigo-500: #6366f1;
+  --color-purple-950: #022c22;
+  --color-indigo-950: #022c22;
+  --color-indigo-900: #064e3b;
+  --color-indigo-500: #10b981;
   --color-emerald-950: #01241a;
   --color-amber-950: #2e1201;
   --color-rose-950: #30020d;
   --color-teal-950: #083b38;
   --color-sky-950: #031c2c;
 
-  --color-purple-400: #c084fc;
-  --color-indigo-400: #818cf8;
+  --color-purple-400: #34d399;
+  --color-indigo-400: #34d399;
   --color-emerald-400: #34d399;
   --color-amber-400: #fbbf24;
   --color-rose-400: #f43f5e;

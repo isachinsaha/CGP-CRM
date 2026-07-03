@@ -1218,7 +1218,7 @@ export default function LeadList({
                       {/* 2. Candidate Demographics */}
                       <td className="px-4 py-3 max-w-[200px]">
                         <div>
-                          <div className={`font-extrabold text-slate-100 uppercase truncate ${!isInlineEdit && 'group-hover:text-accent-emerald transition-colors'} flex items-center gap-1.5 font-display`}>
+                          <div className={`font-extrabold text-slate-100 uppercase tracking-normal truncate ${!isInlineEdit && 'group-hover:text-accent-emerald transition-colors'} flex items-center gap-1.5 font-sans`}>
                             <span>{formatCandidateName(lead.name)}</span>
                             <button
                               onClick={(e) => {

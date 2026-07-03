@@ -200,7 +200,7 @@ export default function LeadBoard({
         </div>
 
         {/* Name / Phone */}
-        <h4 className="font-black text-slate-100 text-sm tracking-tight uppercase font-display">{formatCandidateName(lead.name)}</h4>
+        <h4 className="font-extrabold text-slate-100 text-[13px] tracking-normal uppercase font-sans">{formatCandidateName(lead.name)}</h4>
         <div className="flex items-center justify-between mt-1 pb-1.5 border-b border-slate-750/80">
           <span className="text-[10px] text-slate-400 font-bold font-mono">{lead.phone}</span>
           <span className="text-[9px] bg-slate-800 border border-slate-750 font-bold px-1.5 py-0.5 rounded text-slate-300 uppercase font-mono">
