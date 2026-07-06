@@ -319,19 +319,10 @@ export default function LeadBoard({
       {/* Pipeline Border Card Container */}
       <div className="bg-slate-950/40 rounded-3xl border border-slate-750/85 p-6 shadow-xl text-left">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-5 border-b border-slate-750/80 pb-4 gap-4">
-          <div>
-            <h3 className="text-xs font-black text-slate-100 uppercase tracking-widest flex items-center gap-2 font-display">
-              <TrendingUp className="h-4 w-4 text-accent-emerald" />
-              Your Candidate Pipeline
-            </h3>
-            <p className="text-[11px] text-slate-500 font-bold mt-0.5">
-              Drag-and-drop leads between selectors or use quick arrows to progress candidates from inbound to success
-            </p>
-          </div>
-          
+          {/* Left Side: Controls in One Straight Line */}
           <div className="flex flex-wrap items-center gap-3">
             {/* View Switcher segment button styled beautifully */}
-            <div className="flex items-center bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner">
+            <div className="flex items-center bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
               <button
                 type="button"
                 onClick={() => setViewMode('hub')}
@@ -363,7 +354,7 @@ export default function LeadBoard({
               <select
                 value={coordinatorFilter}
                 onChange={(e) => setCoordinatorFilter(e.target.value)}
-                className="text-[10px] px-3 py-1.5 rounded-xl border border-slate-750 bg-slate-900 text-accent-purple font-black focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase shadow-inner"
+                className="text-[10px] px-3 py-1.5 rounded-xl border border-slate-750 bg-slate-900 text-accent-purple font-black focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase shadow-inner shrink-0"
               >
                 <option value="All">👤 All Coordinators</option>
                 <option value="Unassigned">👤 Unassigned</option>
@@ -374,7 +365,7 @@ export default function LeadBoard({
             )}
 
             {/* Shifted & Minimalist Pipeline Filters */}
-            <div className="flex items-center gap-1 bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner">
+            <div className="flex items-center gap-1 bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
               {[
                 { id: 'all', label: 'All' },
                 { id: 'today', label: 'Today' },
@@ -406,7 +397,7 @@ export default function LeadBoard({
             </div>
 
             {pipelineDateFilter === 'date-wise' && (
-              <div className="flex items-center gap-2 bg-slate-900 border border-slate-750 px-3 py-1.5 rounded-xl text-left animate-fade-in">
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-750 px-3 py-1.5 rounded-xl text-left animate-fade-in shrink-0">
                 <input
                   type="date"
                   value={filterStartDate}
@@ -422,10 +413,17 @@ export default function LeadBoard({
                 />
               </div>
             )}
+          </div>
 
-            {pipelineDateFilter !== 'all' && (
+          {/* Right Side: Results indicator */}
+          <div className="flex items-center shrink-0">
+            {pipelineDateFilter !== 'all' ? (
               <div className="text-[10px] text-slate-400 font-bold bg-slate-900 border border-slate-750 px-3 py-1.5 rounded-xl">
                 Filtered: <span className="text-accent-emerald font-black font-mono">{visibleLeads.length} matches</span>
+              </div>
+            ) : (
+              <div className="text-[10px] text-slate-400 font-bold bg-slate-900 border border-slate-750 px-3 py-1.5 rounded-xl">
+                Showing: <span className="text-accent-emerald font-black font-mono">{visibleLeads.length} candidates</span>
               </div>
             )}
           </div>

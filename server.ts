@@ -80,6 +80,20 @@ function formatCandidateNameBackend(name: string): string {
   return formatted.trim();
 }
 
+// Helper to map LeadStage keys to human-friendly original labels
+function getStageLabel(stage: string): string {
+  const stageMap: Record<string, string> = {
+    new: 'New Inbound',
+    negotiating: 'In Discussion',
+    rotations: 'In Rotations',
+    proposal: 'Office Visited/Interview Attended',
+    won: 'Closed Won',
+    lost: 'Closed Lost'
+  };
+  const key = String(stage).toLowerCase().trim();
+  return stageMap[key] || stage;
+}
+
 // ---------------- SERVER API ROUTES ----------------
 
 // Health check and environment info
@@ -98,24 +112,43 @@ app.get('/api/leads', async (req, res) => {
     const rawLeads = await getLeads();
 
     // 1. Compute dynamic metadata from all unfiltered leads
-    const countriesSet = new Set<string>();
-    const projectsSet = new Set<string>();
-    const tagsSet = new Set<string>();
+    const countriesMap = new Map<string, string>(); // lowercase -> original casing
+    const projectsMap = new Map<string, string>();
+    const tagsMap = new Map<string, string>();
 
     rawLeads.forEach(l => {
-      if (l.country) countriesSet.add(l.country);
-      if (l.project) projectsSet.add(l.project);
+      if (l.country && l.country.trim()) {
+        const trimmed = l.country.trim();
+        const lower = trimmed.toLowerCase();
+        // Prefer Title/Pascal casing over ALL-CAPS if both exist in the DB
+        if (!countriesMap.has(lower) || (trimmed !== trimmed.toUpperCase() && countriesMap.get(lower) === countriesMap.get(lower)?.toUpperCase())) {
+          countriesMap.set(lower, trimmed);
+        }
+      }
+      if (l.project && l.project.trim()) {
+        const trimmed = l.project.trim();
+        const lower = trimmed.toLowerCase();
+        if (!projectsMap.has(lower) || (trimmed !== trimmed.toUpperCase() && projectsMap.get(lower) === projectsMap.get(lower)?.toUpperCase())) {
+          projectsMap.set(lower, trimmed);
+        }
+      }
       if (l.tags && Array.isArray(l.tags)) {
         l.tags.forEach(t => {
-          if (t && t.trim()) tagsSet.add(t.trim());
+          if (t && t.trim()) {
+            const trimmed = t.trim();
+            const lower = trimmed.toLowerCase();
+            if (!tagsMap.has(lower) || (trimmed !== trimmed.toUpperCase() && tagsMap.get(lower) === tagsMap.get(lower)?.toUpperCase())) {
+              tagsMap.set(lower, trimmed);
+            }
+          }
         });
       }
     });
 
     const meta = {
-      countries: Array.from(countriesSet).sort(),
-      projects: Array.from(projectsSet).sort(),
-      tags: Array.from(tagsSet).sort()
+      countries: Array.from(countriesMap.values()).sort((a, b) => a.localeCompare(b)),
+      projects: Array.from(projectsMap.values()).sort((a, b) => a.localeCompare(b)),
+      tags: Array.from(tagsMap.values()).sort((a, b) => a.localeCompare(b))
     };
 
     // 2. Parse query parameters
@@ -176,22 +209,22 @@ app.get('/api/leads', async (req, res) => {
 
       // C. Country Interest filter
       if (country && country !== 'All') {
-        if (lead.country !== country) return false;
+        if (!lead.country || lead.country.trim().toLowerCase() !== country.trim().toLowerCase()) return false;
       }
 
       // D. Project filter
       if (project && project !== 'All') {
-        if (lead.project !== project) return false;
+        if (!lead.project || lead.project.trim().toLowerCase() !== project.trim().toLowerCase()) return false;
       }
 
       // E. Fit score filter
       if (fitScore && fitScore !== 'All') {
-        if (lead.fitScore !== fitScore) return false;
+        if (!lead.fitScore || lead.fitScore.trim().toLowerCase() !== fitScore.trim().toLowerCase()) return false;
       }
 
       // F. Tag filter
       if (tag && tag !== 'All') {
-        if (!lead.tags || !lead.tags.includes(tag)) return false;
+        if (!lead.tags || !lead.tags.some(t => t.trim().toLowerCase() === tag.trim().toLowerCase())) return false;
       }
 
       // G. Coordinator / Telecaller filter
@@ -808,10 +841,12 @@ app.put('/api/leads/:id', async (req, res) => {
 
     // Log Stage transitions
     if (stage !== undefined && lead.stage !== stage) {
+      const fromLabel = getStageLabel(lead.stage);
+      const toLabel = getStageLabel(stage);
       lead.timeline.push({
         id: `tl_${Date.now()}_stage`,
         type: 'status',
-        text: `Pipeline stage updated from "${lead.stage.toUpperCase()}" to "${String(stage).toUpperCase()}"`,
+        text: `Pipeline stage updated from "${fromLabel}" to "${toLabel}"`,
         actor,
         timestamp: new Date().toISOString()
       });
@@ -842,7 +877,7 @@ app.put('/api/leads/:id', async (req, res) => {
         lead.timeline.push({
           id: `tl_${Date.now()}_auto_stage`,
           type: 'status',
-          text: `Pipeline stage auto-updated to "IN DISCUSSION" due to first remark logged`,
+          text: `Pipeline stage auto-updated to "In Discussion" due to first remark logged`,
           actor,
           timestamp: new Date().toISOString()
         });

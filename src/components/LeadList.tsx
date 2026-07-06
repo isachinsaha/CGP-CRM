@@ -388,42 +388,70 @@ export default function LeadList({
 
   // Extract unique target countries dynamically for filtering options
   const targetCountriesList = useMemo(() => {
-    if (metaCountries && metaCountries.length > 0) {
-      return ['All', ...metaCountries];
-    }
-    const set = new Set<string>();
-    leads.forEach(l => {
-      if (l.country) set.add(l.country);
+    const list = metaCountries && metaCountries.length > 0
+      ? metaCountries
+      : Array.from(new Set(leads.map(l => l.country).filter(Boolean)));
+    
+    // Case-insensitive deduplicate
+    const seen = new Set<string>();
+    const deduplicated: string[] = [];
+    list.forEach(c => {
+      const lower = c.trim().toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        deduplicated.push(c.trim());
+      }
     });
-    return ['All', ...Array.from(set)];
+    return ['All', ...deduplicated.sort((a, b) => a.localeCompare(b))];
   }, [leads, metaCountries]);
 
   // Extract unique target projects dynamically for filtering options
   const targetProjectsList = useMemo(() => {
-    if (metaProjects && metaProjects.length > 0) {
-      return ['All', ...metaProjects];
-    }
-    const set = new Set<string>();
-    leads.forEach(l => {
-      if (l.project) set.add(l.project);
+    const list = metaProjects && metaProjects.length > 0
+      ? metaProjects
+      : Array.from(new Set(leads.map(l => l.project).filter(Boolean)));
+    
+    // Case-insensitive deduplicate
+    const seen = new Set<string>();
+    const deduplicated: string[] = [];
+    list.forEach(p => {
+      const lower = p.trim().toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        deduplicated.push(p.trim());
+      }
     });
-    return ['All', ...Array.from(set)];
+    return ['All', ...deduplicated.sort((a, b) => a.localeCompare(b))];
   }, [leads, metaProjects]);
 
   // Extract unique candidate tags dynamically for filter options
   const availableTagsList = useMemo(() => {
-    if (metaTags && metaTags.length > 0) {
-      return ['All', ...metaTags];
+    const list = metaTags && metaTags.length > 0
+      ? metaTags
+      : [];
+    if (list.length === 0) {
+      const set = new Set<string>();
+      leads.forEach(l => {
+        if (l.tags && Array.isArray(l.tags)) {
+          l.tags.forEach(t => {
+            if (t && t.trim()) set.add(t.trim());
+          });
+        }
+      });
+      return ['All', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
     }
-    const set = new Set<string>();
-    leads.forEach(l => {
-      if (l.tags && Array.isArray(l.tags)) {
-        l.tags.forEach(t => {
-          if (t && t.trim()) set.add(t.trim());
-        });
+    
+    // Case-insensitive deduplicate
+    const seen = new Set<string>();
+    const deduplicated: string[] = [];
+    list.forEach(t => {
+      const lower = t.trim().toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        deduplicated.push(t.trim());
       }
     });
-    return ['All', ...Array.from(set)];
+    return ['All', ...deduplicated.sort((a, b) => a.localeCompare(b))];
   }, [leads, metaTags]);
 
   // Handle comprehensive search & multi-layer filters
@@ -455,16 +483,20 @@ export default function LeadList({
         (lead.project && lead.project.toLowerCase().includes(query));
 
       // 3. Country Applied filter
-      const matchesCountry = countryFilter === 'All' || lead.country === countryFilter;
+      const matchesCountry = countryFilter === 'All' || 
+        (lead.country && lead.country.trim().toLowerCase() === countryFilter.trim().toLowerCase());
       
       // 3.5 Hiring Project filter
-      const matchesProject = projectFilter === 'All' || lead.project === projectFilter;
+      const matchesProject = projectFilter === 'All' || 
+        (lead.project && lead.project.trim().toLowerCase() === projectFilter.trim().toLowerCase());
 
       // 4. Inbound Quality Fit score filter
-      const matchesFit = fitScoreFilter === 'All' || lead.fitScore === fitScoreFilter;
+      const matchesFit = fitScoreFilter === 'All' || 
+        (lead.fitScore && lead.fitScore.trim().toLowerCase() === fitScoreFilter.trim().toLowerCase());
 
       // 6. Dynamic Tags filter
-      const matchesTag = tagFilter === 'All' || (lead.tags && lead.tags.includes(tagFilter));
+      const matchesTag = tagFilter === 'All' || 
+        (lead.tags && lead.tags.some(t => t.trim().toLowerCase() === tagFilter.trim().toLowerCase()));
 
       // 7. Date Wise Filter
       let matchesDate = true;
