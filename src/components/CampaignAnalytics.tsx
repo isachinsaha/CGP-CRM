@@ -738,12 +738,12 @@ export default function CampaignAnalytics({
         <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4 select-none">
           <div>
             <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <Bell className="h-4.5 w-4.5 text-accent-purple fill-purple-950 animate-pulse" />
+              <Bell className="h-4.5 w-4.5 text-rose-500 fill-rose-950/40 animate-pulse" />
               Candidates Marked with Reminders
             </h3>
             <p className="text-xs text-slate-400 font-medium font-sans">These files have an active reminder bell enabled for priority tracking and follow-up.</p>
           </div>
-          <span className="text-[10px] bg-purple-950/40 text-accent-purple px-2.5 py-1 rounded-full font-black uppercase border border-purple-900/30">
+          <span className="text-[10px] bg-rose-950/40 text-rose-400 px-2.5 py-1 rounded-full font-black uppercase border border-rose-900/30">
             🔔 {reminderLeads.length} Flagged
           </span>
         </div>
@@ -755,10 +755,10 @@ export default function CampaignAnalytics({
                 <button
                   type="button"
                   onClick={() => handleToggleReminder(lead.id, lead.reminderEnabled)}
-                  className="mt-0.5 text-accent-purple hover:text-slate-400 transition-colors shrink-0 cursor-pointer"
+                  className="mt-0.5 text-rose-500 hover:text-slate-400 transition-colors shrink-0 cursor-pointer"
                   title="Click to Turn Off Reminder"
                 >
-                  <Bell className="h-4.5 w-4.5 text-accent-purple fill-accent-purple hover:scale-110 transition-transform animate-bounce" />
+                  <Bell className="h-4.5 w-4.5 text-rose-500 fill-rose-500 hover:scale-110 transition-transform animate-bounce" />
                 </button>
                 <div className="space-y-2 flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1.5">

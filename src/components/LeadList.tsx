@@ -825,7 +825,8 @@ export default function LeadList({
                 type="date"
                 value={customStartDate}
                 onChange={(e) => setCustomStartDate(e.target.value)}
-                className="text-[10px] font-bold text-slate-300 bg-transparent border-none focus:outline-none cursor-pointer"
+                className="text-[10px] font-bold text-slate-300 bg-transparent border-none focus:outline-none cursor-pointer [color-scheme:dark]"
+                style={{ colorScheme: 'dark' }}
                 title="Start Date"
               />
               <span className="text-[10px] text-slate-500 font-black">TO</span>
@@ -833,7 +834,8 @@ export default function LeadList({
                 type="date"
                 value={customEndDate}
                 onChange={(e) => setCustomEndDate(e.target.value)}
-                className="text-[10px] font-bold text-slate-300 bg-transparent border-none focus:outline-none cursor-pointer"
+                className="text-[10px] font-bold text-slate-300 bg-transparent border-none focus:outline-none cursor-pointer [color-scheme:dark]"
+                style={{ colorScheme: 'dark' }}
                 title="End Date"
               />
             </div>
@@ -1237,7 +1239,6 @@ export default function LeadList({
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[110px]">Pipeline Stage</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">Country</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[150px]">Position Opening</th>
-                <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[210px]">Docs Received Status</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[130px]">Coordinator (Telecaller)</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[170px]">Remarks 1 (First Call)</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[170px]">Remarks 2 (Follow-up)</th>
@@ -1393,47 +1394,6 @@ export default function LeadList({
                         )}
                       </td>
 
-                      {/* Docs Received Status Checklist Column */}
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex flex-col gap-1 text-[10px] font-bold text-slate-400">
-                          <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Passport copy received">
-                            <input
-                              type="checkbox"
-                              checked={!!lead.docPassportCopy}
-                              onChange={(e) => handleInlineUpdate(lead.id, { docPassportCopy: e.target.checked })}
-                              className="h-3 w-3 rounded border-slate-700 text-accent-purple focus:ring-accent-purple bg-slate-950 cursor-pointer"
-                            />
-                            <span className={lead.docPassportCopy ? "text-accent-emerald font-extrabold" : ""}>Passport copy</span>
-                          </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Resume received">
-                            <input
-                              type="checkbox"
-                              checked={!!lead.docResume}
-                              onChange={(e) => handleInlineUpdate(lead.id, { docResume: e.target.checked })}
-                              className="h-3 w-3 rounded border-slate-700 text-accent-purple focus:ring-accent-purple bg-slate-950 cursor-pointer"
-                            />
-                            <span className={lead.docResume ? "text-accent-emerald font-extrabold" : ""}>Resume</span>
-                          </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Office visited or not">
-                            <input
-                              type="checkbox"
-                              checked={!!lead.docOfficeVisited}
-                              onChange={(e) => handleInlineUpdate(lead.id, { docOfficeVisited: e.target.checked })}
-                              className="h-3 w-3 rounded border-slate-700 text-accent-purple focus:ring-accent-purple bg-slate-950 cursor-pointer"
-                            />
-                            <span className={lead.docOfficeVisited ? "text-accent-emerald font-extrabold" : ""}>Office visited</span>
-                          </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Other docs received">
-                            <input
-                              type="checkbox"
-                              checked={!!lead.docOthers}
-                              onChange={(e) => handleInlineUpdate(lead.id, { docOthers: e.target.checked })}
-                              className="h-3 w-3 rounded border-slate-700 text-accent-purple focus:ring-accent-purple bg-slate-950 cursor-pointer"
-                            />
-                            <span className={lead.docOthers ? "text-accent-emerald font-extrabold" : ""}>Others</span>
-                          </label>
-                        </div>
-                      </td>
 
                       {/* 6. Assigned Telecaller (Editable dropdown in Inline edit!) */}
                       <td className="px-4 py-3" onClick={(e) => isInlineEdit && e.stopPropagation()}>

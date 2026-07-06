@@ -3,7 +3,7 @@ import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
 import { 
   X, Info, Sparkles, CheckCircle2, RefreshCw, AlertTriangle, 
   Calendar, Clipboard, Check, Star, ListTodo, History, 
-  Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Bell, Plus
+  Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Bell, Plus, PhoneCall
 } from 'lucide-react';
 import { getCountryFlagUrl, formatCandidateName } from '../utils';
 
@@ -424,7 +424,7 @@ export default function LeadModal({
                   {lead.fitScore} Fit
                 </span>
                 {lead.country && (
-                  <span className="text-[10px] bg-emerald-950/40 text-emerald-400 border border-emerald-900/30 rounded-md px-1.5 py-0.5 font-bold uppercase flex items-center gap-1">
+                  <span className="text-[10px] bg-emerald-950 text-accent-emerald border border-emerald-400/50 rounded-md px-1.5 py-0.5 font-bold uppercase flex items-center gap-1 shadow-2xs">
                     {getCountryFlagUrl(lead.country) ? (
                       <img 
                         src={getCountryFlagUrl(lead.country)} 
@@ -439,64 +439,81 @@ export default function LeadModal({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-400 font-mono mt-0.5">
-                Serial No: <span className="text-slate-200 font-bold">{lead.serialNo || 'Pending'}</span> 
-                {' • '} Phone: <span className="text-slate-200 font-bold">{lead.phone}</span> 
+              <div className="flex items-center flex-wrap gap-x-2.5 gap-y-2 text-xs text-slate-400 font-mono mt-1.5">
+                <span className="flex items-center gap-1">
+                  Serial No: <span className="text-slate-200 font-bold">{lead.serialNo || 'Pending'}</span> 
+                </span>
+                <span className="text-slate-600 select-none">•</span>
+                <span className="flex items-center gap-1">
+                  Phone: <span className="text-slate-200 font-bold">{lead.phone}</span> 
+                </span>
                 {lead.alternateNo && (
                   <>
-                    {' • '} Alt: <span className="text-slate-200 font-bold">{lead.alternateNo}</span>
+                    <span className="text-slate-600 select-none">•</span>
+                    <span className="flex items-center gap-1">
+                      Alt: <span className="text-slate-200 font-bold">{lead.alternateNo}</span>
+                    </span>
                   </>
                 )}
                 {lead.assignedTo && (
                   <>
-                    {' • '} Coordinator:{' '}
-                    <span className="text-emerald-400 font-extrabold bg-emerald-950/40 px-1.5 py-0.5 rounded-sm border border-emerald-900/30">
-                      {lead.assignedTo}
+                    <span className="text-slate-600 select-none">•</span>
+                    <span className="flex items-center gap-1">
+                      Coordinator:{' '}
+                      <span className="text-accent-purple font-extrabold bg-purple-950 px-1.5 py-0.5 rounded-sm border border-purple-400/50">
+                        {lead.assignedTo}
+                      </span>
                     </span>
                   </>
                 )}
                 {lead.source && (
                   <>
-                    {' • '} Source:{' '}
-                    <span className="text-amber-400 font-bold bg-amber-950/40 px-1.5 py-0.5 rounded-sm border border-amber-900/30 uppercase">
-                      {lead.source}
+                    <span className="text-slate-600 select-none">•</span>
+                    <span className="flex items-center gap-1">
+                      Source:{' '}
+                      <span className="text-slate-200 font-bold bg-slate-750 px-1.5 py-0.5 rounded-sm border border-slate-700 uppercase">
+                        {lead.source}
+                      </span>
                     </span>
                   </>
                 )}
                 {lead.project && (
                   <>
-                    {' • '} Project:{' '}
-                    <span className="text-indigo-400 font-bold bg-purple-950/40 px-1.5 py-0.5 rounded-sm border border-purple-900/30 uppercase">
-                      {lead.project}
+                    <span className="text-slate-600 select-none">•</span>
+                    <span className="flex items-center gap-1">
+                      Project:{' '}
+                      <span className="text-accent-purple font-bold bg-purple-950 px-1.5 py-0.5 rounded-sm border border-purple-400/50 uppercase">
+                        {lead.project}
+                      </span>
                     </span>
                   </>
                 )}
-              </p>
+              </div>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
-            {/* Smaller Stage selection */}
-            <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-750">
-              <span className="text-[9px] uppercase font-black text-slate-400 px-1 font-mono">Stage:</span>
+            {/* Shorter, Thicker, Bolder and More Attractive Stage selection */}
+            <div className="flex items-center gap-1.5 bg-slate-900 py-1 px-2.5 rounded-xl border border-slate-600 shadow-xs">
+              <span className="text-[10px] uppercase font-black text-slate-300 font-mono tracking-wider">Stage:</span>
               <select
                 value={formFields.stage}
                 name="stage"
                 onChange={handleFieldChange}
-                className="text-[11px] font-extrabold rounded bg-slate-950 text-slate-300 px-2 py-1 border-none focus:outline-none cursor-pointer"
+                className="text-[12px] font-black rounded-lg bg-slate-950 text-slate-100 px-2 py-1.5 focus:outline-none cursor-pointer max-w-[125px] border-none outline-none font-sans"
               >
-                <option value="new">New Inbound</option>
-                <option value="negotiating">In Discussion</option>
-                <option value="rotations">In Rotations</option>
-                <option value="proposal">Office Visited/Interview Attended</option>
-                <option value="won">Closed Won</option>
-                <option value="lost">Closed Lost</option>
+                <option value="new" className="font-extrabold bg-slate-900 text-slate-100">New Inbound</option>
+                <option value="negotiating" className="font-extrabold bg-slate-900 text-amber-400">In Discussion</option>
+                <option value="rotations" className="font-extrabold bg-slate-900 text-indigo-400">In Rotations</option>
+                <option value="proposal" className="font-extrabold bg-slate-900 text-purple-400">Office Visited</option>
+                <option value="won" className="font-extrabold bg-slate-900 text-emerald-400">Closed Won ✅</option>
+                <option value="lost" className="font-extrabold bg-slate-900 text-rose-400">Closed Lost ❌</option>
               </select>
             </div>
 
-            {/* Smaller Reminder Toggle Switch */}
-            <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-lg border border-slate-750">
-              <span className="text-[9px] uppercase font-black text-slate-400 px-1 font-mono flex items-center gap-0.5">
+            {/* Smaller Reminder Button matching Stage selection style but smaller */}
+            <div className="flex items-center gap-1.5 bg-slate-900 py-1 px-2.5 rounded-xl border border-slate-600 shadow-xs shrink-0">
+              <span className="text-[10px] uppercase font-black text-slate-300 font-mono tracking-wider flex items-center gap-1">
                 <Bell className={`h-3 w-3 ${formFields.reminderEnabled ? 'text-indigo-400 fill-indigo-400' : 'text-slate-450'}`} />
                 <span>Reminder:</span>
               </span>
@@ -526,24 +543,20 @@ export default function LeadModal({
                     console.error(err);
                   }
                 }}
-                className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                  formFields.reminderEnabled ? 'bg-indigo-600' : 'bg-slate-700'
+                className={`text-[12px] font-black rounded-lg bg-slate-950 px-2 py-1.5 focus:outline-none cursor-pointer border-none outline-none font-sans transition-all whitespace-nowrap ${
+                  formFields.reminderEnabled ? 'text-indigo-400 font-extrabold' : 'text-slate-400'
                 }`}
               >
-                <span
-                  className={`pointer-events-none inline-block h-2.5 w-2.5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                    formFields.reminderEnabled ? 'translate-x-3' : 'translate-x-0'
-                  }`}
-                />
+                {formFields.reminderEnabled ? 'ON' : 'OFF'}
               </button>
             </div>
 
-            {/* Top-Right Save Changes Button */}
+            {/* Top-Right Save Changes Button matching Reminder button height and width */}
             <button
               type="button"
               onClick={() => saveProfileEdits()}
               disabled={savingForm}
-              className={`flex items-center justify-center gap-1.5 px-3.5 py-1.5 h-8 min-w-[92px] font-black text-[11px] rounded-xl shadow-3xs transition-all duration-200 cursor-pointer disabled:opacity-50 uppercase tracking-wider border select-none ${
+              className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl shadow-xs font-black text-[12px] uppercase tracking-wider border transition-all duration-200 cursor-pointer disabled:opacity-50 select-none shrink-0 ${
                 saveSuccess 
                   ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm shadow-emerald-600/15' 
                   : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700 hover:shadow-md hover:shadow-emerald-600/15 active:scale-95'
@@ -677,34 +690,61 @@ export default function LeadModal({
                     </div>
                   </div>
 
-                  {/* Call Remarks Sheet overview (G-Sheet Equivalent!) */}
+                  {/* Live Telecaller Remarks (Primary) */}
                   <div className="bg-slate-900/20 p-4.5 rounded-xl border border-slate-750 space-y-3">
                     <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-750 pb-1.5 flex items-center justify-between">
-                      <span>Live Telecaller Remarks columns</span>
-                      <span className="text-[9px] font-semibold text-slate-400 uppercase bg-slate-900 border border-slate-750 px-1.5 py-0.5 rounded-sm font-mono">Synced on commit</span>
+                      <span>Live Telecaller Remarks</span>
                     </h4>
 
                     <div className="space-y-2.5 text-xs">
                       <div className="grid grid-cols-1 gap-2.5">
-                        <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-750 text-left">
+                        <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-750 text-left focus-within:border-accent-purple transition-all">
                           <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">Remarks 1 (First Contact Outcome)</span>
-                          <p className="text-slate-300 italic font-mono mt-1 leading-relaxed">
-                            {lead.remarks1 ? `"${lead.remarks1}"` : '— No remarks logged yet.'}
-                          </p>
+                          <textarea
+                            rows={2}
+                            name="remarks1"
+                            placeholder="— No remarks logged yet."
+                            value={formFields.remarks1 || ''}
+                            onChange={handleFieldChange}
+                            className="w-full bg-transparent border-none p-0 text-slate-200 placeholder-slate-500 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-semibold text-xs"
+                          />
                         </div>
-                        <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-750 text-left">
+                        <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-750 text-left focus-within:border-accent-purple transition-all">
                           <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">Remarks 2 (Follow-up Call Comments)</span>
-                          <p className="text-slate-300 italic font-mono mt-1 leading-relaxed">
-                            {lead.remarks2 ? `"${lead.remarks2}"` : '— No remarks logged yet.'}
-                          </p>
+                          <textarea
+                            rows={2}
+                            name="remarks2"
+                            placeholder="— No remarks logged yet."
+                            value={formFields.remarks2 || ''}
+                            onChange={handleFieldChange}
+                            className="w-full bg-transparent border-none p-0 text-slate-200 placeholder-slate-500 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-semibold text-xs"
+                          />
                         </div>
-                        <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-750 text-left">
-                          <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">Remarks 3 (Final Decision Remarks)</span>
-                          <p className="text-slate-300 italic font-mono mt-1 leading-relaxed">
-                            {lead.remarks3 ? `"${lead.remarks3}"` : '— No remarks logged yet.'}
-                          </p>
+                        <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-750 text-left focus-within:border-amber-500/80 transition-all">
+                          <span className="text-[9px] font-bold text-amber-400 block uppercase tracking-wider flex items-center gap-1">
+                            <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                            Remarks 3 (Final Decision Remarks)
+                          </span>
+                          <textarea
+                            rows={2}
+                            name="remarks3"
+                            placeholder="— No remarks logged yet."
+                            value={formFields.remarks3 || ''}
+                            onChange={handleFieldChange}
+                            className="w-full bg-transparent border-none p-0 text-amber-400 placeholder-amber-400/50 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-black text-xs"
+                          />
                         </div>
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={() => saveProfileEdits()}
+                        disabled={savingForm}
+                        className="w-full py-2.5 bg-slate-900 hover:bg-black text-slate-100 hover:text-white font-extrabold rounded-xl text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md shrink-0 cursor-pointer border border-slate-700"
+                      >
+                        {savingForm ? 'Saving Updates to cloud DB...' : 'Commit Remarks & Profile Changes'}
+                        {saveSuccess && <CheckCircle2 className="h-4 w-4 text-emerald-400 animate-bounce" />}
+                      </button>
 
                       {lead.adminRemarks && (
                         <div className="mt-2 p-2.5 bg-rose-950/20 border border-rose-900/30 text-rose-400 rounded-lg text-left">
@@ -715,37 +755,115 @@ export default function LeadModal({
                     </div>
                   </div>
 
-                  {/* Documents Status Visualization */}
-                  <div className="bg-slate-900/20 p-4.5 rounded-xl border border-slate-750 text-left">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-750 pb-1.5 mb-3 flex items-center justify-between">
-                      <span>Candidate Document Checklist</span>
-                      <span className="text-[9px] font-semibold text-slate-400 uppercase bg-slate-900 border border-slate-750 px-1.5 py-0.5 rounded-sm">Verification Desk</span>
+                  {/* Interactive Candidate Document Checklist - Verification Desk Clickable and Light-Mode Adaptive */}
+                  <div className="bg-slate-900/25 dark:bg-slate-900/10 p-4.5 rounded-xl border border-slate-300 dark:border-slate-750 text-left shadow-xs">
+                    <h4 className="text-xs font-black text-slate-455 dark:text-slate-400 uppercase tracking-wider border-b border-slate-300 dark:border-slate-750 pb-1.5 mb-3 flex items-center justify-between">
+                      <span className="text-slate-800 dark:text-slate-300">Candidate Document Checklist</span>
+                      <span className="text-[9px] font-extrabold text-indigo-550 dark:text-indigo-400 bg-indigo-950/20 dark:bg-slate-900 border border-indigo-900/20 dark:border-slate-750 px-2 py-0.5 rounded uppercase font-mono tracking-wider">
+                        Verification Desk
+                      </span>
                     </h4>
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className={`h-4.5 w-4.5 rounded-md flex items-center justify-center border text-[10px] font-black ${lead.docPassportCopy ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-900 border-slate-750 text-slate-500'}`}>
-                          {lead.docPassportCopy ? '✓' : ''}
+                    
+                    <div className="grid grid-cols-2 gap-3.5 text-xs">
+                      {/* Passport Copy Checkbox */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormFields(prev => ({ ...prev, docPassportCopy: !prev.docPassportCopy }));
+                        }}
+                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-700/10 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        title="Toggle Passport Copy Received"
+                      >
+                        <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
+                          formFields.docPassportCopy 
+                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
+                            : 'bg-slate-200 dark:bg-slate-900 border-slate-400 dark:border-slate-700 text-transparent'
+                        }`}>
+                          ✓
                         </span>
-                        <span className={`font-bold ${lead.docPassportCopy ? 'text-slate-100' : 'text-slate-500'}`}>Passport Copy</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`h-4.5 w-4.5 rounded-md flex items-center justify-center border text-[10px] font-black ${lead.docResume ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-900 border-slate-750 text-slate-500'}`}>
-                          {lead.docResume ? '✓' : ''}
+                        <span className={`font-bold transition-all ${
+                          formFields.docPassportCopy 
+                            ? 'text-slate-800 dark:text-slate-200 font-extrabold' 
+                            : 'text-slate-450 dark:text-slate-500'
+                        }`}>
+                          Passport Copy
                         </span>
-                        <span className={`font-bold ${lead.docResume ? 'text-slate-100' : 'text-slate-500'}`}>Resume / CV</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`h-4.5 w-4.5 rounded-md flex items-center justify-center border text-[10px] font-black ${lead.docOfficeVisited ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-900 border-slate-750 text-slate-500'}`}>
-                          {lead.docOfficeVisited ? '✓' : ''}
+                      </button>
+
+                      {/* Resume / CV Checkbox */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormFields(prev => ({ ...prev, docResume: !prev.docResume }));
+                        }}
+                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-700/10 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        title="Toggle Resume Received"
+                      >
+                        <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
+                          formFields.docResume 
+                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
+                            : 'bg-slate-200 dark:bg-slate-900 border-slate-400 dark:border-slate-700 text-transparent'
+                        }`}>
+                          ✓
                         </span>
-                        <span className={`font-bold ${lead.docOfficeVisited ? 'text-slate-100' : 'text-slate-500'}`}>Office Visites/Online Interview</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`h-4.5 w-4.5 rounded-md flex items-center justify-center border text-[10px] font-black ${lead.docOthers ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-900 border-slate-750 text-slate-500'}`}>
-                          {lead.docOthers ? '✓' : ''}
+                        <span className={`font-bold transition-all ${
+                          formFields.docResume 
+                            ? 'text-slate-800 dark:text-slate-200 font-extrabold' 
+                            : 'text-slate-450 dark:text-slate-500'
+                        }`}>
+                          Resume / CV
                         </span>
-                        <span className={`font-bold ${lead.docOthers ? 'text-slate-100' : 'text-slate-500'}`}>Other Documents</span>
-                      </div>
+                      </button>
+
+                      {/* Office Visited Checkbox */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormFields(prev => ({ ...prev, docOfficeVisited: !prev.docOfficeVisited }));
+                        }}
+                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-700/10 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        title="Toggle Office Visited"
+                      >
+                        <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
+                          formFields.docOfficeVisited 
+                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
+                            : 'bg-slate-200 dark:bg-slate-900 border-slate-400 dark:border-slate-700 text-transparent'
+                        }`}>
+                          ✓
+                        </span>
+                        <span className={`font-bold transition-all ${
+                          formFields.docOfficeVisited 
+                            ? 'text-slate-800 dark:text-slate-200 font-extrabold' 
+                            : 'text-slate-450 dark:text-slate-500'
+                        }`}>
+                          Office Visited
+                        </span>
+                      </button>
+
+                      {/* Other Documents Checkbox */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormFields(prev => ({ ...prev, docOthers: !prev.docOthers }));
+                        }}
+                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-700/10 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        title="Toggle Other Documents Received"
+                      >
+                        <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
+                          formFields.docOthers 
+                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
+                            : 'bg-slate-200 dark:bg-slate-900 border-slate-400 dark:border-slate-700 text-transparent'
+                        }`}>
+                          ✓
+                        </span>
+                        <span className={`font-bold transition-all ${
+                          formFields.docOthers 
+                            ? 'text-slate-800 dark:text-slate-200 font-extrabold' 
+                            : 'text-slate-450 dark:text-slate-500'
+                        }`}>
+                          Other Documents
+                        </span>
+                      </button>
                     </div>
                   </div>
 
@@ -1088,74 +1206,11 @@ export default function LeadModal({
                     </div>
                   </div>
 
-                  {/* 3.5 DOCUMENTS RECEIVED STATUS */}
-                  <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest border-b border-slate-750 pb-1 pt-2">Candidate Document received status</h4>
-                  <div className="grid grid-cols-2 gap-3 bg-slate-900/40 p-3 rounded-xl border border-slate-750">
-                    <label className="flex items-center gap-2.5 cursor-pointer select-none text-xs font-bold text-slate-300">
-                      <input
-                        type="checkbox"
-                        checked={formFields.docPassportCopy}
-                        onChange={(e) => setFormFields(prev => ({ ...prev, docPassportCopy: e.target.checked }))}
-                        className="h-4 w-4 rounded border-slate-700 text-indigo-400 focus:ring-indigo-500 cursor-pointer bg-slate-950"
-                      />
-                      <span>Passport Copy Received</span>
-                    </label>
-                    <label className="flex items-center gap-2.5 cursor-pointer select-none text-xs font-bold text-slate-300">
-                      <input
-                        type="checkbox"
-                        checked={formFields.docResume}
-                        onChange={(e) => setFormFields(prev => ({ ...prev, docResume: e.target.checked }))}
-                        className="h-4 w-4 rounded border-slate-700 text-indigo-400 focus:ring-indigo-500 cursor-pointer bg-slate-950"
-                      />
-                      <span>Resume / CV Received</span>
-                    </label>
-                    <label className="flex items-center gap-2.5 cursor-pointer select-none text-xs font-bold text-slate-300">
-                      <input
-                        type="checkbox"
-                        checked={formFields.docOfficeVisited}
-                        onChange={(e) => setFormFields(prev => ({ ...prev, docOfficeVisited: e.target.checked }))}
-                        className="h-4 w-4 rounded border-slate-700 text-indigo-400 focus:ring-indigo-500 cursor-pointer bg-slate-950"
-                      />
-                      <span>Office Visites/Online Interview Status</span>
-                    </label>
-                    <label className="flex items-center gap-2.5 cursor-pointer select-none text-xs font-bold text-slate-300">
-                      <input
-                        type="checkbox"
-                        checked={formFields.docOthers}
-                        onChange={(e) => setFormFields(prev => ({ ...prev, docOthers: e.target.checked }))}
-                        className="h-4 w-4 rounded border-slate-700 text-indigo-400 focus:ring-indigo-500 cursor-pointer bg-slate-950"
-                      />
-                      <span>Others (Additional Docs)</span>
-                    </label>
-                  </div>
+                  {/* 3.5 DOCUMENTS RECEIVED STATUS has been relocated to the main profile page under the fully clickable Verification Desk */}
 
-                  {/* 4. TELECALLER CALL STATUS */}
-                  <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest border-b border-slate-750 pb-1 pt-2">4. Live Telecaller Call Status</h4>
+                  {/* 4. ADMIN PLACEMENT & NOTES */}
+                  <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest border-b border-slate-750 pb-1 pt-2">4. Admin Placement & Notes</h4>
                   <div className="space-y-3">
-                    <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-750/80 space-y-2">
-                      <label className="block text-[11px] font-bold text-slate-300 flex items-center gap-1 uppercase tracking-wider">
-                        <span>📞 Call Outcome / Connected Status</span>
-                        <span className="text-rose-400 font-extrabold">*</span>
-                      </label>
-                      <select
-                        name="callConnected"
-                        value={formFields.callConnected}
-                        onChange={handleFieldChange}
-                        className={`w-full text-xs px-3 py-2 rounded-lg border font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer ${
-                          formFields.callConnected === 'not_connected'
-                            ? 'bg-rose-950/30 border-rose-800 text-rose-400'
-                            : 'bg-slate-900 border-slate-700 text-slate-100'
-                        }`}
-                      >
-                        <option value="connected">Connected ✅</option>
-                        <option value="not_connected">Not Connected (Mandatory Callback Task) ❌</option>
-                      </select>
-                      {formFields.callConnected === 'not_connected' && (
-                        <p className="text-[10px] text-rose-400 font-bold flex items-center gap-1 animate-pulse">
-                          ⚠️ Error: Please schedule a callback task under "Actions & Reminders" on the right before saving.
-                        </p>
-                      )}
-                    </div>
 
                     <div>
                       <label className="block text-[11px] font-semibold text-rose-400 mb-0.5">Admin Placement instructions (Admins Only)</label>
@@ -1167,18 +1222,6 @@ export default function LeadModal({
                         onChange={handleFieldChange}
                         rows={2}
                         className="w-full text-xs p-3 rounded-lg bg-rose-950/20 border border-rose-900/30 text-rose-400 focus:ring-1 focus:ring-rose-500 focus:outline-none disabled:bg-slate-950 disabled:text-slate-400"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Additional General Notes</label>
-                      <textarea
-                        name="notes"
-                        placeholder="Alternate phone contacts, family numbers, medical condition warnings..."
-                        value={formFields.notes || ''}
-                        onChange={handleFieldChange}
-                        rows={3}
-                        className="w-full text-xs p-3 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none"
                       />
                     </div>
 
@@ -1287,49 +1330,54 @@ export default function LeadModal({
           {/* Right Column: Dynamic Action Hub (Timeline, Task Center, AISensy Templates) */}
           <div className="w-1/2 flex flex-col h-full bg-slate-900/10 relative justify-between border-l border-slate-750">
             
-            {/* Main Lead Remarks Box */}
-            <div className="p-4 bg-slate-950/40 border-b border-slate-750 space-y-3.5 shrink-0 text-left shadow-inner">
-              <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2 font-display">
-                <MessageSquare className="h-4 w-4 text-accent-purple" /> Live Telecaller Remarks
-              </h4>
-              <div className="grid grid-cols-1 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-[9.5px] font-black text-slate-400 uppercase tracking-wide">📞 Remarks 1 — First Contact Outcome</label>
-                  <input
-                    type="text"
-                    name="remarks1"
-                    placeholder="Write first phone call comments..."
-                    value={formFields.remarks1}
-                    onChange={handleFieldChange}
-                    className="w-full text-xs px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-750 focus:ring-1 focus:ring-accent-purple focus:border-accent-purple focus:outline-none font-mono font-medium text-slate-200 transition-all"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-[9.5px] font-black text-slate-400 uppercase tracking-wide">📞 Remarks 2 — Follow-up Outcome</label>
-                  <input
-                    type="text"
-                    name="remarks2"
-                    placeholder="Write follow up phone comments..."
-                    value={formFields.remarks2}
-                    onChange={handleFieldChange}
-                    className="w-full text-xs px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-750 focus:ring-1 focus:ring-accent-purple focus:border-accent-purple focus:outline-none font-mono font-medium text-slate-200 transition-all"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-[9.5px] font-black text-amber-400 uppercase tracking-wide flex items-center gap-1">
-                    <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
-                    <span>📞 Remarks 3 — Final Resolution Outcome</span>
-                  </label>
-                  <input
-                    type="text"
-                    name="remarks3"
-                    placeholder="Write final decision comments..."
-                    value={formFields.remarks3}
-                    onChange={handleFieldChange}
-                    className="w-full text-xs px-3.5 py-2 rounded-xl bg-slate-900 border-2 border-amber-500/50 text-amber-400 placeholder-amber-400/50 focus:ring-1 focus:ring-amber-500 focus:border-amber-500 focus:outline-none font-mono font-black transition-all shadow-md shadow-amber-950/20"
-                  />
-                </div>
+            {/* Live Telecaller Call Status */}
+            <div className="p-4 bg-slate-950/40 border-b border-slate-750 space-y-3 shrink-0 text-left shadow-inner">
+              <div className="flex justify-between items-center">
+                <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2 font-display">
+                  <PhoneCall className="h-4 w-4 text-accent-purple" /> Live Telecaller Call Status
+                </h4>
+                <span className="text-[9px] font-bold text-slate-400 bg-slate-900 border border-slate-750 px-2 py-0.5 rounded font-mono uppercase">
+                  Connected status
+                </span>
               </div>
+
+              <div className="grid grid-cols-2 gap-3.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormFields(prev => ({ ...prev, callConnected: 'connected' }));
+                  }}
+                  className={`py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all border cursor-pointer ${
+                    formFields.callConnected === 'connected'
+                      ? 'bg-emerald-950/40 border-emerald-500/60 text-emerald-400 shadow-md shadow-emerald-950/20'
+                      : 'bg-slate-900 border-slate-750 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                  }`}
+                >
+                  <span className={`w-2.5 h-2.5 rounded-full ${formFields.callConnected === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                  Connected ✅
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormFields(prev => ({ ...prev, callConnected: 'not_connected' }));
+                  }}
+                  className={`py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all border cursor-pointer ${
+                    formFields.callConnected === 'not_connected'
+                      ? 'bg-rose-950/40 border-rose-500/60 text-rose-400 shadow-md shadow-rose-950/20'
+                      : 'bg-slate-900 border-slate-750 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                  }`}
+                >
+                  <span className={`w-2.5 h-2.5 rounded-full ${formFields.callConnected === 'not_connected' ? 'bg-rose-400 animate-pulse' : 'bg-slate-600'}`} />
+                  Not Connected ❌
+                </button>
+              </div>
+
+              {formFields.callConnected === 'not_connected' && (
+                <div className="p-2.5 bg-rose-950/25 border border-rose-900/30 text-rose-300 rounded-lg text-[10px] font-bold flex items-center gap-1.5 animate-pulse mt-1">
+                  <span>⚠️ Please schedule a callback task under "Actions & Reminders" below before committing.</span>
+                </div>
+              )}
             </div>
 
             {/* Header / Tabs switcher */}
@@ -1390,7 +1438,8 @@ export default function LeadModal({
                             required
                             value={newTaskDueDate}
                             onChange={(e) => setNewTaskDueDate(e.target.value)}
-                            className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-accent-purple focus:bg-slate-900 text-slate-100 mt-1 font-semibold"
+                            className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-accent-purple focus:bg-slate-900 text-slate-100 mt-1 font-semibold [color-scheme:dark]"
+                            style={{ colorScheme: 'dark' }}
                           />
                         </div>
                         <div className="flex items-end">

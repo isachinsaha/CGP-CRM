@@ -167,12 +167,12 @@ export default function LeadBoard({
           e.dataTransfer.setData('text/plain', lead.id);
           e.dataTransfer.effectAllowed = 'move';
         }}
-        className="bg-slate-850 rounded-xl border border-slate-750 p-3.5 shadow-sm hover:shadow-xl hover:border-accent-purple hover:-translate-y-0.5 transition-all duration-200 cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full"
+        className="bg-slate-850 rounded-xl border border-slate-700 p-3.5 shadow-sm hover:shadow-xl hover:border-accent-purple hover:-translate-y-0.5 transition-all duration-200 cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full"
         onClick={() => onSelectLead(lead)}
       >
         {/* Target country badge & Stars */}
         <div className="flex justify-between items-center gap-1.5 mb-2">
-          <span className="text-[11px] font-bold text-slate-200 bg-slate-800 px-2.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1.5">
+          <span className="text-[11px] font-bold text-slate-200 bg-slate-750 border border-slate-700 px-2.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1.5 shadow-2xs">
             {lead.country && getCountryFlagUrl(lead.country) ? (
               <img 
                 src={getCountryFlagUrl(lead.country)} 
@@ -194,6 +194,7 @@ export default function LeadBoard({
                     ? 'text-amber-500 fill-amber-500' 
                     : 'text-slate-700'
                 }`} 
+                id={`lead-board-star-${lead.id}-${i}`}
               />
             ))}
           </div>
@@ -201,33 +202,33 @@ export default function LeadBoard({
 
         {/* Name / Phone */}
         <h4 className="font-extrabold text-slate-100 text-sm tracking-wide uppercase font-sans">{formatCandidateName(lead.name)}</h4>
-        <div className="flex items-center justify-between mt-1 pb-1.5 border-b border-slate-750/80">
+        <div className="flex items-center justify-between mt-1 pb-1.5 border-b border-slate-700">
           <span className="text-[11px] text-slate-300 font-semibold font-mono tracking-wide">{lead.phone}</span>
-          <span className="text-[10px] bg-slate-800 border border-slate-700 font-bold px-2 py-0.5 rounded text-slate-200 uppercase font-mono">
+          <span className="text-[10px] bg-slate-750 border border-slate-700 font-bold px-2 py-0.5 rounded text-slate-200 uppercase font-mono">
             {lead.gender === 'F' ? 'F' : 'M'}, Age {lead.age || '24'}
           </span>
         </div>
 
         {/* Position Indicator */}
-        <span className="text-[11px] text-accent-emerald bg-emerald-950 border border-emerald-400/30 px-2.5 py-1 rounded font-bold uppercase truncate block mt-2 text-left w-full font-sans tracking-wide">
+        <span className="text-[11px] text-accent-emerald bg-emerald-950 border border-emerald-400/50 px-2.5 py-1 rounded font-bold uppercase truncate block mt-2 text-left w-full font-sans tracking-wide">
           💼 {lead.position || 'General Applicant'}
         </span>
 
         {lead.project && (
-          <span className="text-[11px] text-accent-purple bg-purple-950 border border-purple-400/30 px-2.5 py-1 rounded font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
+          <span className="text-[11px] text-accent-purple bg-purple-950 border border-purple-400/50 px-2.5 py-1 rounded font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
             🎯 Project: {lead.project}
           </span>
         )}
 
         {lead.source && (
-          <span className="text-[11px] text-slate-200 bg-slate-800 border border-slate-750 px-2.5 py-1 rounded font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
+          <span className="text-[11px] text-slate-200 bg-slate-750 border border-slate-700 px-2.5 py-1 rounded font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
             📣 Source: {lead.source}
           </span>
         )}
 
         {/* Telecaller Remarks Log Indicator */}
         {hasRemarks ? (
-          <div className="bg-slate-900 p-2 rounded-lg border border-slate-750 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-slate-800/90 group/remarks cursor-help">
+          <div className="bg-slate-950 p-2 rounded-lg border border-slate-700 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-slate-900 group/remarks cursor-help">
             <span className="text-[10px] uppercase font-bold text-accent-emerald block mb-0.5 tracking-wider flex justify-between items-center font-sans">
               <span>{lead.remarks3 ? "📞 3rd" : lead.remarks2 ? "📞 2nd" : "📞 1st"} Remark</span>
               <span className="text-[8px] text-slate-400 normal-case font-normal group-hover/remarks:hidden">Full</span>
@@ -237,16 +238,16 @@ export default function LeadBoard({
             </p>
           </div>
         ) : (
-          <div className="text-[11px] text-left text-slate-400 mt-2 font-sans">
+          <div className="text-[11px] text-left text-slate-300 mt-2 font-sans font-medium">
             No Remarks Logged
           </div>
         )}
 
         {/* Coordinator Badge */}
         {lead.assignedTo && (
-          <div className="text-[11px] mt-2 flex justify-between items-center border-t border-slate-750 pt-2 text-left">
-            <span className="text-slate-400 font-bold">Coordinator:</span>
-            <span className="text-accent-purple font-bold bg-purple-950/50 border border-purple-900/40 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-sans">
+          <div className="text-[11px] mt-2 flex justify-between items-center border-t border-slate-700 pt-2 text-left">
+            <span className="text-slate-300 font-extrabold">Coordinator:</span>
+            <span className="text-accent-purple font-black bg-purple-950 border border-purple-400/60 px-2.5 py-1 rounded text-[10px] uppercase tracking-wider font-sans shadow-2xs">
               👤 {lead.assignedTo}
             </span>
           </div>
@@ -317,8 +318,8 @@ export default function LeadBoard({
       )}
 
       {/* Pipeline Border Card Container */}
-      <div className="bg-slate-950/40 rounded-3xl border border-slate-750/85 p-6 shadow-xl text-left">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-5 border-b border-slate-750/80 pb-4 gap-4">
+      <div className="bg-slate-950/40 rounded-3xl border border-slate-700 p-6 shadow-xl text-left">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-5 border-b border-slate-700 pb-4 gap-4">
           {/* Left Side: Controls in One Straight Line */}
           <div className="flex flex-wrap items-center gap-3">
             {/* View Switcher segment button styled beautifully */}
@@ -397,19 +398,21 @@ export default function LeadBoard({
             </div>
 
             {pipelineDateFilter === 'date-wise' && (
-              <div className="flex items-center gap-2 bg-slate-900 border border-slate-750 px-3 py-1.5 rounded-xl text-left animate-fade-in shrink-0">
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-xl text-left animate-fade-in shrink-0">
                 <input
                   type="date"
                   value={filterStartDate}
                   onChange={(e) => setFilterStartDate(e.target.value)}
-                  className="bg-transparent text-[10px] text-slate-100 font-extrabold outline-none border-0 p-0 cursor-pointer h-4 w-24 focus:ring-0"
+                  className="bg-transparent text-[10px] text-slate-100 font-extrabold outline-none border-0 p-0 cursor-pointer h-4 w-24 focus:ring-0 [color-scheme:dark]"
+                  style={{ colorScheme: 'dark' }}
                 />
                 <span className="text-[9px] text-slate-500 font-bold font-mono">to</span>
                 <input
                   type="date"
                   value={filterEndDate}
                   onChange={(e) => setFilterEndDate(e.target.value)}
-                  className="bg-transparent text-[10px] text-slate-100 font-extrabold outline-none border-0 p-0 cursor-pointer h-4 w-24 focus:ring-0"
+                  className="bg-transparent text-[10px] text-slate-100 font-extrabold outline-none border-0 p-0 cursor-pointer h-4 w-24 focus:ring-0 [color-scheme:dark]"
+                  style={{ colorScheme: 'dark' }}
                 />
               </div>
             )}
@@ -528,8 +531,8 @@ export default function LeadBoard({
 
             {/* Active Stage Container (Active Jobs Hub style) */}
             {selectedStage && (
-              <div className="bg-slate-950/40 border border-slate-750/80 rounded-3xl p-6 shadow-3xs text-left space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-750/60 pb-4 gap-3">
+              <div className="bg-slate-950/40 border border-slate-700 rounded-3xl p-6 shadow-3xs text-left space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-700 pb-4 gap-3">
                   <div>
                     <h3 className="text-sm font-black text-slate-100 uppercase tracking-wide flex items-center gap-2">
                       📂 {COLUMNS.find(c => c.id === selectedStage)?.title} Candidates
@@ -590,11 +593,11 @@ export default function LeadBoard({
                     className={`rounded-2xl border p-3.5 flex flex-col min-h-[580px] w-[280px] sm:w-[300px] md:w-[310px] shrink-0 h-full text-left shadow-md transition-all duration-200 ${
                       isDraggedOver 
                         ? 'border-accent-purple bg-accent-purple/10 scale-[1.01] shadow-xl ring-2 ring-accent-purple/20' 
-                        : 'border-slate-750 bg-slate-900/90'
+                        : 'border-slate-700 bg-slate-900/90'
                     }`}
                   >
                     {/* Column Header */}
-                    <div className="flex items-center justify-between mb-4 border-b border-slate-750 pb-2.5 min-h-[44px]">
+                    <div className="flex items-center justify-between mb-4 border-b border-slate-700 pb-2.5 min-h-[44px]">
                       <span className={`text-[9px] sm:text-[9.5px] font-black uppercase tracking-tight px-2 py-1 rounded-md leading-normal break-words inline-block ${col.headerColor}`}>
                         {col.title} ({colLeads.length})
                       </span>
