@@ -3,6 +3,7 @@ import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
 import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Bell, Download, Sparkles, TrendingUp, X, UploadCloud } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { getCountryFlagUrl, formatCandidateName } from '../utils';
+import { SearchableSelect } from './SearchableSelect';
 
 interface LeadListProps {
   leads: Lead[];
@@ -154,7 +155,7 @@ export default function LeadList({
     const phone = getValue(['phone', 'whatsappmobileno', 'mobileno', 'whatsapp', 'candidatemobileno']);
     const gender = getValue(['gender', 'sex']) || 'M';
     const age = Number(getValue(['age', 'years'])) || 24;
-    const origin = getValue(['origin', 'sourcecountry', 'citizenship']) || 'Nepal';
+    const origin = getValue(['origin', 'sourcecountry', 'citizenship']) || '';
     const country = getValue(['country', 'destination', 'targetcountry', 'countryinterest']) || 'Kuwait';
     const position = getValue(['position', 'job', 'positionopening', 'jobposition']) || 'General openings';
     const experience = getValue(['experience', 'workexperience']) || 'Fresh criteria';
@@ -454,6 +455,77 @@ export default function LeadList({
     return ['All', ...deduplicated.sort((a, b) => a.localeCompare(b))];
   }, [leads, metaTags]);
 
+  // Searchable select options helper mappings
+  const countryOptions = useMemo(() => [
+    { value: 'All', label: 'All Applied Countries' },
+    ...targetCountriesList.filter(c => c !== 'All').map(country => ({
+      value: country,
+      label: `✈️ ${country.toUpperCase()}`
+    }))
+  ], [targetCountriesList]);
+
+  const coordinatorOptions = useMemo(() => {
+    const list = [
+      { value: 'All', label: '👤 All Coordinators' },
+      { value: 'Unassigned', label: '👤 Unassigned Only' }
+    ];
+    if (coordinators && coordinators.length > 0) {
+      coordinators.forEach(coord => {
+        list.push({
+          value: coord.username,
+          label: `👤 ${coord.displayName.toUpperCase()}`
+        });
+      });
+    } else {
+      COORDINATORS.forEach(coord => {
+        list.push({
+          value: coord,
+          label: `👤 ${coord.toUpperCase()}`
+        });
+      });
+    }
+    return list;
+  }, [coordinators]);
+
+  const projectOptions = useMemo(() => [
+    { value: 'All', label: 'All Projects' },
+    ...targetProjectsList.filter(p => p !== 'All').map(proj => ({
+      value: proj,
+      label: `🎯 ${proj.toUpperCase()}`
+    }))
+  ], [targetProjectsList]);
+
+  const tagOptions = useMemo(() => [
+    { value: 'All', label: 'All Tags' },
+    ...availableTagsList.filter(t => t !== 'All').map(tag => ({
+      value: tag,
+      label: `🏷️ ${tag}`
+    }))
+  ], [availableTagsList]);
+
+  const fitScoreOptions = useMemo(() => [
+    { value: 'All', label: 'All AI Quality Fit' },
+    { value: 'high', label: '🥇 High Fit Quality' },
+    { value: 'medium', label: '🥈 Medium Fit Quality' },
+    { value: 'low', label: '🥉 Low Fit Quality' },
+    { value: 'unqualified', label: '🛑 Unqualified / Spam' }
+  ], []);
+
+  const genderOptions = useMemo(() => [
+    { value: 'All', label: 'All Genders' },
+    { value: 'Male', label: '👦 Male' },
+    { value: 'Female', label: '👧 Female' }
+  ], []);
+
+  const dateOptions = useMemo(() => [
+    { value: 'All', label: '📅 All Dates' },
+    { value: 'Today', label: '📅 Today' },
+    { value: 'Yesterday', label: '📅 Yesterday' },
+    { value: 'Last7Days', label: '📅 Last 7 Days' },
+    { value: 'Last30Days', label: '📅 Last 30 Days' },
+    { value: 'Custom', label: '📅 Custom Range...' }
+  ], []);
+
   // Handle comprehensive search & multi-layer filters
   const filteredLeads = useMemo(() => {
     if (onFiltersChange) {
@@ -690,99 +762,62 @@ export default function LeadList({
           </div>
 
           {/* Country filter */}
-          <select
+          <SearchableSelect
             value={countryFilter}
-            onChange={(e) => setCountryFilter(e.target.value)}
+            onChange={setCountryFilter}
+            options={countryOptions}
             className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
-          >
-            <option value="All">All Applied Countries</option>
-            {targetCountriesList.filter(c => c !== 'All').map((country, idx) => (
-              <option key={idx} value={country}>✈️ {country.toUpperCase()}</option>
-            ))}
-          </select>
+          />
 
           {/* Coordinator Filter - only in Admin View */}
           {userRole === 'admin' && (
-            <select
+            <SearchableSelect
               value={coordinatorFilter}
-              onChange={(e) => setCoordinatorFilter(e.target.value)}
+              onChange={setCoordinatorFilter}
+              options={coordinatorOptions}
               className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-accent-purple font-black focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
-            >
-              <option value="All">👤 All Coordinators</option>
-              <option value="Unassigned">👤 Unassigned Only</option>
-              {coordinators && coordinators.length > 0 ? (
-                coordinators.map((coord) => (
-                  <option key={coord.id} value={coord.username}>👤 {coord.displayName.toUpperCase()}</option>
-                ))
-              ) : (
-                COORDINATORS.map((coord, idx) => (
-                  <option key={idx} value={coord}>👤 {coord.toUpperCase()}</option>
-                ))
-              )}
-            </select>
+            />
           )}
 
           {/* Hiring Project filter */}
-          <select
+          <SearchableSelect
             value={projectFilter}
-            onChange={(e) => setProjectFilter(e.target.value)}
+            onChange={setProjectFilter}
+            options={projectOptions}
             className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
-          >
-            <option value="All">All Projects</option>
-            {targetProjectsList.filter(p => p !== 'All').map((proj, idx) => (
-              <option key={idx} value={proj}>🎯 {proj.toUpperCase()}</option>
-            ))}
-          </select>
+          />
 
           {/* Tags Filter Dropdown */}
-          <select
+          <SearchableSelect
             value={tagFilter}
-            onChange={(e) => setTagFilter(e.target.value)}
+            onChange={setTagFilter}
+            options={tagOptions}
             className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer"
-          >
-            <option value="All">All Tags</option>
-            {availableTagsList.filter(t => t !== 'All').map((tag, idx) => (
-              <option key={idx} value={tag}>🏷️ {tag}</option>
-            ))}
-          </select>
+          />
 
           {/* Fit score filter */}
-          <select
+          <SearchableSelect
             value={fitScoreFilter}
-            onChange={(e) => setFitScoreFilter(e.target.value)}
+            onChange={setFitScoreFilter}
+            options={fitScoreOptions}
             className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer"
-          >
-            <option value="All">All AI Quality Fit</option>
-            <option value="high">🥇 High Fit Quality</option>
-            <option value="medium">🥈 Medium Fit Quality</option>
-            <option value="low">🥉 Low Fit Quality</option>
-            <option value="unqualified">🛑 Unqualified / Spam</option>
-          </select>
+          />
 
           {/* Gender Filter */}
-          <select
+          <SearchableSelect
             value={genderFilter}
-            onChange={(e) => setGenderFilter(e.target.value)}
+            onChange={setGenderFilter}
+            options={genderOptions}
             className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
-          >
-            <option value="All">All Genders</option>
-            <option value="Male">👦 Male</option>
-            <option value="Female">👧 Female</option>
-          </select>
+          />
 
           {/* Date Wise Filter */}
-          <select
+          <SearchableSelect
             value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
+            onChange={setDateFilter}
+            options={dateOptions}
             className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
-          >
-            <option value="All">📅 All Dates</option>
-            <option value="Today">📅 Today</option>
-            <option value="Yesterday">📅 Yesterday</option>
-            <option value="Last7Days">📅 Last 7 Days</option>
-            <option value="Last30Days">📅 Last 30 Days</option>
-            <option value="Custom">📅 Custom Range...</option>
-          </select>
+          />
 
           {dateFilter === 'Custom' && (
             <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-750 p-1 px-2 rounded-lg animate-in fade-in zoom-in-95">

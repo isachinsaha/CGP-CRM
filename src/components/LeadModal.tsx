@@ -707,7 +707,7 @@ export default function LeadModal({
                       </div>
 
                       {lead.adminRemarks && (
-                        <div className="mt-2 p-2.5 bg-rose-950/20 border border-rose-900/30 text-rose-300 rounded-lg text-left">
+                        <div className="mt-2 p-2.5 bg-rose-950/20 border border-rose-900/30 text-rose-400 rounded-lg text-left">
                           <span className="text-[9px] font-bold text-rose-400 block uppercase">Admin Placement Instructions Directive</span>
                           <p className="font-semibold leading-relaxed mt-0.5">{lead.adminRemarks}</p>
                         </div>
@@ -1143,7 +1143,7 @@ export default function LeadModal({
                         onChange={handleFieldChange}
                         className={`w-full text-xs px-3 py-2 rounded-lg border font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer ${
                           formFields.callConnected === 'not_connected'
-                            ? 'bg-rose-950/30 border-rose-800 text-rose-300'
+                            ? 'bg-rose-950/30 border-rose-800 text-rose-400'
                             : 'bg-slate-900 border-slate-700 text-slate-100'
                         }`}
                       >
@@ -1166,7 +1166,7 @@ export default function LeadModal({
                         value={formFields.adminRemarks}
                         onChange={handleFieldChange}
                         rows={2}
-                        className="w-full text-xs p-3 rounded-lg bg-rose-950/20 border border-rose-900/30 text-rose-300 focus:ring-1 focus:ring-rose-500 focus:outline-none disabled:bg-slate-950 disabled:text-slate-400"
+                        className="w-full text-xs p-3 rounded-lg bg-rose-950/20 border border-rose-900/30 text-rose-400 focus:ring-1 focus:ring-rose-500 focus:outline-none disabled:bg-slate-950 disabled:text-slate-400"
                       />
                     </div>
 
@@ -1326,7 +1326,7 @@ export default function LeadModal({
                     placeholder="Write final decision comments..."
                     value={formFields.remarks3}
                     onChange={handleFieldChange}
-                    className="w-full text-xs px-3.5 py-2 rounded-xl bg-slate-900 border-2 border-amber-500/50 text-amber-300 placeholder-amber-600/40 focus:ring-1 focus:ring-amber-500 focus:border-amber-500 focus:outline-none font-mono font-black transition-all shadow-md shadow-amber-950/20"
+                    className="w-full text-xs px-3.5 py-2 rounded-xl bg-slate-900 border-2 border-amber-500/50 text-amber-400 placeholder-amber-400/50 focus:ring-1 focus:ring-amber-500 focus:border-amber-500 focus:outline-none font-mono font-black transition-all shadow-md shadow-amber-950/20"
                   />
                 </div>
               </div>
