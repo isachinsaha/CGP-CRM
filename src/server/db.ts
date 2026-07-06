@@ -531,6 +531,13 @@ export async function getLeads(): Promise<Lead[]> {
         leads.push(docSnap.data() as Lead);
       });
       fetchedFromCloud = true;
+
+      // Warm and sync the local DATA_FILE cache with current cloud state
+      try {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(leads, null, 2), 'utf-8');
+      } catch (err) {
+        console.error('Failed to sync cloud leads to local cache:', err);
+      }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to get leads from cloud, falling back:', err);
     }
@@ -597,9 +604,20 @@ export async function getLeadById(id: string): Promise<Lead | undefined> {
   return leads.find(l => l.id === id);
 }
 
-// Save all leads
+// Save all leads using smart delta-saving for Firestore
 export async function saveLeads(leads: Lead[]): Promise<void> {
   await initializeDatabase();
+
+  // Read previous leads from local cache to compute the delta (new, modified, deleted)
+  let oldLeads: Lead[] = [];
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const oldData = fs.readFileSync(DATA_FILE, 'utf-8');
+      oldLeads = JSON.parse(oldData) as Lead[];
+    }
+  } catch (err) {
+    console.error('[saveLeads] Failed to read old leads for delta comparison:', err);
+  }
 
   // Write to local JSON file first so we ALWAYS have a local copy and stay fully functional!
   try {
@@ -610,29 +628,73 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
 
   if (db) {
     try {
-      const batch = writeBatch(db);
-      leads.forEach(l => {
-        const docRef = doc(db, 'leads', l.id);
-        batch.set(docRef, cleanForFirestore(l));
-      });
-      await runWithTimeout(batch.commit(), 2000);
-
-      // Delete any removed leads
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'leads')), 2000);
-      const deleteBatch = writeBatch(db);
-      let hasDeletes = false;
-      snapshot.forEach(docSnap => {
-        if (!leads.some(l => l.id === docSnap.id)) {
-          deleteBatch.delete(docSnap.ref);
-          hasDeletes = true;
+      const oldLeadsMap = new Map<string, Lead>();
+      oldLeads.forEach(l => {
+        if (l && l.id) {
+          oldLeadsMap.set(l.id, l);
         }
       });
-      if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 2000);
+
+      const leadsToSave: Lead[] = [];
+      leads.forEach(l => {
+        if (!l || !l.id) return;
+        const oldL = oldLeadsMap.get(l.id);
+        if (!oldL) {
+          // This is a new lead
+          leadsToSave.push(l);
+        } else {
+          // Compare JSON string or updatedAt to check for edits
+          if (l.updatedAt !== oldL.updatedAt || JSON.stringify(l) !== JSON.stringify(oldL)) {
+            leadsToSave.push(l);
+          }
+        }
+      });
+
+      const currentLeadsMap = new Map<string, Lead>();
+      leads.forEach(l => {
+        if (l && l.id) {
+          currentLeadsMap.set(l.id, l);
+        }
+      });
+
+      const leadsToDelete: string[] = [];
+      oldLeads.forEach(oldL => {
+        if (oldL && oldL.id && !currentLeadsMap.has(oldL.id)) {
+          leadsToDelete.push(oldL.id);
+        }
+      });
+
+      console.log(`[Firestore Client] saveLeads diff: ${leadsToSave.length} leads to set, ${leadsToDelete.length} leads to delete (total: ${leads.length})`);
+
+      // Write changes in batches of 400
+      if (leadsToSave.length > 0) {
+        const CHUNK_SIZE = 400;
+        for (let i = 0; i < leadsToSave.length; i += CHUNK_SIZE) {
+          const chunk = leadsToSave.slice(i, i + CHUNK_SIZE);
+          const batch = writeBatch(db);
+          chunk.forEach(l => {
+            const docRef = doc(db, 'leads', l.id);
+            batch.set(docRef, cleanForFirestore(l));
+          });
+          await runWithTimeout(batch.commit(), 5000);
+        }
+      }
+
+      // Delete removed documents in batches of 400
+      if (leadsToDelete.length > 0) {
+        const CHUNK_SIZE = 400;
+        for (let i = 0; i < leadsToDelete.length; i += CHUNK_SIZE) {
+          const chunk = leadsToDelete.slice(i, i + CHUNK_SIZE);
+          const batch = writeBatch(db);
+          chunk.forEach(id => {
+            const docRef = doc(db, 'leads', id);
+            batch.delete(docRef);
+          });
+          await runWithTimeout(batch.commit(), 5000);
+        }
       }
     } catch (err: any) {
-      console.error('[Firestore Client] Failed to save leads to cloud:', err);
-      // Log but do not throw, as we saved to the local file successfully
+      console.error('[Firestore Client] Failed to save leads delta to cloud:', err);
     }
   }
 }
