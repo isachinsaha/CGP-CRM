@@ -109,6 +109,20 @@ export default function App() {
     }
   }, [currentUser?.username]);
 
+  // Listen for Escape key to close open modals/panels
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedLead(null);
+        setIsCreateModalOpen(false);
+        setIsCoordManagerOpen(false);
+        setIsMetadataManagerOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Dynamic countries and positions list states
   const [countries, setCountries] = useState<string[]>(() => {
     const saved = localStorage.getItem('crm_countries');

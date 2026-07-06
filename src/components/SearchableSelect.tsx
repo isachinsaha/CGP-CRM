@@ -77,7 +77,7 @@ export function SearchableSelect({
 
       {isOpen && (
         <div
-          className={`absolute left-0 mt-1 w-64 rounded-xl border border-slate-750 bg-slate-950 p-2 shadow-2xl z-50 focus:outline-none ${dropdownClassName}`}
+          className={`absolute left-0 mt-1 w-64 rounded-xl border border-slate-700 bg-slate-850 p-2 shadow-2xl z-50 focus:outline-none ${dropdownClassName}`}
         >
           {/* Search Input */}
           <div className="relative mb-2">
@@ -88,7 +88,7 @@ export function SearchableSelect({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search..."
-              className="w-full rounded-lg bg-slate-900 border border-slate-800 py-1.5 pl-8 pr-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-accent-purple font-medium"
+              className="w-full rounded-lg bg-slate-900 border border-slate-700 py-1.5 pl-8 pr-3 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-accent-purple font-medium"
             />
           </div>
 
@@ -108,7 +108,7 @@ export function SearchableSelect({
                     className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors ${
                       isSelected
                         ? 'bg-accent-purple/20 text-accent-purple font-black'
-                        : 'text-slate-300 hover:bg-slate-900 hover:text-white'
+                        : 'text-slate-200 hover:bg-slate-950 hover:text-accent-purple font-bold'
                     }`}
                   >
                     <span className="flex items-center gap-2 truncate">

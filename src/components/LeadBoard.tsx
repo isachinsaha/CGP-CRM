@@ -172,7 +172,7 @@ export default function LeadBoard({
       >
         {/* Target country badge & Stars */}
         <div className="flex justify-between items-center gap-1.5 mb-2">
-          <span className="text-[10px] font-black text-slate-300 bg-slate-800 px-2.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1.5">
+          <span className="text-[11px] font-bold text-slate-200 bg-slate-800 px-2.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1.5">
             {lead.country && getCountryFlagUrl(lead.country) ? (
               <img 
                 src={getCountryFlagUrl(lead.country)} 
@@ -200,53 +200,53 @@ export default function LeadBoard({
         </div>
 
         {/* Name / Phone */}
-        <h4 className="font-extrabold text-slate-100 text-[13px] tracking-normal uppercase font-sans">{formatCandidateName(lead.name)}</h4>
+        <h4 className="font-extrabold text-slate-100 text-sm tracking-wide uppercase font-sans">{formatCandidateName(lead.name)}</h4>
         <div className="flex items-center justify-between mt-1 pb-1.5 border-b border-slate-750/80">
-          <span className="text-[10px] text-slate-400 font-bold font-mono">{lead.phone}</span>
-          <span className="text-[9px] bg-slate-800 border border-slate-750 font-bold px-1.5 py-0.5 rounded text-slate-300 uppercase font-mono">
+          <span className="text-[11px] text-slate-300 font-semibold font-mono tracking-wide">{lead.phone}</span>
+          <span className="text-[10px] bg-slate-800 border border-slate-700 font-bold px-2 py-0.5 rounded text-slate-200 uppercase font-mono">
             {lead.gender === 'F' ? 'F' : 'M'}, Age {lead.age || '24'}
           </span>
         </div>
 
         {/* Position Indicator */}
-        <span className="text-[9px] text-emerald-400 bg-emerald-950/40 border border-emerald-900/30 px-2.5 py-1 rounded font-bold uppercase truncate block mt-2 text-left w-full font-display">
+        <span className="text-[11px] text-accent-emerald bg-emerald-950 border border-emerald-400/30 px-2.5 py-1 rounded font-bold uppercase truncate block mt-2 text-left w-full font-sans tracking-wide">
           💼 {lead.position || 'General Applicant'}
         </span>
 
         {lead.project && (
-          <span className="text-[9px] text-accent-purple bg-purple-950/40 border border-purple-900/30 px-2.5 py-1 rounded font-black uppercase truncate block mt-1 text-left w-full font-display">
+          <span className="text-[11px] text-accent-purple bg-purple-950 border border-purple-400/30 px-2.5 py-1 rounded font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
             🎯 Project: {lead.project}
           </span>
         )}
 
         {lead.source && (
-          <span className="text-[9px] text-slate-300 bg-slate-800 border border-slate-750 px-2.5 py-1 rounded font-bold uppercase truncate block mt-1 text-left w-full font-display">
+          <span className="text-[11px] text-slate-200 bg-slate-800 border border-slate-750 px-2.5 py-1 rounded font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
             📣 Source: {lead.source}
           </span>
         )}
 
         {/* Telecaller Remarks Log Indicator */}
         {hasRemarks ? (
-          <div className="bg-slate-900 p-2 rounded-lg border border-slate-750 text-[10px] text-left mt-2 transition-all duration-200 hover:bg-slate-800/90 group/remarks cursor-help">
-            <span className="text-[8px] uppercase font-black text-accent-emerald block mb-0.5 tracking-wider flex justify-between items-center font-display">
+          <div className="bg-slate-900 p-2 rounded-lg border border-slate-750 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-slate-800/90 group/remarks cursor-help">
+            <span className="text-[10px] uppercase font-bold text-accent-emerald block mb-0.5 tracking-wider flex justify-between items-center font-sans">
               <span>{lead.remarks3 ? "📞 3rd" : lead.remarks2 ? "📞 2nd" : "📞 1st"} Remark</span>
-              <span className="text-[7px] text-slate-500 normal-case font-normal group-hover/remarks:hidden">Full</span>
+              <span className="text-[8px] text-slate-400 normal-case font-normal group-hover/remarks:hidden">Full</span>
             </span>
-            <p className="text-slate-300 truncate group-hover/remarks:whitespace-normal group-hover/remarks:break-all italic font-medium font-mono transition-all duration-250">
+            <p className="text-slate-200 truncate group-hover/remarks:whitespace-normal group-hover/remarks:break-all italic font-medium font-mono text-[11px] transition-all duration-250">
               "{lead.remarks3 || lead.remarks2 || lead.remarks1}"
             </p>
           </div>
         ) : (
-          <div className="text-[9px] text-left text-slate-500 mt-2 font-mono">
+          <div className="text-[11px] text-left text-slate-400 mt-2 font-sans">
             No Remarks Logged
           </div>
         )}
 
         {/* Coordinator Badge */}
         {lead.assignedTo && (
-          <div className="text-[10px] mt-2 flex justify-between items-center border-t border-slate-750 pt-1.5 text-left">
-            <span className="text-slate-500 font-bold">Coordinator:</span>
-            <span className="text-accent-purple font-black bg-purple-950/40 border border-purple-900/30 px-2 py-0.5 rounded text-[9px] uppercase tracking-wider font-display">
+          <div className="text-[11px] mt-2 flex justify-between items-center border-t border-slate-750 pt-2 text-left">
+            <span className="text-slate-400 font-bold">Coordinator:</span>
+            <span className="text-accent-purple font-bold bg-purple-950/50 border border-purple-900/40 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-sans">
               👤 {lead.assignedTo}
             </span>
           </div>
@@ -566,7 +566,7 @@ export default function LeadBoard({
             <div className="absolute inset-0 bg-gradient-to-r from-accent-purple/5 via-transparent to-accent-emerald/5 pointer-events-none rounded-2xl" />
             
             {/* Grid Columns */}
-            <div className="flex gap-4 overflow-x-auto pb-4 w-full relative z-10 xl:justify-between" id="kanban-pipeline-columns">
+            <div className="flex gap-4 overflow-x-auto pb-4 w-full relative z-10 xl:justify-start" id="kanban-pipeline-columns">
               {COLUMNS.map(col => {
                 const colLeads = visibleLeads.filter(l => l.stage === col.id);
                 const isDraggedOver = draggedOverColumn === col.id;
@@ -587,7 +587,7 @@ export default function LeadBoard({
                         onUpdateStage(leadId, col.id);
                       }
                     }}
-                    className={`rounded-2xl border p-3.5 flex flex-col min-h-[580px] w-[240px] sm:w-[260px] lg:w-[280px] xl:w-auto xl:flex-1 shrink-0 h-full text-left shadow-md transition-all duration-200 ${
+                    className={`rounded-2xl border p-3.5 flex flex-col min-h-[580px] w-[280px] sm:w-[300px] md:w-[310px] shrink-0 h-full text-left shadow-md transition-all duration-200 ${
                       isDraggedOver 
                         ? 'border-accent-purple bg-accent-purple/10 scale-[1.01] shadow-xl ring-2 ring-accent-purple/20' 
                         : 'border-slate-750 bg-slate-900/90'
