@@ -37,8 +37,8 @@ let currentDbId: string = '(default)';
 
 // Helper to enforce timeouts on async Firestore promises so they never hang the server
 function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 20000): Promise<T> {
-  // Override low timeouts (like 2000ms) with a safe minimum of 20000ms to allow for cold starts and initial connection latency
-  const actualTimeout = Math.max(timeoutMs, 20000);
+  // Override low timeouts with a safe minimum of 5000ms to keep response times snappy while permitting some latency
+  const actualTimeout = Math.max(timeoutMs, 5000);
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`Firestore operation timed out after ${actualTimeout}ms`));
@@ -53,6 +53,42 @@ function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 20000): Prom
         reject(err);
       });
   });
+}
+
+// Circuit breaker state for Firestore
+let cloudSyncEnabled = true;
+let cloudErrorCount = 0;
+let lastCloudErrorTime = 0;
+const CLOUD_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes cooldown
+
+function checkCloudStatus(): boolean {
+  if (!db) return false;
+  if (!cloudSyncEnabled) {
+    const now = Date.now();
+    if (now - lastCloudErrorTime > CLOUD_BREAKER_COOLDOWN_MS) {
+      console.log('[Firestore Client] Circuit breaker cooldown finished. Attempting to re-enable cloud sync.');
+      cloudSyncEnabled = true;
+      cloudErrorCount = 0;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+function handleCloudError(err: any) {
+  const errMsg = err?.message || String(err);
+  const isQuota = errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota') || errMsg.includes('quota') || errMsg.includes('limit exceeded');
+  const isTimeout = errMsg.includes('timed out') || errMsg.includes('timeout');
+  
+  if (isQuota || isTimeout) {
+    cloudErrorCount++;
+    if (isQuota || cloudErrorCount >= 3) {
+      console.error(`[Firestore Client] Circuit breaker tripped! Temporarily disabling cloud sync for 5 minutes due to consecutive errors: ${errMsg}`);
+      cloudSyncEnabled = false;
+      lastCloudErrorTime = Date.now();
+    }
+  }
 }
 
 function initFirestore() {
@@ -83,6 +119,22 @@ function initFirestore() {
 
 // Perform initial initialization
 initFirestore();
+
+// In-Memory Cache for Firestore to dramatically reduce Firestore read operations (and avoid hitting Quota Limits)
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+const CACHE_TTL_MS = 15000; // 15 seconds Cache TTL. Perfect to debounce multiple parallel queries or quick navigations!
+
+const dbCache = {
+  leads: null as CacheEntry<Lead[]> | null,
+  coordinators: null as CacheEntry<Coordinator[]> | null,
+  jobs: null as CacheEntry<Job[]> | null,
+  updates: null as CacheEntry<ImportantUpdate[]> | null,
+  metadata: null as CacheEntry<CgpMetadata> | null,
+};
 
 // Helper to recursively strip or replace undefined values with empty/null for Firestore compatibility
 function cleanForFirestore(obj: any): any {
@@ -132,7 +184,7 @@ export async function initializeCoordinatorsDatabase() {
     fs.writeFileSync(COORDINATORS_FILE, JSON.stringify(defaultCoordinators, null, 2), 'utf-8');
   }
 
-  if (db) {
+  if (checkCloudStatus()) {
     try {
       const q = query(collection(db, 'coordinators'), limit(1));
       const snapshot = await runWithTimeout(getDocs(q), 2000);
@@ -148,6 +200,7 @@ export async function initializeCoordinatorsDatabase() {
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to check/seed coordinators, falling back to local file:', err);
+      handleCloudError(err);
     }
   }
 }
@@ -155,21 +208,44 @@ export async function initializeCoordinatorsDatabase() {
 // Get all coordinators
 export async function getCoordinators(): Promise<Coordinator[]> {
   await initializeCoordinatorsDatabase();
-  if (db) {
+
+  // Check in-memory cache first
+  if (dbCache.coordinators && (Date.now() - dbCache.coordinators.timestamp < CACHE_TTL_MS)) {
+    return dbCache.coordinators.data;
+  }
+
+  if (checkCloudStatus()) {
     try {
       const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 2000);
       const coords: Coordinator[] = [];
       snapshot.forEach(docSnap => {
         coords.push(docSnap.data() as Coordinator);
       });
+
+      // Update in-memory cache
+      dbCache.coordinators = { data: coords, timestamp: Date.now() };
+
+      // Sync and warm the local cache file
+      try {
+        fs.writeFileSync(COORDINATORS_FILE, JSON.stringify(coords, null, 2), 'utf-8');
+      } catch (err) {
+        console.error('Failed to sync cloud coordinators to local cache:', err);
+      }
+
       return coords;
     } catch (err: any) {
       console.error('[Firestore Client] Failed to fetch coordinators from cloud, falling back to local files:', err);
+      handleCloudError(err);
     }
   }
   try {
     const data = fs.readFileSync(COORDINATORS_FILE, 'utf-8');
-    return JSON.parse(data) as Coordinator[];
+    const coords = JSON.parse(data) as Coordinator[];
+
+    // Cache the fallback local values too
+    dbCache.coordinators = { data: coords, timestamp: Date.now() };
+
+    return coords;
   } catch (err) {
     console.error('Failed to read coordinators file', err);
     return [];
@@ -180,6 +256,9 @@ export async function getCoordinators(): Promise<Coordinator[]> {
 export async function saveCoordinators(coordinators: Coordinator[]): Promise<void> {
   await initializeCoordinatorsDatabase();
 
+  // Update in-memory cache immediately so changes are instantly reflected on reads
+  dbCache.coordinators = { data: coordinators, timestamp: Date.now() };
+
   // Write to local JSON file first so we ALWAYS have a local copy and stay fully functional!
   try {
     fs.writeFileSync(COORDINATORS_FILE, JSON.stringify(coordinators, null, 2), 'utf-8');
@@ -187,32 +266,35 @@ export async function saveCoordinators(coordinators: Coordinator[]): Promise<voi
     console.error('Failed to write coordinators file', err);
   }
 
-  if (db) {
-    try {
-      const batch = writeBatch(db);
-      coordinators.forEach(c => {
-        const docRef = doc(db, 'coordinators', c.id);
-        batch.set(docRef, cleanForFirestore(c));
-      });
-      await runWithTimeout(batch.commit(), 2000);
+  if (checkCloudStatus()) {
+    // Run asynchronously in background to avoid blocking the client request
+    (async () => {
+      try {
+        const batch = writeBatch(db);
+        coordinators.forEach(c => {
+          const docRef = doc(db, 'coordinators', c.id);
+          batch.set(docRef, cleanForFirestore(c));
+        });
+        await runWithTimeout(batch.commit(), 2000);
 
-      // Delete any removed coordinators
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 2000);
-      const deleteBatch = writeBatch(db);
-      let hasDeletes = false;
-      snapshot.forEach(docSnap => {
-        if (!coordinators.some(c => c.id === docSnap.id)) {
-          deleteBatch.delete(docSnap.ref);
-          hasDeletes = true;
+        // Delete any removed coordinators
+        const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 2000);
+        const deleteBatch = writeBatch(db);
+        let hasDeletes = false;
+        snapshot.forEach(docSnap => {
+          if (!coordinators.some(c => c.id === docSnap.id)) {
+            deleteBatch.delete(docSnap.ref);
+            hasDeletes = true;
+          }
+        });
+        if (hasDeletes) {
+          await runWithTimeout(deleteBatch.commit(), 2000);
         }
-      });
-      if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 2000);
+      } catch (err: any) {
+        console.error('[Firestore Client] Failed to save coordinators to cloud in background:', err);
+        handleCloudError(err);
       }
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save coordinators to cloud:', err);
-      // Log but do not throw, as we saved to the local file successfully
-    }
+    })();
   }
 }
 
@@ -498,7 +580,7 @@ async function initializeDatabase() {
     fs.writeFileSync(DATA_FILE, JSON.stringify(initialLeads, null, 2), 'utf-8');
   }
 
-  if (db) {
+  if (checkCloudStatus()) {
     try {
       const q = query(collection(db, 'leads'), limit(1));
       const snapshot = await runWithTimeout(getDocs(q), 2000);
@@ -514,6 +596,7 @@ async function initializeDatabase() {
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to check/seed leads:', err);
+      handleCloudError(err);
     }
   }
 }
@@ -521,9 +604,15 @@ async function initializeDatabase() {
 // Read database
 export async function getLeads(): Promise<Lead[]> {
   await initializeDatabase();
+
+  // Check in-memory cache first
+  if (dbCache.leads && (Date.now() - dbCache.leads.timestamp < CACHE_TTL_MS)) {
+    return dbCache.leads.data;
+  }
+
   let leads: Lead[] = [];
   let fetchedFromCloud = false;
-  if (db) {
+  if (checkCloudStatus()) {
     try {
       const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
       const snapshot = await runWithTimeout(getDocs(q), 2000);
@@ -531,6 +620,9 @@ export async function getLeads(): Promise<Lead[]> {
         leads.push(docSnap.data() as Lead);
       });
       fetchedFromCloud = true;
+
+      // Update in-memory cache
+      dbCache.leads = { data: leads, timestamp: Date.now() };
 
       // Warm and sync the local DATA_FILE cache with current cloud state
       try {
@@ -540,12 +632,16 @@ export async function getLeads(): Promise<Lead[]> {
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to get leads from cloud, falling back:', err);
+      handleCloudError(err);
     }
   }
   if (!fetchedFromCloud) {
     try {
       const data = fs.readFileSync(DATA_FILE, 'utf-8');
       leads = JSON.parse(data) as Lead[];
+
+      // Cache the local file fallback too
+      dbCache.leads = { data: leads, timestamp: Date.now() };
     } catch (err) {
       console.error('Failed to read database', err);
       leads = [];
@@ -584,12 +680,20 @@ export async function getLeads(): Promise<Lead[]> {
     saveLeads(leads).catch(err => console.error('Failed to save migrated leads:', err));
   }
 
+  // Store final migrated version in-memory cache
+  dbCache.leads = { data: leads, timestamp: Date.now() };
+
   return leads;
 }
 
 // Find lead by id
 export async function getLeadById(id: string): Promise<Lead | undefined> {
-  if (db) {
+  // Try retrieving from active in-memory cache first if available
+  if (dbCache.leads && (Date.now() - dbCache.leads.timestamp < CACHE_TTL_MS)) {
+    return dbCache.leads.data.find(l => l.id === id);
+  }
+
+  if (checkCloudStatus()) {
     try {
       const docSnap = await runWithTimeout(getDoc(doc(db, 'leads', id)), 2000);
       if (docSnap.exists()) {
@@ -598,6 +702,7 @@ export async function getLeadById(id: string): Promise<Lead | undefined> {
       return undefined;
     } catch (err: any) {
       console.error('[Firestore Client] Failed to get lead by ID from cloud, falling back:', err);
+      handleCloudError(err);
     }
   }
   const leads = await getLeads();
@@ -607,6 +712,9 @@ export async function getLeadById(id: string): Promise<Lead | undefined> {
 // Save all leads using smart delta-saving for Firestore
 export async function saveLeads(leads: Lead[]): Promise<void> {
   await initializeDatabase();
+
+  // Update in-memory cache immediately so local changes are instantly reflected on reads
+  dbCache.leads = { data: leads, timestamp: Date.now() };
 
   // Read previous leads from local cache to compute the delta (new, modified, deleted)
   let oldLeads: Lead[] = [];
@@ -626,88 +734,87 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
     console.error('Failed to write database', err);
   }
 
-  if (db) {
-    try {
-      const oldLeadsMap = new Map<string, Lead>();
-      oldLeads.forEach(l => {
-        if (l && l.id) {
-          oldLeadsMap.set(l.id, l);
-        }
-      });
+  if (checkCloudStatus()) {
+    // Run asynchronously in the background so it is completely non-blocking!
+    (async () => {
+      try {
+        const oldLeadsMap = new Map<string, Lead>();
+        oldLeads.forEach(l => {
+          if (l && l.id) {
+            oldLeadsMap.set(l.id, l);
+          }
+        });
 
-      const leadsToSave: Lead[] = [];
-      leads.forEach(l => {
-        if (!l || !l.id) return;
-        const oldL = oldLeadsMap.get(l.id);
-        if (!oldL) {
-          // This is a new lead
-          leadsToSave.push(l);
-        } else {
-          // Compare JSON string or updatedAt to check for edits
-          if (l.updatedAt !== oldL.updatedAt || JSON.stringify(l) !== JSON.stringify(oldL)) {
+        const leadsToSave: Lead[] = [];
+        leads.forEach(l => {
+          if (!l || !l.id) return;
+          const oldL = oldLeadsMap.get(l.id);
+          if (!oldL) {
+            // This is a new lead
             leadsToSave.push(l);
+          } else {
+            // Compare JSON string or updatedAt to check for edits
+            if (l.updatedAt !== oldL.updatedAt || JSON.stringify(l) !== JSON.stringify(oldL)) {
+              leadsToSave.push(l);
+            }
+          }
+        });
+
+        const currentLeadsMap = new Map<string, Lead>();
+        leads.forEach(l => {
+          if (l && l.id) {
+            currentLeadsMap.set(l.id, l);
+          }
+        });
+
+        const leadsToDelete: string[] = [];
+        oldLeads.forEach(oldL => {
+          if (oldL && oldL.id && !currentLeadsMap.has(oldL.id)) {
+            leadsToDelete.push(oldL.id);
+          }
+        });
+
+        if (leadsToSave.length > 0 || leadsToDelete.length > 0) {
+          console.log(`[Firestore Client] Background saveLeads diff: ${leadsToSave.length} leads to set, ${leadsToDelete.length} leads to delete (total: ${leads.length})`);
+        }
+
+        // Write changes in batches of 400
+        if (leadsToSave.length > 0) {
+          const CHUNK_SIZE = 400;
+          for (let i = 0; i < leadsToSave.length; i += CHUNK_SIZE) {
+            const chunk = leadsToSave.slice(i, i + CHUNK_SIZE);
+            const batch = writeBatch(db);
+            chunk.forEach(l => {
+              const docRef = doc(db, 'leads', l.id);
+              batch.set(docRef, cleanForFirestore(l));
+            });
+            await runWithTimeout(batch.commit(), 5000);
           }
         }
-      });
 
-      const currentLeadsMap = new Map<string, Lead>();
-      leads.forEach(l => {
-        if (l && l.id) {
-          currentLeadsMap.set(l.id, l);
+        // Delete removed documents in batches of 400
+        if (leadsToDelete.length > 0) {
+          const CHUNK_SIZE = 400;
+          for (let i = 0; i < leadsToDelete.length; i += CHUNK_SIZE) {
+            const chunk = leadsToDelete.slice(i, i + CHUNK_SIZE);
+            const batch = writeBatch(db);
+            chunk.forEach(id => {
+              const docRef = doc(db, 'leads', id);
+              batch.delete(docRef);
+            });
+            await runWithTimeout(batch.commit(), 5000);
+          }
         }
-      });
-
-      const leadsToDelete: string[] = [];
-      oldLeads.forEach(oldL => {
-        if (oldL && oldL.id && !currentLeadsMap.has(oldL.id)) {
-          leadsToDelete.push(oldL.id);
-        }
-      });
-
-      console.log(`[Firestore Client] saveLeads diff: ${leadsToSave.length} leads to set, ${leadsToDelete.length} leads to delete (total: ${leads.length})`);
-
-      // Write changes in batches of 400
-      if (leadsToSave.length > 0) {
-        const CHUNK_SIZE = 400;
-        for (let i = 0; i < leadsToSave.length; i += CHUNK_SIZE) {
-          const chunk = leadsToSave.slice(i, i + CHUNK_SIZE);
-          const batch = writeBatch(db);
-          chunk.forEach(l => {
-            const docRef = doc(db, 'leads', l.id);
-            batch.set(docRef, cleanForFirestore(l));
-          });
-          await runWithTimeout(batch.commit(), 5000);
-        }
+      } catch (err: any) {
+        console.error('[Firestore Client] Failed to save leads delta to cloud in background:', err);
+        handleCloudError(err);
       }
-
-      // Delete removed documents in batches of 400
-      if (leadsToDelete.length > 0) {
-        const CHUNK_SIZE = 400;
-        for (let i = 0; i < leadsToDelete.length; i += CHUNK_SIZE) {
-          const chunk = leadsToDelete.slice(i, i + CHUNK_SIZE);
-          const batch = writeBatch(db);
-          chunk.forEach(id => {
-            const docRef = doc(db, 'leads', id);
-            batch.delete(docRef);
-          });
-          await runWithTimeout(batch.commit(), 5000);
-        }
-      }
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save leads delta to cloud:', err);
-    }
+    })();
   }
 }
 
 // Add custom lead
 export async function addLead(lead: Lead): Promise<void> {
-  if (db) {
-    try {
-      await runWithTimeout(setDoc(doc(db, 'leads', lead.id), cleanForFirestore(lead)), 2000);
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to add lead to cloud:', err);
-    }
-  }
   const leads = await getLeads();
   leads.unshift(lead);
   await saveLeads(leads);
@@ -833,7 +940,7 @@ export async function initializeJobsDatabase() {
     fs.writeFileSync(JOBS_FILE, JSON.stringify(defaultJobs, null, 2), 'utf-8');
   }
 
-  if (db) {
+  if (checkCloudStatus()) {
     try {
       const statusRef = doc(db, 'metadata', 'jobs_status');
       const statusSnap = await runWithTimeout(getDoc(statusRef), 2000);
@@ -850,6 +957,7 @@ export async function initializeJobsDatabase() {
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to check/seed jobs, falling back to local file:', err);
+      handleCloudError(err);
     }
   }
 }
@@ -857,7 +965,13 @@ export async function initializeJobsDatabase() {
 // Get all jobs
 export async function getJobs(): Promise<Job[]> {
   await initializeJobsDatabase();
-  if (db) {
+
+  // Check in-memory cache first
+  if (dbCache.jobs && (Date.now() - dbCache.jobs.timestamp < CACHE_TTL_MS)) {
+    return dbCache.jobs.data;
+  }
+
+  if (checkCloudStatus()) {
     try {
       const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 2000);
       const jobs: Job[] = [];
@@ -882,9 +996,22 @@ export async function getJobs(): Promise<Job[]> {
           } as Job);
         }
       });
-      return jobs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      const sortedJobs = jobs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+      // Update in-memory cache
+      dbCache.jobs = { data: sortedJobs, timestamp: Date.now() };
+
+      // Sync the local file cache with current cloud state so cold-starts are fully populated!
+      try {
+        fs.writeFileSync(JOBS_FILE, JSON.stringify(sortedJobs, null, 2), 'utf-8');
+      } catch (err) {
+        console.error('Failed to sync cloud jobs to local cache:', err);
+      }
+
+      return sortedJobs;
     } catch (err: any) {
       console.error('[Firestore Client] Failed to fetch jobs from cloud, falling back to local files:', err);
+      handleCloudError(err);
     }
   }
   try {
@@ -906,7 +1033,12 @@ export async function getJobs(): Promise<Job[]> {
       isActive: j.isActive !== undefined ? Boolean(j.isActive) : true,
       createdAt: j.createdAt || new Date().toISOString()
     }));
-    return sanitized.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    const sortedSanitized = sanitized.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+    // Cache the fallback local values too
+    dbCache.jobs = { data: sortedSanitized, timestamp: Date.now() };
+
+    return sortedSanitized;
   } catch (err) {
     console.error('Failed to read jobs file', err);
     return [];
@@ -918,6 +1050,9 @@ export async function saveJobs(jobs: Job[]): Promise<void> {
   await initializeJobsDatabase();
   const validJobs = (jobs || []).filter(j => j && typeof j === 'object' && j.id);
 
+  // Update in-memory cache immediately so changes are instantly reflected on reads
+  dbCache.jobs = { data: validJobs, timestamp: Date.now() };
+
   // Write to local file first so we ALWAYS have a local copy and stay fully functional!
   try {
     fs.writeFileSync(JOBS_FILE, JSON.stringify(validJobs, null, 2), 'utf-8');
@@ -925,31 +1060,35 @@ export async function saveJobs(jobs: Job[]): Promise<void> {
     console.error('Failed to write jobs file', err);
   }
 
-  if (db) {
-    try {
-      const batch = writeBatch(db);
-      validJobs.forEach(j => {
-        const docRef = doc(db, 'jobs', j.id);
-        batch.set(docRef, cleanForFirestore(j));
-      });
-      await runWithTimeout(batch.commit(), 2000);
+  if (checkCloudStatus()) {
+    // Run asynchronously in background to avoid blocking client requests
+    (async () => {
+      try {
+        const batch = writeBatch(db);
+        validJobs.forEach(j => {
+          const docRef = doc(db, 'jobs', j.id);
+          batch.set(docRef, cleanForFirestore(j));
+        });
+        await runWithTimeout(batch.commit(), 2000);
 
-      // Delete any removed jobs
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 2000);
-      const deleteBatch = writeBatch(db);
-      let hasDeletes = false;
-      snapshot.forEach(docSnap => {
-        if (!validJobs.some(j => j.id === docSnap.id)) {
-          deleteBatch.delete(docSnap.ref);
-          hasDeletes = true;
+        // Delete any removed jobs
+        const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 2000);
+        const deleteBatch = writeBatch(db);
+        let hasDeletes = false;
+        snapshot.forEach(docSnap => {
+          if (!validJobs.some(j => j.id === docSnap.id)) {
+            deleteBatch.delete(docSnap.ref);
+            hasDeletes = true;
+          }
+        });
+        if (hasDeletes) {
+          await runWithTimeout(deleteBatch.commit(), 2000);
         }
-      });
-      if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 2000);
+      } catch (err: any) {
+        console.error('[Firestore Client] Failed to save jobs to cloud in background:', err);
+        handleCloudError(err);
       }
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save jobs to cloud:', err);
-    }
+    })();
   }
 }
 
@@ -976,7 +1115,7 @@ export async function initializeUpdatesDatabase() {
     fs.writeFileSync(UPDATES_FILE, JSON.stringify(defaultUpdates, null, 2), 'utf-8');
   }
 
-  if (db) {
+  if (checkCloudStatus()) {
     try {
       const statusRef = doc(db, 'metadata', 'updates_status');
       const statusSnap = await runWithTimeout(getDoc(statusRef), 2000);
@@ -993,6 +1132,7 @@ export async function initializeUpdatesDatabase() {
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to check/seed updates, falling back to local file:', err);
+      handleCloudError(err);
     }
   }
 }
@@ -1000,7 +1140,13 @@ export async function initializeUpdatesDatabase() {
 // Get all updates
 export async function getUpdates(): Promise<ImportantUpdate[]> {
   await initializeUpdatesDatabase();
-  if (db) {
+
+  // Check in-memory cache first
+  if (dbCache.updates && (Date.now() - dbCache.updates.timestamp < CACHE_TTL_MS)) {
+    return dbCache.updates.data;
+  }
+
+  if (checkCloudStatus()) {
     try {
       const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 2000);
       const updates: ImportantUpdate[] = [];
@@ -1014,15 +1160,33 @@ export async function getUpdates(): Promise<ImportantUpdate[]> {
           } as ImportantUpdate);
         }
       });
-      return updates.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      const sortedUpdates = updates.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+      // Update in-memory cache
+      dbCache.updates = { data: sortedUpdates, timestamp: Date.now() };
+
+      // Sync the local file cache with current cloud state so cold-starts are fully populated!
+      try {
+        fs.writeFileSync(UPDATES_FILE, JSON.stringify(sortedUpdates, null, 2), 'utf-8');
+      } catch (err) {
+        console.error('Failed to sync cloud updates to local cache:', err);
+      }
+
+      return sortedUpdates;
     } catch (err: any) {
       console.error('[Firestore Client] Failed to fetch updates from cloud, falling back to local files:', err);
+      handleCloudError(err);
     }
   }
   try {
     const data = fs.readFileSync(UPDATES_FILE, 'utf-8');
     const updates = JSON.parse(data) as ImportantUpdate[];
-    return updates.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    const sortedSanitized = updates.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+    // Cache the fallback local values too
+    dbCache.updates = { data: sortedSanitized, timestamp: Date.now() };
+
+    return sortedSanitized;
   } catch (err) {
     console.error('Failed to read updates file', err);
     return [];
@@ -1034,37 +1198,44 @@ export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
   await initializeUpdatesDatabase();
   const validUpdates = (updates || []).filter(u => u && typeof u === 'object' && u.id);
 
+  // Update in-memory cache immediately so changes are instantly reflected on reads
+  dbCache.updates = { data: validUpdates, timestamp: Date.now() };
+
   try {
     fs.writeFileSync(UPDATES_FILE, JSON.stringify(validUpdates, null, 2), 'utf-8');
   } catch (err) {
     console.error('Failed to write updates file', err);
   }
 
-  if (db) {
-    try {
-      const batch = writeBatch(db);
-      validUpdates.forEach(u => {
-        const docRef = doc(db, 'updates', u.id);
-        batch.set(docRef, cleanForFirestore(u));
-      });
-      await runWithTimeout(batch.commit(), 2000);
+  if (checkCloudStatus()) {
+    // Run asynchronously in background to avoid blocking client requests
+    (async () => {
+      try {
+        const batch = writeBatch(db);
+        validUpdates.forEach(u => {
+          const docRef = doc(db, 'updates', u.id);
+          batch.set(docRef, cleanForFirestore(u));
+        });
+        await runWithTimeout(batch.commit(), 2000);
 
-      // Delete any removed updates
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 2000);
-      const deleteBatch = writeBatch(db);
-      let hasDeletes = false;
-      snapshot.forEach(docSnap => {
-        if (!validUpdates.some(u => u.id === docSnap.id)) {
-          deleteBatch.delete(docSnap.ref);
-          hasDeletes = true;
+        // Delete any removed updates
+        const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 2000);
+        const deleteBatch = writeBatch(db);
+        let hasDeletes = false;
+        snapshot.forEach(docSnap => {
+          if (!validUpdates.some(u => u.id === docSnap.id)) {
+            deleteBatch.delete(docSnap.ref);
+            hasDeletes = true;
+          }
+        });
+        if (hasDeletes) {
+          await runWithTimeout(deleteBatch.commit(), 2000);
         }
-      });
-      if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 2000);
+      } catch (err: any) {
+        console.error('[Firestore Client] Failed to save updates to cloud in background:', err);
+        handleCloudError(err);
       }
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save updates to cloud:', err);
-    }
+    })();
   }
 }
 
@@ -1094,7 +1265,7 @@ export async function initializeMetadataDatabase() {
     fs.writeFileSync(METADATA_FILE, JSON.stringify(defaultMetadata, null, 2), 'utf-8');
   }
 
-  if (db) {
+  if (checkCloudStatus()) {
     try {
       const docRef = doc(db, 'metadata', 'options');
       const docSnap = await runWithTimeout(getDoc(docRef), 2000);
@@ -1105,34 +1276,59 @@ export async function initializeMetadataDatabase() {
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to check/seed metadata, falling back to local file:', err);
+      handleCloudError(err);
     }
   }
 }
 
 export async function getMetadata(): Promise<CgpMetadata> {
   await initializeMetadataDatabase();
-  if (db) {
+
+  // Check in-memory cache first
+  if (dbCache.metadata && (Date.now() - dbCache.metadata.timestamp < CACHE_TTL_MS)) {
+    return dbCache.metadata.data;
+  }
+
+  if (checkCloudStatus()) {
     try {
       const docSnap = await runWithTimeout(getDoc(doc(db, 'metadata', 'options')), 2000);
       if (docSnap.exists()) {
         const data = docSnap.data();
-        return {
+        const metadata: CgpMetadata = {
           countries: Array.isArray(data.countries) ? data.countries : [],
           positions: Array.isArray(data.positions) ? data.positions : [],
           projects: Array.isArray(data.projects) ? data.projects : [],
           tagsList: Array.isArray(data.tagsList) ? data.tagsList : []
         };
+
+        // Update in-memory cache
+        dbCache.metadata = { data: metadata, timestamp: Date.now() };
+
+        // Sync the local file cache with current cloud state so cold-starts are fully populated!
+        try {
+          fs.writeFileSync(METADATA_FILE, JSON.stringify(metadata, null, 2), 'utf-8');
+        } catch (err) {
+          console.error('Failed to sync cloud metadata to local cache:', err);
+        }
+
+        return metadata;
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to fetch metadata from cloud, falling back to local file:', err);
+      handleCloudError(err);
     }
   }
   try {
     const data = fs.readFileSync(METADATA_FILE, 'utf-8');
-    return JSON.parse(data) as CgpMetadata;
+    const metadata = JSON.parse(data) as CgpMetadata;
+
+    // Cache the fallback local values too
+    dbCache.metadata = { data: metadata, timestamp: Date.now() };
+
+    return metadata;
   } catch (err) {
     console.error('Failed to read metadata file', err);
-    return {
+    const fallbackMetadata = {
       countries: ['Kuwait', 'Dubai', 'Qatar', 'Germany', 'Japan', 'Albania'],
       positions: ['Waiter', 'Waitress', 'Chef', 'Nurse', 'Cleaner', 'Driver', 'Electrician'],
       projects: ['Napkin affairs', 'Alltoobi', 'Lulu hypermarket', 'General Intake'],
@@ -1142,23 +1338,34 @@ export async function getMetadata(): Promise<CgpMetadata> {
         'Receptionist', 'Housekeeper', 'Security', 'Painter', 'Mechanic', 'Operator'
       ]
     };
+
+    dbCache.metadata = { data: fallbackMetadata, timestamp: Date.now() };
+    return fallbackMetadata;
   }
 }
 
 export async function saveMetadata(metadata: CgpMetadata): Promise<void> {
   await initializeMetadataDatabase();
+
+  // Update in-memory cache immediately so changes are instantly reflected on reads
+  dbCache.metadata = { data: metadata, timestamp: Date.now() };
+
   try {
     fs.writeFileSync(METADATA_FILE, JSON.stringify(metadata, null, 2), 'utf-8');
   } catch (err) {
     console.error('Failed to write metadata file', err);
   }
 
-  if (db) {
-    try {
-      await runWithTimeout(setDoc(doc(db, 'metadata', 'options'), cleanForFirestore(metadata)), 2000);
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save metadata to cloud:', err);
-    }
+  if (checkCloudStatus()) {
+    // Run asynchronously in background to avoid blocking client requests
+    (async () => {
+      try {
+        await runWithTimeout(setDoc(doc(db, 'metadata', 'options'), cleanForFirestore(metadata)), 2000);
+      } catch (err: any) {
+        console.error('[Firestore Client] Failed to save metadata to cloud in background:', err);
+        handleCloudError(err);
+      }
+    })();
   }
 }
 
