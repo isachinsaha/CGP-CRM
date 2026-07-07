@@ -115,7 +115,7 @@ export default function LeadModal({
     entryDate: initialLead.entryDate || '',
     assignDate: initialLead.assignDate || '',
     gender: initialLead.gender || 'M',
-    age: initialLead.age !== undefined ? String(initialLead.age) : '24',
+    age: (initialLead.age !== undefined && initialLead.age !== null) ? String(initialLead.age) : '',
     origin: initialLead.origin || '',
     country: initialLead.country || '',
     position: initialLead.position || '',
@@ -160,7 +160,7 @@ export default function LeadModal({
       entryDate: initialLead.entryDate || '',
       assignDate: initialLead.assignDate || '',
       gender: initialLead.gender || 'M',
-      age: initialLead.age !== undefined ? String(initialLead.age) : '24',
+      age: (initialLead.age !== undefined && initialLead.age !== null) ? String(initialLead.age) : '',
       origin: initialLead.origin || '',
       country: initialLead.country || '',
       position: initialLead.position || '',
@@ -1023,8 +1023,8 @@ export default function LeadModal({
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 cursor-pointer uppercase font-bold"
                       >
                         <option value="MALE">Male (MALE)</option>
-                        <option value="FEMALE">Female (FEMALE)</option>
                         <option value="M">Male (M)</option>
+                        <option value="FEMALE">Female (FEMALE)</option>
                         <option value="F">Female (F)</option>
                         <option value="Not defined">Not defined</option>
                       </select>

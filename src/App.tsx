@@ -211,7 +211,7 @@ export default function App() {
     phone: '',
     alternateNo: '',
     gender: 'Not defined',
-    age: '24',
+    age: '',
     origin: '',
     country: 'Kuwait',
     position: 'Waiter',
@@ -383,7 +383,7 @@ export default function App() {
         },
         body: JSON.stringify({
           ...createFields,
-          age: Number(createFields.age) || 24,
+          age: createFields.age !== '' ? (Number(createFields.age) || '') : '',
           importance: Number(createFields.importance) || 3,
           tags: enrollTags
         })
@@ -395,7 +395,7 @@ export default function App() {
           phone: '',
           alternateNo: '',
           gender: 'Not defined',
-          age: '24',
+          age: '',
           origin: '',
           country: 'Kuwait',
           position: 'Waiter',

@@ -25,6 +25,7 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 const DATA_FILE = path.join(DATA_DIR, 'leads.json');
+const DATA_FILE_SYNCED = path.join(DATA_DIR, 'leads_last_synced.json');
 const COORDINATORS_FILE = path.join(DATA_DIR, 'coordinators.json');
 const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
 const UPDATES_FILE = path.join(DATA_DIR, 'updates.json');
@@ -59,16 +60,19 @@ function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 20000): Prom
 let cloudSyncEnabled = true;
 let cloudErrorCount = 0;
 let lastCloudErrorTime = 0;
-const CLOUD_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes cooldown
+let cloudBreakerCooldownMs = 5 * 60 * 1000; // default 5 minutes
+let quotaLimitExceeded = false;
 
 function checkCloudStatus(): boolean {
   if (!db) return false;
   if (!cloudSyncEnabled) {
     const now = Date.now();
-    if (now - lastCloudErrorTime > CLOUD_BREAKER_COOLDOWN_MS) {
+    if (now - lastCloudErrorTime > cloudBreakerCooldownMs) {
       console.log('[Firestore Client] Circuit breaker cooldown finished. Attempting to re-enable cloud sync.');
       cloudSyncEnabled = true;
       cloudErrorCount = 0;
+      quotaLimitExceeded = false;
+      cloudBreakerCooldownMs = 5 * 60 * 1000; // Reset to default
     } else {
       return false;
     }
@@ -81,14 +85,33 @@ function handleCloudError(err: any) {
   const isQuota = errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota') || errMsg.includes('quota') || errMsg.includes('limit exceeded');
   const isTimeout = errMsg.includes('timed out') || errMsg.includes('timeout');
   
-  if (isQuota || isTimeout) {
+  if (isQuota) {
+    quotaLimitExceeded = true;
+    cloudSyncEnabled = false;
+    lastCloudErrorTime = Date.now();
+    cloudBreakerCooldownMs = 60 * 60 * 1000; // 1 hour cooldown for Quota errors since they take long to reset
+    console.error(`[Firestore Client] Quota limit exceeded! Disabling cloud sync for 1 hour: ${errMsg}`);
+  } else if (isTimeout) {
     cloudErrorCount++;
-    if (isQuota || cloudErrorCount >= 3) {
-      console.error(`[Firestore Client] Circuit breaker tripped! Temporarily disabling cloud sync for 5 minutes due to consecutive errors: ${errMsg}`);
+    if (cloudErrorCount >= 3) {
+      console.error(`[Firestore Client] Circuit breaker tripped due to timeouts! Temporarily disabling cloud sync for 5 minutes: ${errMsg}`);
       cloudSyncEnabled = false;
       lastCloudErrorTime = Date.now();
+      cloudBreakerCooldownMs = 5 * 60 * 1000;
     }
   }
+}
+
+export function getCloudSyncStatus() {
+  return {
+    cloudSyncEnabled,
+    cloudErrorCount,
+    lastCloudErrorTime,
+    quotaLimitExceeded,
+    cooldownRemainingMs: cloudSyncEnabled ? 0 : Math.max(0, cloudBreakerCooldownMs - (Date.now() - lastCloudErrorTime)),
+    currentDbId,
+    dbInitialized: !!db
+  };
 }
 
 function initFirestore() {
@@ -267,34 +290,32 @@ export async function saveCoordinators(coordinators: Coordinator[]): Promise<voi
   }
 
   if (checkCloudStatus()) {
-    // Run asynchronously in background to avoid blocking the client request
-    (async () => {
-      try {
-        const batch = writeBatch(db);
-        coordinators.forEach(c => {
-          const docRef = doc(db, 'coordinators', c.id);
-          batch.set(docRef, cleanForFirestore(c));
-        });
-        await runWithTimeout(batch.commit(), 2000);
+    // Await cloud sync to guarantee data persistence under Cloud Run
+    try {
+      const batch = writeBatch(db);
+      coordinators.forEach(c => {
+        const docRef = doc(db, 'coordinators', c.id);
+        batch.set(docRef, cleanForFirestore(c));
+      });
+      await runWithTimeout(batch.commit(), 2000);
 
-        // Delete any removed coordinators
-        const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 2000);
-        const deleteBatch = writeBatch(db);
-        let hasDeletes = false;
-        snapshot.forEach(docSnap => {
-          if (!coordinators.some(c => c.id === docSnap.id)) {
-            deleteBatch.delete(docSnap.ref);
-            hasDeletes = true;
-          }
-        });
-        if (hasDeletes) {
-          await runWithTimeout(deleteBatch.commit(), 2000);
+      // Delete any removed coordinators
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 2000);
+      const deleteBatch = writeBatch(db);
+      let hasDeletes = false;
+      snapshot.forEach(docSnap => {
+        if (!coordinators.some(c => c.id === docSnap.id)) {
+          deleteBatch.delete(docSnap.ref);
+          hasDeletes = true;
         }
-      } catch (err: any) {
-        console.error('[Firestore Client] Failed to save coordinators to cloud in background:', err);
-        handleCloudError(err);
+      });
+      if (hasDeletes) {
+        await runWithTimeout(deleteBatch.commit(), 2000);
       }
-    })();
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to save coordinators to cloud:', err);
+      handleCloudError(err);
+    }
   }
 }
 
@@ -601,7 +622,119 @@ async function initializeDatabase() {
   }
 }
 
-// Read database
+// Helper function to perform bi-directional merge between local changes, last synced, and latest cloud data
+function syncAndMergeLeadsList(
+  localLeads: Lead[], 
+  cloudLeads: Lead[], 
+  lastSyncedLeads: Lead[]
+): { mergedLeads: Lead[], pendingUpload: Lead[], pendingDeleteIds: string[] } {
+  
+  const localMap = new Map<string, Lead>();
+  localLeads.forEach(l => { if (l && l.id) localMap.set(l.id, l); });
+
+  const cloudMap = new Map<string, Lead>();
+  cloudLeads.forEach(l => { if (l && l.id) cloudMap.set(l.id, l); });
+
+  const syncedMap = new Map<string, Lead>();
+  lastSyncedLeads.forEach(l => { if (l && l.id) syncedMap.set(l.id, l); });
+
+  const mergedLeads: Lead[] = [];
+  const pendingUpload: Lead[] = [];
+  const pendingDeleteIds: string[] = [];
+
+  const allIds = new Set([
+    ...localMap.keys(),
+    ...cloudMap.keys(),
+    ...syncedMap.keys()
+  ]);
+
+  for (const id of allIds) {
+    const local = localMap.get(id);
+    const cloud = cloudMap.get(id);
+    const synced = syncedMap.get(id);
+
+    if (local && cloud && synced) {
+      // Exist in all three
+      if (JSON.stringify(local) === JSON.stringify(cloud)) {
+        mergedLeads.push(local);
+      } else {
+        // Different. Determine who has newer edits based on updatedAt or default to local
+        const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
+        const cloudTime = new Date(cloud.updatedAt || cloud.createdAt || 0).getTime();
+
+        if (localTime > cloudTime) {
+          mergedLeads.push(local);
+          pendingUpload.push(local);
+        } else {
+          mergedLeads.push(cloud);
+        }
+      }
+    } else if (local && cloud && !synced) {
+      // Exist in local and cloud, but wasn't tracked as synced
+      const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
+      const cloudTime = new Date(cloud.updatedAt || cloud.createdAt || 0).getTime();
+
+      if (localTime > cloudTime) {
+        mergedLeads.push(local);
+        pendingUpload.push(local);
+      } else {
+        mergedLeads.push(cloud);
+      }
+    } else if (local && !cloud && synced) {
+      // Deleted from Cloud by another coordinator/admin
+      // So we delete it locally
+      console.log(`[Sync] Lead ${local.name || id} was deleted from cloud, removing from local.`);
+    } else if (!local && cloud && synced) {
+      // Deleted locally on this machine
+      // So we delete from cloud
+      console.log(`[Sync] Lead ${cloud.name || id} was deleted locally, marking for cloud deletion.`);
+      pendingDeleteIds.push(id);
+    } else if (local && !cloud && !synced) {
+      // Brand new lead created locally
+      mergedLeads.push(local);
+      pendingUpload.push(local);
+    } else if (!local && cloud && !synced) {
+      // Brand new lead created on cloud by another coordinator/admin
+      mergedLeads.push(cloud);
+    } else {
+      // Only in synced map (deleted on both sides), ignore
+    }
+  }
+
+  // Sort by createdAt desc
+  mergedLeads.sort((a, b) => {
+    const timeA = new Date(a.createdAt || 0).getTime();
+    const timeB = new Date(b.createdAt || 0).getTime();
+    return timeB - timeA;
+  });
+
+  return { mergedLeads, pendingUpload, pendingDeleteIds };
+}
+
+// Find lead by id
+export async function getLeadById(id: string): Promise<Lead | undefined> {
+  // Try retrieving from active in-memory cache first if available
+  if (dbCache.leads && (Date.now() - dbCache.leads.timestamp < CACHE_TTL_MS)) {
+    return dbCache.leads.data.find(l => l.id === id);
+  }
+
+  if (checkCloudStatus()) {
+    try {
+      const docSnap = await runWithTimeout(getDoc(doc(db, 'leads', id)), 2000);
+      if (docSnap.exists()) {
+        return docSnap.data() as Lead;
+      }
+      return undefined;
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to get lead by ID from cloud, falling back:', err);
+      handleCloudError(err);
+    }
+  }
+  const leads = await getLeads();
+  return leads.find(l => l.id === id);
+}
+
+// Read database with bidirectional sync
 export async function getLeads(): Promise<Lead[]> {
   await initializeDatabase();
 
@@ -610,47 +743,104 @@ export async function getLeads(): Promise<Lead[]> {
     return dbCache.leads.data;
   }
 
-  let leads: Lead[] = [];
-  let fetchedFromCloud = false;
+  // 1. Read existing local leads
+  let localLeads: Lead[] = [];
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const data = fs.readFileSync(DATA_FILE, 'utf-8');
+      localLeads = JSON.parse(data) as Lead[];
+    }
+  } catch (err) {
+    console.error('Failed to read local leads database:', err);
+  }
+
+  // 2. Read last successfully synced leads
+  let lastSyncedLeads: Lead[] = [];
+  try {
+    if (fs.existsSync(DATA_FILE_SYNCED)) {
+      const data = fs.readFileSync(DATA_FILE_SYNCED, 'utf-8');
+      lastSyncedLeads = JSON.parse(data) as Lead[];
+    } else {
+      // If synced file doesn't exist yet, seed it with current local leads to start tracking
+      lastSyncedLeads = [...localLeads];
+      fs.writeFileSync(DATA_FILE_SYNCED, JSON.stringify(lastSyncedLeads, null, 2), 'utf-8');
+    }
+  } catch (err) {
+    console.error('Failed to read last synced leads:', err);
+  }
+
+  let finalLeads = [...localLeads];
+
+  // 3. Try to sync with Cloud
   if (checkCloudStatus()) {
     try {
+      // Fetch latest cloud leads
       const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
-      const snapshot = await runWithTimeout(getDocs(q), 2000);
+      const snapshot = await runWithTimeout(getDocs(q), 5000);
+      const cloudLeads: Lead[] = [];
       snapshot.forEach(docSnap => {
-        leads.push(docSnap.data() as Lead);
+        cloudLeads.push(docSnap.data() as Lead);
       });
-      fetchedFromCloud = true;
 
-      // Update in-memory cache
-      dbCache.leads = { data: leads, timestamp: Date.now() };
+      // Execute Merge and Sync!
+      const mergeResult = syncAndMergeLeadsList(localLeads, cloudLeads, lastSyncedLeads);
+      
+      finalLeads = mergeResult.mergedLeads;
 
-      // Warm and sync the local DATA_FILE cache with current cloud state
-      try {
-        fs.writeFileSync(DATA_FILE, JSON.stringify(leads, null, 2), 'utf-8');
-      } catch (err) {
-        console.error('Failed to sync cloud leads to local cache:', err);
+      // Handle any pending uploads to Firestore (which are local-only modifications or creations)
+      if (mergeResult.pendingUpload.length > 0) {
+        console.log(`[Firestore Client] Found ${mergeResult.pendingUpload.length} pending local changes/creations to upload to Firestore...`);
+        const CHUNK_SIZE = 400;
+        for (let i = 0; i < mergeResult.pendingUpload.length; i += CHUNK_SIZE) {
+          const chunk = mergeResult.pendingUpload.slice(i, i + CHUNK_SIZE);
+          const batch = writeBatch(db);
+          chunk.forEach(l => {
+            const docRef = doc(db, 'leads', l.id);
+            batch.set(docRef, cleanForFirestore(l));
+          });
+          await runWithTimeout(batch.commit(), 5000);
+        }
+        console.log(`[Firestore Client] Uploaded ${mergeResult.pendingUpload.length} pending leads successfully.`);
       }
+
+      // Handle any pending deletes from Firestore (deleted locally but still on cloud)
+      if (mergeResult.pendingDeleteIds.length > 0) {
+        console.log(`[Firestore Client] Found ${mergeResult.pendingDeleteIds.length} pending deletes to propagate to cloud...`);
+        const CHUNK_SIZE = 400;
+        for (let i = 0; i < mergeResult.pendingDeleteIds.length; i += CHUNK_SIZE) {
+          const chunk = mergeResult.pendingDeleteIds.slice(i, i + CHUNK_SIZE);
+          const batch = writeBatch(db);
+          chunk.forEach(id => {
+            const docRef = doc(db, 'leads', id);
+            batch.delete(docRef);
+          });
+          await runWithTimeout(batch.commit(), 5000);
+        }
+        console.log(`[Firestore Client] Deleted ${mergeResult.pendingDeleteIds.length} leads from cloud successfully.`);
+      }
+
+      // Since cloud synchronization was fully successful, we update local and synced files with final merged state!
+      try {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(finalLeads, null, 2), 'utf-8');
+        fs.writeFileSync(DATA_FILE_SYNCED, JSON.stringify(finalLeads, null, 2), 'utf-8');
+      } catch (err) {
+        console.error('Failed to write synced databases', err);
+      }
+
     } catch (err: any) {
-      console.error('[Firestore Client] Failed to get leads from cloud, falling back:', err);
+      console.error('[Firestore Client] Failed to get/sync leads with cloud, using local-only state:', err);
       handleCloudError(err);
+      // Fallback to local leads since cloud check failed
+      finalLeads = localLeads;
     }
-  }
-  if (!fetchedFromCloud) {
-    try {
-      const data = fs.readFileSync(DATA_FILE, 'utf-8');
-      leads = JSON.parse(data) as Lead[];
-
-      // Cache the local file fallback too
-      dbCache.leads = { data: leads, timestamp: Date.now() };
-    } catch (err) {
-      console.error('Failed to read database', err);
-      leads = [];
-    }
+  } else {
+    // Cloud sync disabled/offline - keep using local-only state
+    finalLeads = localLeads;
   }
 
-  // Auto-migrate "CGP-" prefix to "INQ-" and "contacted" stage to "negotiating" for all present leads!
+  // Auto-migrate "CGP-" prefix to "INQ-" and "contacted" stage to "negotiating"
   let hasChanges = false;
-  leads = leads.map(l => {
+  finalLeads = finalLeads.map(l => {
     let changed = false;
     let serialNo = l.serialNo;
     let stage = l.stage;
@@ -677,36 +867,13 @@ export async function getLeads(): Promise<Lead[]> {
 
   if (hasChanges) {
     console.log('[Migration] Converting present leads CGP- serial numbers and stage contacted...');
-    saveLeads(leads).catch(err => console.error('Failed to save migrated leads:', err));
+    saveLeads(finalLeads).catch(err => console.error('Failed to save migrated leads:', err));
   }
 
-  // Store final migrated version in-memory cache
-  dbCache.leads = { data: leads, timestamp: Date.now() };
+  // Update in-memory cache
+  dbCache.leads = { data: finalLeads, timestamp: Date.now() };
 
-  return leads;
-}
-
-// Find lead by id
-export async function getLeadById(id: string): Promise<Lead | undefined> {
-  // Try retrieving from active in-memory cache first if available
-  if (dbCache.leads && (Date.now() - dbCache.leads.timestamp < CACHE_TTL_MS)) {
-    return dbCache.leads.data.find(l => l.id === id);
-  }
-
-  if (checkCloudStatus()) {
-    try {
-      const docSnap = await runWithTimeout(getDoc(doc(db, 'leads', id)), 2000);
-      if (docSnap.exists()) {
-        return docSnap.data() as Lead;
-      }
-      return undefined;
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to get lead by ID from cloud, falling back:', err);
-      handleCloudError(err);
-    }
-  }
-  const leads = await getLeads();
-  return leads.find(l => l.id === id);
+  return finalLeads;
 }
 
 // Save all leads using smart delta-saving for Firestore
@@ -716,17 +883,6 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
   // Update in-memory cache immediately so local changes are instantly reflected on reads
   dbCache.leads = { data: leads, timestamp: Date.now() };
 
-  // Read previous leads from local cache to compute the delta (new, modified, deleted)
-  let oldLeads: Lead[] = [];
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const oldData = fs.readFileSync(DATA_FILE, 'utf-8');
-      oldLeads = JSON.parse(oldData) as Lead[];
-    }
-  } catch (err) {
-    console.error('[saveLeads] Failed to read old leads for delta comparison:', err);
-  }
-
   // Write to local JSON file first so we ALWAYS have a local copy and stay fully functional!
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(leads, null, 2), 'utf-8');
@@ -735,81 +891,89 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
   }
 
   if (checkCloudStatus()) {
-    // Run asynchronously in the background so it is completely non-blocking!
-    (async () => {
+    try {
+      // Compare local leads with our last synced file to identify what needs to be saved/deleted in Firestore
+      let lastSyncedLeads: Lead[] = [];
       try {
-        const oldLeadsMap = new Map<string, Lead>();
-        oldLeads.forEach(l => {
-          if (l && l.id) {
-            oldLeadsMap.set(l.id, l);
-          }
-        });
-
-        const leadsToSave: Lead[] = [];
-        leads.forEach(l => {
-          if (!l || !l.id) return;
-          const oldL = oldLeadsMap.get(l.id);
-          if (!oldL) {
-            // This is a new lead
-            leadsToSave.push(l);
-          } else {
-            // Compare JSON string or updatedAt to check for edits
-            if (l.updatedAt !== oldL.updatedAt || JSON.stringify(l) !== JSON.stringify(oldL)) {
-              leadsToSave.push(l);
-            }
-          }
-        });
-
-        const currentLeadsMap = new Map<string, Lead>();
-        leads.forEach(l => {
-          if (l && l.id) {
-            currentLeadsMap.set(l.id, l);
-          }
-        });
-
-        const leadsToDelete: string[] = [];
-        oldLeads.forEach(oldL => {
-          if (oldL && oldL.id && !currentLeadsMap.has(oldL.id)) {
-            leadsToDelete.push(oldL.id);
-          }
-        });
-
-        if (leadsToSave.length > 0 || leadsToDelete.length > 0) {
-          console.log(`[Firestore Client] Background saveLeads diff: ${leadsToSave.length} leads to set, ${leadsToDelete.length} leads to delete (total: ${leads.length})`);
+        if (fs.existsSync(DATA_FILE_SYNCED)) {
+          const syncedData = fs.readFileSync(DATA_FILE_SYNCED, 'utf-8');
+          lastSyncedLeads = JSON.parse(syncedData) as Lead[];
         }
-
-        // Write changes in batches of 400
-        if (leadsToSave.length > 0) {
-          const CHUNK_SIZE = 400;
-          for (let i = 0; i < leadsToSave.length; i += CHUNK_SIZE) {
-            const chunk = leadsToSave.slice(i, i + CHUNK_SIZE);
-            const batch = writeBatch(db);
-            chunk.forEach(l => {
-              const docRef = doc(db, 'leads', l.id);
-              batch.set(docRef, cleanForFirestore(l));
-            });
-            await runWithTimeout(batch.commit(), 5000);
-          }
-        }
-
-        // Delete removed documents in batches of 400
-        if (leadsToDelete.length > 0) {
-          const CHUNK_SIZE = 400;
-          for (let i = 0; i < leadsToDelete.length; i += CHUNK_SIZE) {
-            const chunk = leadsToDelete.slice(i, i + CHUNK_SIZE);
-            const batch = writeBatch(db);
-            chunk.forEach(id => {
-              const docRef = doc(db, 'leads', id);
-              batch.delete(docRef);
-            });
-            await runWithTimeout(batch.commit(), 5000);
-          }
-        }
-      } catch (err: any) {
-        console.error('[Firestore Client] Failed to save leads delta to cloud in background:', err);
-        handleCloudError(err);
+      } catch (err) {
+        console.error('Failed to read last synced file in saveLeads:', err);
       }
-    })();
+
+      const syncedMap = new Map<string, Lead>();
+      lastSyncedLeads.forEach(l => { if (l && l.id) syncedMap.set(l.id, l); });
+
+      const leadsToSave: Lead[] = [];
+      leads.forEach(l => {
+        if (!l || !l.id) return;
+        const syncedL = syncedMap.get(l.id);
+        if (!syncedL) {
+          // This is a new lead (unsynced)
+          leadsToSave.push(l);
+        } else {
+          // Compare updatedAt or structural JSON to find edits
+          if (l.updatedAt !== syncedL.updatedAt || JSON.stringify(l) !== JSON.stringify(syncedL)) {
+            leadsToSave.push(l);
+          }
+        }
+      });
+
+      const currentIds = new Set(leads.map(l => l.id).filter(Boolean));
+      const leadsToDelete: string[] = [];
+      lastSyncedLeads.forEach(syncedL => {
+        if (syncedL && syncedL.id && !currentIds.has(syncedL.id)) {
+          leadsToDelete.push(syncedL.id);
+        }
+      });
+
+      if (leadsToSave.length > 0 || leadsToDelete.length > 0) {
+        console.log(`[Firestore Client] Syncing saveLeads diff: ${leadsToSave.length} leads to set, ${leadsToDelete.length} leads to delete (total: ${leads.length})`);
+      }
+
+      // Write changes in batches of 400
+      if (leadsToSave.length > 0) {
+        const CHUNK_SIZE = 400;
+        for (let i = 0; i < leadsToSave.length; i += CHUNK_SIZE) {
+          const chunk = leadsToSave.slice(i, i + CHUNK_SIZE);
+          const batch = writeBatch(db);
+          chunk.forEach(l => {
+            const docRef = doc(db, 'leads', l.id);
+            batch.set(docRef, cleanForFirestore(l));
+          });
+          await runWithTimeout(batch.commit(), 5000);
+        }
+      }
+
+      // Delete removed documents in batches of 400
+      if (leadsToDelete.length > 0) {
+        const CHUNK_SIZE = 400;
+        for (let i = 0; i < leadsToDelete.length; i += CHUNK_SIZE) {
+          const chunk = leadsToDelete.slice(i, i + CHUNK_SIZE);
+          const batch = writeBatch(db);
+          chunk.forEach(id => {
+            const docRef = doc(db, 'leads', id);
+            batch.delete(docRef);
+          });
+          await runWithTimeout(batch.commit(), 5000);
+        }
+      }
+
+      // Since all Firestore operations succeeded, we can safely update the local DATA_FILE_SYNCED cache
+      try {
+        fs.writeFileSync(DATA_FILE_SYNCED, JSON.stringify(leads, null, 2), 'utf-8');
+      } catch (err) {
+        console.error('Failed to update synced cache file:', err);
+      }
+
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to save leads delta to cloud:', err);
+      handleCloudError(err);
+      // We do NOT update DATA_FILE_SYNCED because the writes failed to reach the cloud.
+      // This leaves them as "unsynced" in our metadata so that they will be retried and merged on the next read!
+    }
   }
 }
 
@@ -1061,34 +1225,32 @@ export async function saveJobs(jobs: Job[]): Promise<void> {
   }
 
   if (checkCloudStatus()) {
-    // Run asynchronously in background to avoid blocking client requests
-    (async () => {
-      try {
-        const batch = writeBatch(db);
-        validJobs.forEach(j => {
-          const docRef = doc(db, 'jobs', j.id);
-          batch.set(docRef, cleanForFirestore(j));
-        });
-        await runWithTimeout(batch.commit(), 2000);
+    // Await cloud sync to guarantee data persistence under Cloud Run
+    try {
+      const batch = writeBatch(db);
+      validJobs.forEach(j => {
+        const docRef = doc(db, 'jobs', j.id);
+        batch.set(docRef, cleanForFirestore(j));
+      });
+      await runWithTimeout(batch.commit(), 2000);
 
-        // Delete any removed jobs
-        const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 2000);
-        const deleteBatch = writeBatch(db);
-        let hasDeletes = false;
-        snapshot.forEach(docSnap => {
-          if (!validJobs.some(j => j.id === docSnap.id)) {
-            deleteBatch.delete(docSnap.ref);
-            hasDeletes = true;
-          }
-        });
-        if (hasDeletes) {
-          await runWithTimeout(deleteBatch.commit(), 2000);
+      // Delete any removed jobs
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 2000);
+      const deleteBatch = writeBatch(db);
+      let hasDeletes = false;
+      snapshot.forEach(docSnap => {
+        if (!validJobs.some(j => j.id === docSnap.id)) {
+          deleteBatch.delete(docSnap.ref);
+          hasDeletes = true;
         }
-      } catch (err: any) {
-        console.error('[Firestore Client] Failed to save jobs to cloud in background:', err);
-        handleCloudError(err);
+      });
+      if (hasDeletes) {
+        await runWithTimeout(deleteBatch.commit(), 2000);
       }
-    })();
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to save jobs to cloud:', err);
+      handleCloudError(err);
+    }
   }
 }
 
@@ -1208,34 +1370,32 @@ export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
   }
 
   if (checkCloudStatus()) {
-    // Run asynchronously in background to avoid blocking client requests
-    (async () => {
-      try {
-        const batch = writeBatch(db);
-        validUpdates.forEach(u => {
-          const docRef = doc(db, 'updates', u.id);
-          batch.set(docRef, cleanForFirestore(u));
-        });
-        await runWithTimeout(batch.commit(), 2000);
+    // Await cloud sync to guarantee data persistence under Cloud Run
+    try {
+      const batch = writeBatch(db);
+      validUpdates.forEach(u => {
+        const docRef = doc(db, 'updates', u.id);
+        batch.set(docRef, cleanForFirestore(u));
+      });
+      await runWithTimeout(batch.commit(), 2000);
 
-        // Delete any removed updates
-        const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 2000);
-        const deleteBatch = writeBatch(db);
-        let hasDeletes = false;
-        snapshot.forEach(docSnap => {
-          if (!validUpdates.some(u => u.id === docSnap.id)) {
-            deleteBatch.delete(docSnap.ref);
-            hasDeletes = true;
-          }
-        });
-        if (hasDeletes) {
-          await runWithTimeout(deleteBatch.commit(), 2000);
+      // Delete any removed updates
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 2000);
+      const deleteBatch = writeBatch(db);
+      let hasDeletes = false;
+      snapshot.forEach(docSnap => {
+        if (!validUpdates.some(u => u.id === docSnap.id)) {
+          deleteBatch.delete(docSnap.ref);
+          hasDeletes = true;
         }
-      } catch (err: any) {
-        console.error('[Firestore Client] Failed to save updates to cloud in background:', err);
-        handleCloudError(err);
+      });
+      if (hasDeletes) {
+        await runWithTimeout(deleteBatch.commit(), 2000);
       }
-    })();
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to save updates to cloud:', err);
+      handleCloudError(err);
+    }
   }
 }
 
@@ -1357,15 +1517,13 @@ export async function saveMetadata(metadata: CgpMetadata): Promise<void> {
   }
 
   if (checkCloudStatus()) {
-    // Run asynchronously in background to avoid blocking client requests
-    (async () => {
-      try {
-        await runWithTimeout(setDoc(doc(db, 'metadata', 'options'), cleanForFirestore(metadata)), 2000);
-      } catch (err: any) {
-        console.error('[Firestore Client] Failed to save metadata to cloud in background:', err);
-        handleCloudError(err);
-      }
-    })();
+    // Await cloud sync to guarantee data persistence under Cloud Run
+    try {
+      await runWithTimeout(setDoc(doc(db, 'metadata', 'options'), cleanForFirestore(metadata)), 2000);
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to save metadata to cloud:', err);
+      handleCloudError(err);
+    }
   }
 }
 

@@ -535,7 +535,7 @@ Other details: ${selected.otherTerms || 'None'}`;
                           {match.name}
                         </h4>
                         <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold font-mono">
-                          <span>{match.gender === 'F' ? 'F' : 'M'}, Age {match.age || '24'}</span>
+                          <span>{match.gender === 'F' ? 'F' : 'M'}, Age {match.age || 'N/A'}</span>
                           <span>•</span>
                           <span className="flex items-center gap-0.5">
                             <MapPin className="h-2.5 w-2.5 inline text-slate-500" /> {match.origin || 'Darjeeling'}

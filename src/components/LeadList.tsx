@@ -154,7 +154,8 @@ export default function LeadList({
     }
     const phone = getValue(['phone', 'whatsappmobileno', 'mobileno', 'whatsapp', 'candidatemobileno']);
     const gender = getValue(['gender', 'sex']) || 'M';
-    const age = Number(getValue(['age', 'years'])) || 24;
+    const ageVal = getValue(['age', 'years']);
+    const age = ageVal !== undefined && ageVal !== null && ageVal !== '' ? (Number(ageVal) || '') : '';
     const origin = getValue(['origin', 'sourcecountry', 'citizenship']) || '';
     const country = getValue(['country', 'destination', 'targetcountry', 'countryinterest']) || 'Kuwait';
     const position = getValue(['position', 'job', 'positionopening', 'jobposition']) || 'General openings';
@@ -1305,7 +1306,7 @@ export default function LeadList({
                           </div>
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">{lead.phone}</div>
                           <div className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                            {lead.gender === 'FEMALE' || lead.gender === 'F' ? 'Female' : 'Male'}, Age {lead.age || '24'} ({lead.origin || 'No State'})
+                            {lead.gender === 'FEMALE' || lead.gender === 'F' ? 'Female' : 'Male'}, Age {lead.age || 'N/A'} ({lead.origin || 'No State'})
                           </div>
                           {lead.tags && lead.tags.length > 0 && (
                             <div className="flex flex-wrap gap-1 mt-1.5">
