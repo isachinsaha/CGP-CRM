@@ -6,6 +6,7 @@ import {
   Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Bell, Plus, PhoneCall
 } from 'lucide-react';
 import { getCountryFlagUrl, formatCandidateName } from '../utils';
+import { SearchableSelect } from './SearchableSelect.tsx';
 
 interface LeadModalProps {
   lead: Lead;
@@ -1016,18 +1017,19 @@ export default function LeadModal({
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Gender</label>
-                      <select
-                        name="gender"
+                      <SearchableSelect
                         value={formFields.gender}
-                        onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 cursor-pointer uppercase font-bold"
-                      >
-                        <option value="MALE">Male (MALE)</option>
-                        <option value="M">Male (M)</option>
-                        <option value="FEMALE">Female (FEMALE)</option>
-                        <option value="F">Female (F)</option>
-                        <option value="Not defined">Not defined</option>
-                      </select>
+                        onChange={(val) => setFormFields(prev => ({ ...prev, gender: val }))}
+                        options={[
+                          { value: 'MALE', label: '👱‍♂️ MALE' },
+                          { value: 'M', label: '👨 M' },
+                          { value: 'FEMALE', label: '👩‍🦰 FEMALE' },
+                          { value: 'F', label: '👩 F' },
+                          { value: 'Not defined', label: '❓ NOT DEFINED' }
+                        ]}
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 font-bold uppercase cursor-pointer"
+                        dropdownClassName="w-48 bg-slate-900 border border-slate-700"
+                      />
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Age</label>
@@ -1057,38 +1059,42 @@ export default function LeadModal({
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Target Country</label>
-                      <select
-                        name="country"
+                      <SearchableSelect
                         value={formFields.country}
-                        onChange={handleFieldChange}
+                        onChange={(val) => setFormFields(prev => ({ ...prev, country: val }))}
+                        options={[
+                          { value: '', label: '✈️ SELECT COUNTRY' },
+                          ...(propCountries && propCountries.length > 0 ? propCountries : ['Kuwait', 'Dubai', 'Qatar', 'Germany', 'Japan', 'Albania']).map(c => ({
+                            value: c,
+                            label: `✈️ ${c.toUpperCase()}`
+                          }))
+                        ]}
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 text-slate-100 font-bold uppercase cursor-pointer"
-                      >
-                        <option value="">-- Select Country --</option>
-                        {(propCountries && propCountries.length > 0 ? propCountries : ['Kuwait', 'Dubai', 'Qatar', 'Germany', 'Japan', 'Albania']).map((c, idx) => (
-                          <option key={idx} value={c}>{c}</option>
-                        ))}
-                      </select>
+                        dropdownClassName="w-48 bg-slate-900 border border-slate-700"
+                      />
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Coordinator</label>
-                      <select
-                        name="assignedTo"
-                        disabled={isSubAgent}
+                      <SearchableSelect
                         value={formFields.assignedTo}
-                        onChange={handleFieldChange}
+                        onChange={(val) => setFormFields(prev => ({ ...prev, assignedTo: val }))}
+                        options={[
+                          { value: '', label: '👤 UNASSIGNED' },
+                          ...(coordinators && coordinators.length > 0 ? (
+                            coordinators.filter(c => c.role === 'agent').map(coord => ({
+                              value: coord.username,
+                              label: `👤 ${coord.displayName.toUpperCase()} (TELECALLER)`
+                            }))
+                          ) : (
+                            ['Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'].map(coord => ({
+                              value: coord,
+                              label: `👤 ${coord.toUpperCase()} (TELECALLER)`
+                            }))
+                          ))
+                        ]}
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 text-emerald-400 font-bold cursor-pointer"
-                      >
-                        <option value="">-- Unassigned --</option>
-                        {coordinators && coordinators.length > 0 ? (
-                          coordinators.filter(c => c.role === 'agent').map(coord => (
-                            <option key={coord.id} value={coord.username}>{coord.displayName} (Telecaller)</option>
-                          ))
-                        ) : (
-                          ['Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'].map(coord => (
-                            <option key={coord} value={coord}>{coord} (Telecaller)</option>
-                          ))
-                        )}
-                      </select>
+                        dropdownClassName="w-64 bg-slate-900 border border-slate-700"
+                      />
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Assign Date</label>
@@ -1107,17 +1113,19 @@ export default function LeadModal({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Target Position / Line</label>
-                      <select
-                        name="position"
+                      <SearchableSelect
                         value={formFields.position}
-                        onChange={handleFieldChange}
+                        onChange={(val) => setFormFields(prev => ({ ...prev, position: val }))}
+                        options={[
+                          { value: '', label: '💼 SELECT POSITION' },
+                          ...(propPositions && propPositions.length > 0 ? propPositions : ['Waiter', 'Waitress', 'Chef', 'Nurse', 'Cleaner', 'Driver', 'Electrician']).map(p => ({
+                            value: p,
+                            label: `💼 ${p.toUpperCase()}`
+                          }))
+                        ]}
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-medium uppercase cursor-pointer"
-                      >
-                        <option value="">-- Select Position --</option>
-                        {(propPositions && propPositions.length > 0 ? propPositions : ['Waiter', 'Waitress', 'Chef', 'Nurse', 'Cleaner', 'Driver', 'Electrician']).map((p, idx) => (
-                          <option key={idx} value={p}>{p}</option>
-                        ))}
-                      </select>
+                        dropdownClassName="w-60 bg-slate-900 border border-slate-700"
+                      />
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Experience Criteria</label>
@@ -1135,21 +1143,21 @@ export default function LeadModal({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Lead Source</label>
-                      <select
-                        name="source"
-                        disabled={isSubAgent}
+                      <SearchableSelect
                         value={formFields.source}
-                        onChange={handleFieldChange}
+                        onChange={(val) => setFormFields(prev => ({ ...prev, source: val }))}
+                        options={[
+                          { value: '', label: '📣 UNKNOWN' },
+                          { value: 'Ads', label: '📣 ADS' },
+                          { value: 'Organic', label: '🌱 ORGANIC' },
+                          { value: 'Website', label: '🌐 WEBSITE' },
+                          { value: 'Instagram', label: '📸 INSTAGRAM' },
+                          { value: 'Referral', label: '🤝 REFERRAL' },
+                          { value: 'Other', label: '❓ OTHER' }
+                        ]}
                         className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-medium uppercase cursor-pointer"
-                      >
-                        <option value="">-- Unknown --</option>
-                        <option value="Ads">Ads 📣</option>
-                        <option value="Organic">Organic 🌱</option>
-                        <option value="Website">Website 🌐</option>
-                        <option value="Instagram">Instagram 📸</option>
-                        <option value="Referral">Referral 🤝</option>
-                        <option value="Other">Other</option>
-                      </select>
+                        dropdownClassName="w-48 bg-slate-900 border border-slate-700"
+                      />
                     </div>
 
                     <div>
@@ -1191,17 +1199,19 @@ export default function LeadModal({
                           </button>
                         </div>
                       ) : (
-                        <select
-                          name="project"
+                        <SearchableSelect
                           value={formFields.project}
-                          onChange={handleFieldChange}
+                          onChange={(val) => setFormFields(prev => ({ ...prev, project: val }))}
+                          options={[
+                            { value: '', label: '📁 UNKNOWN / GENERAL' },
+                            ...projects.map(proj => ({
+                              value: proj,
+                              label: `📁 ${proj.toUpperCase()}`
+                            }))
+                          ]}
                           className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-semibold uppercase cursor-pointer"
-                        >
-                          <option value="">-- Unknown / General --</option>
-                          {projects.map((proj, idx) => (
-                            <option key={idx} value={proj}>{proj}</option>
-                          ))}
-                        </select>
+                          dropdownClassName="w-56 bg-slate-900 border border-slate-700"
+                        />
                       )}
                     </div>
                   </div>

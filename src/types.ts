@@ -115,5 +115,32 @@ export interface ImportantUpdate {
   createdAt: string;
 }
 
+export interface WalletTransaction {
+  id: string;
+  type: 'credit' | 'debit';
+  amount: number;
+  reason: string;
+  leadId?: string;
+  timestamp: string;
+}
+
+export interface Wallet {
+  id: string; // matches coordinator's username
+  username: string;
+  displayName: string;
+  balance: number;
+  transactions: WalletTransaction[];
+  updatedAt: string;
+}
+
+export interface IncentiveRule {
+  id: string;
+  projectName: string; // e.g. "Lulu hypermarket" or "General" (can be 'all' or 'any' or specific name)
+  country: string; // e.g. "Japan", "Kuwait" or "All"
+  amount: number;
+  createdAt: string;
+}
+
+
 
 

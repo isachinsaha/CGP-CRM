@@ -14,10 +14,12 @@ import {
   X,
   LayoutGrid,
   Trello,
-  RotateCw
+  RotateCw,
+  Search
 } from 'lucide-react';
 import { getCountryFlagUrl, formatCandidateName } from '../utils';
 import ImportantUpdatesBar from './ImportantUpdatesBar.tsx';
+import { SearchableSelect } from './SearchableSelect.tsx';
 
 interface LeadBoardProps {
   leads: Lead[];
@@ -56,6 +58,26 @@ export default function LeadBoard({
 
   // Coordinator filter state (for Admin View)
   const [coordinatorFilter, setCoordinatorFilter] = useState('All');
+
+  // Search input state for Pipeline
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Memoized options list for searchable coordinator select
+  const coordinatorOptions = React.useMemo(() => {
+    const list = [
+      { value: 'All', label: '👤 All Coordinators' },
+      { value: 'Unassigned', label: '👤 Unassigned Only' }
+    ];
+    if (coordinators && coordinators.length > 0) {
+      coordinators.filter(c => c.role === 'agent').forEach(coord => {
+        list.push({
+          value: coord.username,
+          label: `👤 ${coord.displayName.toUpperCase()}`
+        });
+      });
+    }
+    return list;
+  }, [coordinators]);
 
   // Date filter state: 'all' | 'today' | 'yesterday' | 'date-wise'
   const [pipelineDateFilter, setPipelineDateFilter] = useState<'all' | 'today' | 'yesterday' | 'date-wise'>('all');
@@ -102,6 +124,19 @@ export default function LeadBoard({
   // Filter leads based on agent bucket selection AND date filters
   const visibleLeads = React.useMemo(() => {
     let filtered = leads;
+
+    // Search query filter
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(lead => 
+        (lead.name && lead.name.toLowerCase().includes(q)) ||
+        (lead.phone && lead.phone.toLowerCase().includes(q)) ||
+        (lead.country && lead.country.toLowerCase().includes(q)) ||
+        (lead.position && lead.position.toLowerCase().includes(q)) ||
+        (lead.project && lead.project.toLowerCase().includes(q)) ||
+        (lead.source && lead.source.toLowerCase().includes(q))
+      );
+    }
 
     // Agent bucket filter
     if (userRole === 'agent') {
@@ -152,7 +187,7 @@ export default function LeadBoard({
     }
 
     return filtered;
-  }, [leads, userRole, currentAgentId, coordinatorFilter, pipelineDateFilter, filterStartDate, filterEndDate]);
+  }, [leads, searchQuery, userRole, currentAgentId, coordinatorFilter, pipelineDateFilter, filterStartDate, filterEndDate]);
 
   // Lead Card Render Helper to avoid duplicate JSX
   const renderLeadCard = (lead: Lead) => {
@@ -320,52 +355,31 @@ export default function LeadBoard({
       {/* Pipeline Border Card Container */}
       <div className="bg-slate-950/40 rounded-3xl border border-slate-700 p-6 shadow-xl text-left">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-5 border-b border-slate-700 pb-4 gap-4">
-          {/* Left Side: Controls in One Straight Line */}
+          {/* Left Side: Controls in One Straight Line in exact requested order */}
           <div className="flex flex-wrap items-center gap-3">
-            {/* View Switcher segment button styled beautifully */}
-            <div className="flex items-center bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
-              <button
-                type="button"
-                onClick={() => setViewMode('hub')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                  viewMode === 'hub'
-                    ? 'bg-accent-purple text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <LayoutGrid className="h-3 w-3" />
-                Pipeline View
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('board')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                  viewMode === 'board'
-                    ? 'bg-accent-purple text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Trello className="h-3 w-3" />
-                Classic View
-              </button>
+            {/* 1. Search option */}
+            <div className="relative w-full sm:w-60 text-left shrink-0">
+              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Search candidate..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-1.5 text-xs rounded-xl border border-slate-750 focus:outline-none focus:ring-1 focus:ring-accent-purple bg-slate-900 text-slate-100 placeholder-slate-500 font-medium"
+              />
             </div>
 
-            {/* Coordinator Filter - only in Admin View */}
+            {/* 2. All coordinators filter - only in Admin View */}
             {userRole === 'admin' && (
-              <select
+              <SearchableSelect
                 value={coordinatorFilter}
-                onChange={(e) => setCoordinatorFilter(e.target.value)}
-                className="text-[10px] px-3 py-1.5 rounded-xl border border-slate-750 bg-slate-900 text-accent-purple font-black focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase shadow-inner shrink-0"
-              >
-                <option value="All">👤 All Coordinators</option>
-                <option value="Unassigned">👤 Unassigned</option>
-                {coordinators.filter(c => c.role === 'agent').map(coord => (
-                  <option key={coord.id} value={coord.username}>👤 {coord.displayName.toUpperCase()}</option>
-                ))}
-              </select>
+                onChange={setCoordinatorFilter}
+                options={coordinatorOptions}
+                className="text-xs px-2.5 py-1.5 rounded-xl border border-slate-750 bg-slate-900 text-accent-purple font-black focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase shadow-inner shrink-0"
+              />
             )}
 
-            {/* Shifted & Minimalist Pipeline Filters */}
+            {/* 3. Time filters: All, Today, Yesterday, Date */}
             <div className="flex items-center gap-1 bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
               {[
                 { id: 'all', label: 'All' },
@@ -416,6 +430,34 @@ export default function LeadBoard({
                 />
               </div>
             )}
+
+            {/* 4. View Switcher segment button styled beautifully (Pipeline & Classic) */}
+            <div className="flex items-center bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
+              <button
+                type="button"
+                onClick={() => setViewMode('hub')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  viewMode === 'hub'
+                    ? 'bg-accent-purple text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <LayoutGrid className="h-3 w-3" />
+                Pipeline View
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('board')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  viewMode === 'board'
+                    ? 'bg-accent-purple text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Trello className="h-3 w-3" />
+                Classic View
+              </button>
+            </div>
           </div>
 
           {/* Right Side: Results indicator */}

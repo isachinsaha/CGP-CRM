@@ -3,9 +3,22 @@ import { StatSummary, Lead, Coordinator } from '../types.ts';
 import { 
   BarChart3, TrendingUp, Target, Percent, Sparkles, 
   UserCheck, Inbox, Calendar, Users, Award, ShieldAlert, Clock, MapPin, CheckCircle,
-  CheckSquare2, Square, AlertCircle, ListTodo, User, Bell
+  CheckSquare2, Square, AlertCircle, ListTodo, User, Bell, PieChart as PieIcon, AreaChart as AreaIcon
 } from 'lucide-react';
 import { formatCandidateName } from '../utils';
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  Legend,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid
+} from 'recharts';
 
 interface CampaignAnalyticsProps {
   stats: StatSummary;
@@ -54,6 +67,9 @@ export default function CampaignAnalytics({
   const [customStartDate, setCustomStartDate] = useState<string>('2025-01-01');
   const [customEndDate, setCustomEndDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [selectedCoordFilter, setSelectedCoordFilter] = useState<string>('All');
+  const [todoCoordFilter, setTodoCoordFilter] = useState<string>('All');
+  const [attributionChartType, setAttributionChartType] = useState<'bar' | 'pie'>('bar');
+  const [pipelineChartType, setPipelineChartType] = useState<'funnel' | 'mountain'>('funnel');
 
   // Selected coordinator display name for filtering
   const selectedCoordinatorName = useMemo(() => {
@@ -243,6 +259,11 @@ export default function CampaignAnalytics({
 
     activeLeads.forEach(lead => {
       if (lead.tasks && Array.isArray(lead.tasks)) {
+        // Filter by coordinator if selected
+        if (todoCoordFilter !== 'All') {
+          const matched = lead.assignedTo?.toLowerCase() === todoCoordFilter.toLowerCase() || lead.assignedTo === todoCoordFilter;
+          if (!matched) return;
+        }
         lead.tasks.forEach(task => {
           if (!task.completed) {
             list.push({
@@ -260,7 +281,7 @@ export default function CampaignAnalytics({
 
     // Sort by due date (overdue/today/upcoming first)
     return list.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
-  }, [activeLeads]);
+  }, [activeLeads, todoCoordFilter]);
 
   const handleCompleteTask = async (leadId: string, taskId: string) => {
     const lead = activeLeads.find(l => l.id === leadId);
@@ -295,8 +316,12 @@ export default function CampaignAnalytics({
 
   // Extract all leads with active reminders
   const reminderLeads = useMemo(() => {
-    return activeLeads.filter(l => l.reminderEnabled);
-  }, [activeLeads]);
+    let filtered = activeLeads.filter(l => l.reminderEnabled);
+    if (todoCoordFilter !== 'All') {
+      filtered = filtered.filter(l => l.assignedTo?.toLowerCase() === todoCoordFilter.toLowerCase() || l.assignedTo === todoCoordFilter);
+    }
+    return filtered;
+  }, [activeLeads, todoCoordFilter]);
 
   const handleToggleReminder = async (leadId: string, currentVal?: boolean) => {
     try {
@@ -732,6 +757,39 @@ export default function CampaignAnalytics({
           </div>
         </div>
       )}
+
+      {/* ACTIONABLE FOLLOW-UPS FILTER BAR */}
+      <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-left shadow-lg select-none">
+        <div className="space-y-1">
+          <h3 className="text-sm font-extrabold text-slate-100 flex items-center gap-2 uppercase tracking-wide">
+            <Users className="h-4 w-4 text-accent-purple" />
+            Actionable Follow-up Filters
+          </h3>
+          <p className="text-xs text-slate-400 font-medium">
+            Filter the priority reminder cards and real-time checklist below by coordinator.
+          </p>
+        </div>
+
+        {userRole === 'admin' ? (
+          <div className="flex items-center gap-2.5 bg-slate-950 border border-slate-800 px-3.5 py-2 rounded-xl w-full sm:w-auto shrink-0 shadow-sm hover:border-slate-700 transition">
+            <span className="text-[10px] font-black text-slate-450 uppercase font-mono tracking-wider">Coordinator:</span>
+            <select
+              value={todoCoordFilter}
+              onChange={(e) => setTodoCoordFilter(e.target.value)}
+              className="bg-transparent text-xs text-slate-200 font-black outline-none border-0 p-0 cursor-pointer focus:ring-0 uppercase font-display max-w-[200px]"
+            >
+              <option value="All" className="bg-slate-950 text-slate-200">All Coordinators</option>
+              {coordinators.filter(c => c.role === 'agent').map(c => (
+                <option key={c.id} value={c.displayName} className="bg-slate-950 text-slate-200">{c.displayName}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-950/40 text-accent-purple text-[10px] font-black uppercase tracking-wider rounded-xl border border-purple-900/30 font-display">
+            <span>Coordinator: {userRole === 'agent' && currentAgentId ? (coordinators.find(c => c.username?.toLowerCase() === currentAgentId.toLowerCase() || c.displayName?.toLowerCase() === currentAgentId.toLowerCase())?.displayName || currentAgentId) : 'My Assigned Files'}</span>
+          </div>
+        )}
+      </div>
 
       {/* CANDIDATES MARKED FOR REMINDER (🔔) */}
       <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 text-left">
@@ -1427,83 +1485,223 @@ export default function CampaignAnalytics({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Ad Country Demands breakdown */}
-        <div className="lg:col-span-7 bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl">
-          <h3 className="text-sm font-semibold text-slate-100 mb-4 flex items-center gap-2 text-left font-display">
-            <BarChart3 className="h-4.5 w-4.5 text-accent-emerald" />
-            Active Consultancy Target Country Attribution
-          </h3>
-          <div className="space-y-4">
-            {campaignAttributionFiltered && campaignAttributionFiltered.length > 0 ? (
-              campaignAttributionFiltered.map((camp, idx) => {
-                const maxCount = Math.max(...campaignAttributionFiltered.map(c => c.count), 1);
-                const percentLength = Math.round((camp.count / maxCount) * 100);
-                return (
-                  <div key={idx} className="space-y-1 text-left">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-semibold text-slate-200 truncate max-w-[280px] font-sans">
-                        ✈️ {camp.campaign.replace(' Openings', '')} Placement Program
-                      </span>
-                      <span className="text-slate-400 font-mono font-bold">
-                        {camp.count} leads
-                      </span>
-                    </div>
-                    <div className="h-6 w-full bg-slate-950 rounded-lg overflow-hidden flex items-center p-0.5 border border-slate-850">
-                      <div
-                        style={{ width: `${percentLength}%` }}
-                        className="h-full bg-accent-emerald hover:bg-emerald-500 rounded-md transition-all duration-500 flex items-center px-2"
-                      >
-                        {percentLength > 15 && (
-                          <span className="text-[9px] text-slate-950 font-black uppercase tracking-wider">
-                            {percentLength}%
+        <div className="lg:col-span-7 bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl flex flex-col justify-between">
+          <div>
+            <div className="flex justify-between items-center mb-4 select-none">
+              <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2 font-display">
+                <BarChart3 className="h-4.5 w-4.5 text-accent-emerald" />
+                Active Consultancy Target Country Attribution
+              </h3>
+              <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-855">
+                <button
+                  type="button"
+                  onClick={() => setAttributionChartType('bar')}
+                  className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-lg transition-all cursor-pointer ${
+                    attributionChartType === 'bar'
+                      ? 'bg-emerald-500 text-zinc-950 font-black shadow-md'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Bars
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAttributionChartType('pie')}
+                  className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-lg transition-all cursor-pointer ${
+                    attributionChartType === 'pie'
+                      ? 'bg-emerald-500 text-zinc-950 font-black shadow-md'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Pie
+                </button>
+              </div>
+            </div>
+
+            {attributionChartType === 'bar' ? (
+              <div className="space-y-4">
+                {campaignAttributionFiltered && campaignAttributionFiltered.length > 0 ? (
+                  campaignAttributionFiltered.map((camp, idx) => {
+                    const maxCount = Math.max(...campaignAttributionFiltered.map(c => c.count), 1);
+                    const percentLength = Math.round((camp.count / maxCount) * 100);
+                    return (
+                      <div key={idx} className="space-y-1 text-left">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-semibold text-slate-200 truncate max-w-[280px] font-sans">
+                            ✈️ {camp.campaign.replace(' Openings', '')} Placement Program
                           </span>
-                        )}
+                          <span className="text-slate-400 font-mono font-bold">
+                            {camp.count} leads
+                          </span>
+                        </div>
+                        <div className="h-6 w-full bg-slate-950 rounded-lg overflow-hidden flex items-center p-0.5 border border-slate-850">
+                          <div
+                            style={{ width: `${percentLength}%` }}
+                            className="h-full bg-accent-emerald hover:bg-emerald-500 rounded-md transition-all duration-500 flex items-center px-2"
+                          >
+                            {percentLength > 15 && (
+                              <span className="text-[9px] text-slate-950 font-black uppercase tracking-wider">
+                                {percentLength}%
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                );
-              })
+                    );
+                  })
+                ) : (
+                  <div className="text-xs text-slate-450 py-10 text-center font-sans">No campaign attributions available.</div>
+                )}
+              </div>
             ) : (
-              <div className="text-xs text-slate-450 py-10 text-center font-sans">No campaign attributions available.</div>
+              <div className="h-[280px] w-full flex items-center justify-center">
+                {campaignAttributionFiltered && campaignAttributionFiltered.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={campaignAttributionFiltered.map(c => ({
+                          name: c.campaign.replace(' Openings', '').replace(' Program', ''),
+                          value: c.count
+                        }))}
+                        cx="50%"
+                        cy="45%"
+                        innerRadius={60}
+                        outerRadius={85}
+                        paddingAngle={4}
+                        dataKey="value"
+                      >
+                        {campaignAttributionFiltered.map((entry, index) => {
+                          const COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ec4899', '#06b6d4', '#14b8a6', '#f43f5e'];
+                          return <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />;
+                        })}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
+                        itemStyle={{ color: '#f1f5f9', fontSize: '11px' }}
+                      />
+                      <Legend 
+                        verticalAlign="bottom" 
+                        height={36} 
+                        iconType="circle"
+                        iconSize={8}
+                        wrapperStyle={{ fontSize: '10px', color: '#94a3b8' }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-xs text-slate-450 py-10 text-center font-sans">No campaign data for Pie Chart.</div>
+                )}
+              </div>
             )}
           </div>
         </div>
 
         {/* Lead pipeline stage funnel */}
-        <div className="lg:col-span-5 bg-slate-900 p-6 rounded-2xl border border-slate-800 text-left shadow-xl">
-          <h3 className="text-sm font-semibold text-slate-100 mb-4 flex items-center gap-2 font-display">
-            <Target className="h-4.5 w-4.5 text-accent-emerald" />
-            Candidate Pipeline Funnel Stages
-          </h3>
-          <div className="space-y-2.5">
-            {[
-              { label: 'New Lead Inbound', key: 'new', color: 'bg-slate-600 hover:bg-slate-500' },
-              { label: 'In Negotiation', key: 'negotiating', color: 'bg-amber-600 hover:bg-amber-500' },
-              { label: 'In Rotations', key: 'rotations', color: 'bg-indigo-600 hover:bg-indigo-500' },
-              { label: 'Office Visited/Interview attendant', key: 'proposal', color: 'bg-purple-650 hover:bg-purple-605' },
-              { label: 'Closed Converted', key: 'won', color: 'bg-accent-emerald hover:bg-emerald-500' },
-              { label: 'Unqualified / Lost', key: 'lost', color: 'bg-slate-700 hover:bg-slate-650' }
-            ].map((funnel, idx) => {
-              const count = pipelineStagesFiltered[funnel.key as any] || 0;
-              const maxVal = Math.max(...(Object.values(pipelineStagesFiltered) as number[]), 1);
-              const pct = calculatePercent(count, filteredLeadsCount);
-              const barWidth = Math.max(10, calculatePercent(count, maxVal));
-              return (
-                <div key={idx} className="flex items-center gap-3">
-                  <div className="w-28 text-xs font-semibold text-slate-450 text-right truncate">
-                    {funnel.label}
-                  </div>
-                  <div className="flex-1 h-8 bg-slate-950 rounded-lg flex items-center px-1 overflow-hidden border border-slate-850">
-                    <div
-                      style={{ width: `${barWidth}%` }}
-                      className={`h-6 rounded-md ${funnel.color} transition-all duration-500 flex items-center justify-between px-2 text-white font-mono text-[10px] font-bold`}
-                    >
-                      <span className="text-slate-950 drop-shadow-xs font-black">{count}</span>
-                      {pct > 0 && <span className="text-[8px] opacity-80 text-slate-950 font-extrabold">{pct}%</span>}
+        <div className="lg:col-span-5 bg-slate-900 p-6 rounded-2xl border border-slate-800 text-left shadow-xl flex flex-col justify-between">
+          <div>
+            <div className="flex justify-between items-center mb-4 select-none">
+              <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2 font-display">
+                <Target className="h-4.5 w-4.5 text-accent-emerald" />
+                Candidate Pipeline Funnel Stages
+              </h3>
+              <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-850">
+                <button
+                  type="button"
+                  onClick={() => setPipelineChartType('funnel')}
+                  className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-lg transition-all cursor-pointer ${
+                    pipelineChartType === 'funnel'
+                      ? 'bg-emerald-500 text-zinc-950 font-black shadow-md'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Funnel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPipelineChartType('mountain')}
+                  className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-lg transition-all cursor-pointer ${
+                    pipelineChartType === 'mountain'
+                      ? 'bg-emerald-500 text-zinc-950 font-black shadow-md'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Mountain
+                </button>
+              </div>
+            </div>
+
+            {pipelineChartType === 'funnel' ? (
+              <div className="space-y-2.5">
+                {[
+                  { label: 'New Lead Inbound', key: 'new', color: 'bg-slate-600 hover:bg-slate-500' },
+                  { label: 'In Negotiation', key: 'negotiating', color: 'bg-amber-600 hover:bg-amber-500' },
+                  { label: 'In Rotations', key: 'rotations', color: 'bg-indigo-600 hover:bg-indigo-500' },
+                  { label: 'Office Visited/Interview attendant', key: 'proposal', color: 'bg-purple-650 hover:bg-purple-605' },
+                  { label: 'Closed Converted', key: 'won', color: 'bg-accent-emerald hover:bg-emerald-500' },
+                  { label: 'Unqualified / Lost', key: 'lost', color: 'bg-slate-700 hover:bg-slate-650' }
+                ].map((funnel, idx) => {
+                  const count = pipelineStagesFiltered[funnel.key as any] || 0;
+                  const maxVal = Math.max(...(Object.values(pipelineStagesFiltered) as number[]), 1);
+                  const pct = calculatePercent(count, filteredLeadsCount);
+                  const barWidth = Math.max(10, calculatePercent(count, maxVal));
+                  return (
+                    <div key={idx} className="flex items-center gap-3">
+                      <div className="w-28 text-xs font-semibold text-slate-450 text-right truncate">
+                        {funnel.label}
+                      </div>
+                      <div className="flex-1 h-8 bg-slate-950 rounded-lg flex items-center px-1 overflow-hidden border border-slate-850">
+                        <div
+                          style={{ width: `${barWidth}%` }}
+                          className={`h-6 rounded-md ${funnel.color} transition-all duration-500 flex items-center justify-between px-2 text-white font-mono text-[10px] font-bold`}
+                        >
+                          <span className="text-slate-950 drop-shadow-xs font-black">{count}</span>
+                          {pct > 0 && <span className="text-[8px] opacity-80 text-slate-950 font-extrabold">{pct}%</span>}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="h-[280px] w-full mt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={[
+                      { stage: 'Inbound', count: pipelineStagesFiltered.new || 0 },
+                      { stage: 'Negotiation', count: pipelineStagesFiltered.negotiating || 0 },
+                      { stage: 'Rotation', count: pipelineStagesFiltered.rotations || 0 },
+                      { stage: 'Interview', count: pipelineStagesFiltered.proposal || 0 },
+                      { stage: 'Converted', count: pipelineStagesFiltered.won || 0 },
+                      { stage: 'Lost', count: pipelineStagesFiltered.lost || 0 }
+                    ]}
+                    margin={{ top: 10, right: 10, left: -25, bottom: 5 }}
+                  >
+                    <defs>
+                      <linearGradient id="colorPipeline" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                    <XAxis dataKey="stage" stroke="#94a3b8" fontSize={9} tickLine={false} />
+                    <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
+                      labelStyle={{ color: '#f1f5f9', fontWeight: 'bold', fontSize: '11px' }}
+                      itemStyle={{ color: '#10b981', fontSize: '11px' }}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="count" 
+                      stroke="#10b981" 
+                      strokeWidth={3} 
+                      fillOpacity={1} 
+                      fill="url(#colorPipeline)" 
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
         </div>
       </div>

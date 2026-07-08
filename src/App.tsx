@@ -8,7 +8,7 @@ import { Lead, LeadStage, StatSummary, Coordinator } from './types.ts';
 import { 
   LayoutGrid, Table, BarChart3, Briefcase, ShieldAlert, Sparkles, 
   RefreshCw, MessageSquare, Plus, HelpCircle, Layers, Lock, User, Check, X, Shield,
-  LogOut, Users, UserCheck, Sun, Moon
+  LogOut, Users, UserCheck, Sun, Moon, PiggyBank
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -22,13 +22,14 @@ import LeadModal from './components/LeadModal.tsx';
 import LoginScreen from './components/LoginScreen.tsx';
 import CoordinatorsManager from './components/CoordinatorsManager.tsx';
 import MetadataManager from './components/MetadataManager.tsx';
+import IncentiveRulesManager from './components/IncentiveRulesManager.tsx';
 import CGPLogo from './components/CGPLogo.tsx';
 import ImportantUpdatesBar from './components/ImportantUpdatesBar.tsx';
 
 // Import local assets
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'board' | 'list' | 'analytics' | 'jobs' | 'ai-matcher'>('board');
+  const [activeTab, setActiveTab] = useState<'board' | 'list' | 'analytics' | 'jobs' | 'ai-matcher' | 'wallet'>('board');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [stats, setStats] = useState<StatSummary | null>(null);
@@ -37,6 +38,7 @@ export default function App() {
   const [coordinatorsList, setCoordinatorsList] = useState<Coordinator[]>([]);
   const [isCoordManagerOpen, setIsCoordManagerOpen] = useState(false);
   const [isMetadataManagerOpen, setIsMetadataManagerOpen] = useState(false);
+  const [isIncentiveRulesOpen, setIsIncentiveRulesOpen] = useState(false);
 
   // Authentication & session state
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string; displayName: string; role: 'admin' | 'agent' } | null>(() => {
@@ -117,6 +119,7 @@ export default function App() {
         setIsCreateModalOpen(false);
         setIsCoordManagerOpen(false);
         setIsMetadataManagerOpen(false);
+        setIsIncentiveRulesOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown, true);
@@ -532,6 +535,15 @@ export default function App() {
                   <Layers className="h-3.5 w-3.5 text-accent-purple" />
                   <span>Manage Options</span>
                 </button>
+
+                <button
+                  onClick={() => setIsIncentiveRulesOpen(true)}
+                  className="text-xs font-black px-3.5 py-2 bg-slate-850 hover:bg-slate-800 border border-slate-750 hover:border-slate-600 text-slate-200 rounded-xl transition-all flex items-center gap-1.5 shadow-md cursor-pointer uppercase tracking-wider"
+                  title="Manage Coordinator Incentive & Compensation Rules"
+                >
+                  <PiggyBank className="h-3.5 w-3.5 text-accent-purple" />
+                  <span>Incentive Rules</span>
+                </button>
               </>
             )}
 
@@ -582,7 +594,8 @@ export default function App() {
               { id: 'list', label: 'Spreadsheet Explorer', icon: Table },
               { id: 'analytics', label: 'Consultancy Reports', icon: BarChart3 },
               { id: 'ai-matcher', label: 'AI Profile Matcher', icon: Sparkles },
-              { id: 'jobs', label: 'Active Jobs Hub', icon: Briefcase }
+              { id: 'jobs', label: 'Active Jobs Hub', icon: Briefcase },
+              { id: 'wallet', label: 'Incentive Wallet', icon: PiggyBank }
             ].map(tab => {
               const Icon = tab.icon;
               return (
@@ -693,6 +706,15 @@ export default function App() {
               <ActiveJobs
                 currentUser={currentUser}
                 countries={countries}
+                view="jobs"
+              />
+            )}
+
+            {activeTab === 'wallet' && (
+              <ActiveJobs
+                currentUser={currentUser}
+                countries={countries}
+                view="wallet"
               />
             )}
 
@@ -1201,6 +1223,17 @@ export default function App() {
           onUpdateProjects={handleUpdateProjects}
           onUpdateCountries={handleUpdateCountries}
           onUpdatePositions={handleUpdatePositions}
+        />
+      )}
+
+      {/* Incentive Structures & Compensation Rules Manager */}
+      {isIncentiveRulesOpen && (
+        <IncentiveRulesManager
+          userRole={userRole}
+          onClose={() => setIsIncentiveRulesOpen(false)}
+          onRulesChanged={() => pullCrmData(true)}
+          countries={countries}
+          projects={projects}
         />
       )}
 

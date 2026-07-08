@@ -15,7 +15,7 @@ import {
   writeBatch,
   setLogLevel
 } from 'firebase/firestore';
-import { Lead, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate } from '../types.ts';
+import { Lead, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule } from '../types.ts';
 
 // Configure Firebase SDK to only log errors, suppressing gRPC connection warnings
 setLogLevel('error');
@@ -30,11 +30,29 @@ const COORDINATORS_FILE = path.join(DATA_DIR, 'coordinators.json');
 const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
 const UPDATES_FILE = path.join(DATA_DIR, 'updates.json');
 const METADATA_FILE = path.join(DATA_DIR, 'metadata.json');
+const WALLETS_FILE = path.join(DATA_DIR, 'wallets.json');
+const INCENTIVE_RULES_FILE = path.join(DATA_DIR, 'incentive_rules.json');
+
+// Mutex to prevent overlapping database read/write and Firestore sync operations
+class DatabaseMutex {
+  private queue: Promise<any> = Promise.resolve();
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(fn);
+    this.queue = next.catch(() => {});
+    return next;
+  }
+}
+
+export const dbMutex = new DatabaseMutex();
 
 // Initialize client-side Firebase Firestore with standard Web SDK
 // This bypasses GCP Service Account IAM permissions propagation issues on shared databases!
 let db: any = null;
+let firebaseApp: any = null;
 let currentDbId: string = '(default)';
+let dbVerified = false;
+let dbVerifying = false;
 
 // Helper to enforce timeouts on async Firestore promises so they never hang the server
 function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 20000): Promise<T> {
@@ -63,8 +81,59 @@ let lastCloudErrorTime = 0;
 let cloudBreakerCooldownMs = 5 * 60 * 1000; // default 5 minutes
 let quotaLimitExceeded = false;
 
+async function verifyDatabaseAccess() {
+  if (dbVerified || !db) return;
+  if (dbVerifying) return;
+  dbVerifying = true;
+  
+  try {
+    console.log(`[Firestore Client] Verifying access to configured database: "${currentDbId}"...`);
+    // Try a simple getDoc on a non-existent document with a fast timeout to check database provisioning
+    const testRef = doc(db, 'metadata', 'test_connection');
+    await runWithTimeout(getDoc(testRef), 3000);
+    dbVerified = true;
+    console.log(`[Firestore Client] Configured database "${currentDbId}" verified and fully active.`);
+  } catch (err: any) {
+    const errMsg = err?.message || String(err);
+    console.warn(`[Firestore Client] Verification of configured database "${currentDbId}" failed:`, errMsg);
+    
+    // If database does not exist or we get NOT_FOUND / INVALID, fallback to default database
+    if (currentDbId !== '(default)' && (
+      errMsg.includes('NOT_FOUND') || 
+      errMsg.includes('not found') || 
+      errMsg.includes('Database') || 
+      errMsg.includes('database') ||
+      errMsg.includes('Invalid database') ||
+      errMsg.includes('invalid')
+    )) {
+      console.warn(`[Firestore Client] Custom database "${currentDbId}" is not provisioned or active. GRACEFULLY FALLING BACK TO "(default)" DATABASE.`);
+      try {
+        db = getFirestore(firebaseApp, '(default)');
+        currentDbId = '(default)';
+        dbVerified = true;
+        console.log(`[Firestore Client] Successfully fell back and re-initialized to "(default)" database.`);
+      } catch (fallbackErr) {
+        console.error('[Firestore Client] Fatal: Failed to fall back to "(default)" database:', fallbackErr);
+      }
+    } else {
+      // Mark as verified for general network timeout / other errors so we do not spam verification queries
+      dbVerified = true;
+    }
+  } finally {
+    dbVerifying = false;
+  }
+}
+
 function checkCloudStatus(): boolean {
   if (!db) return false;
+  
+  // Trigger verification asynchronously
+  if (!dbVerified && !dbVerifying) {
+    verifyDatabaseAccess().catch(err => {
+      console.error('[Firestore Client] Error in verifyDatabaseAccess:', err);
+    });
+  }
+
   if (!cloudSyncEnabled) {
     const now = Date.now();
     if (now - lastCloudErrorTime > cloudBreakerCooldownMs) {
@@ -128,6 +197,7 @@ function initFirestore() {
         appId: config.appId
       };
       const app = initializeApp(firebaseConfig);
+      firebaseApp = app;
       db = getFirestore(app, config.firestoreDatabaseId || '(default)');
       currentDbId = config.firestoreDatabaseId || '(default)';
       console.log(`[Firestore Client] Initialized Firestore client for project "${config.projectId}" (Database ID: "${currentDbId}")`);
@@ -157,6 +227,8 @@ const dbCache = {
   jobs: null as CacheEntry<Job[]> | null,
   updates: null as CacheEntry<ImportantUpdate[]> | null,
   metadata: null as CacheEntry<CgpMetadata> | null,
+  wallets: null as CacheEntry<Wallet[]> | null,
+  incentive_rules: null as CacheEntry<IncentiveRule[]> | null,
 };
 
 // Helper to recursively strip or replace undefined values with empty/null for Firestore compatibility
@@ -735,7 +807,7 @@ export async function getLeadById(id: string): Promise<Lead | undefined> {
 }
 
 // Read database with bidirectional sync
-export async function getLeads(): Promise<Lead[]> {
+async function getLeadsInternal(): Promise<Lead[]> {
   await initializeDatabase();
 
   // Check in-memory cache first
@@ -877,7 +949,7 @@ export async function getLeads(): Promise<Lead[]> {
 }
 
 // Save all leads using smart delta-saving for Firestore
-export async function saveLeads(leads: Lead[]): Promise<void> {
+async function saveLeadsInternal(leads: Lead[]): Promise<void> {
   await initializeDatabase();
 
   // Update in-memory cache immediately so local changes are instantly reflected on reads
@@ -975,6 +1047,14 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
       // This leaves them as "unsynced" in our metadata so that they will be retried and merged on the next read!
     }
   }
+}
+
+export async function getLeads(): Promise<Lead[]> {
+  return dbMutex.run(() => getLeadsInternal());
+}
+
+export async function saveLeads(leads: Lead[]): Promise<void> {
+  return dbMutex.run(() => saveLeadsInternal(leads));
 }
 
 // Add custom lead
@@ -1526,4 +1606,348 @@ export async function saveMetadata(metadata: CgpMetadata): Promise<void> {
     }
   }
 }
+
+// --- WALLET DATABASE FUNCTIONS ---
+
+export async function initializeWalletsDatabase() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(WALLETS_FILE)) {
+    fs.writeFileSync(WALLETS_FILE, JSON.stringify([], null, 2), 'utf-8');
+  }
+
+  if (checkCloudStatus()) {
+    try {
+      const q = query(collection(db, 'wallets'), limit(1));
+      const snapshot = await runWithTimeout(getDocs(q), 2000);
+      if (snapshot.empty) {
+        console.log('[Firestore Client] Seeding default wallets from coordinators...');
+        const coords = await getCoordinators();
+        const batch = writeBatch(db);
+        const defaultWallets: Wallet[] = coords.map(c => ({
+          id: c.username.toLowerCase(),
+          username: c.username.toLowerCase(),
+          displayName: c.displayName,
+          balance: 0,
+          transactions: [],
+          updatedAt: new Date().toISOString()
+        }));
+        defaultWallets.forEach(w => {
+          const docRef = doc(db, 'wallets', w.id);
+          batch.set(docRef, cleanForFirestore(w));
+        });
+        await runWithTimeout(batch.commit(), 2000);
+        console.log('[Firestore Client] Seeded wallets successfully.');
+      }
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to check/seed wallets:', err);
+      handleCloudError(err);
+    }
+  }
+}
+
+export async function getWallets(): Promise<Wallet[]> {
+  await initializeWalletsDatabase();
+
+  if (dbCache.wallets && (Date.now() - dbCache.wallets.timestamp < CACHE_TTL_MS)) {
+    return dbCache.wallets.data;
+  }
+
+  if (checkCloudStatus()) {
+    try {
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'wallets')), 2000);
+      const wallets: Wallet[] = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        wallets.push({
+          id: docSnap.id,
+          username: data.username || docSnap.id,
+          displayName: data.displayName || data.username || docSnap.id,
+          balance: Number(data.balance) || 0,
+          transactions: Array.isArray(data.transactions) ? data.transactions : [],
+          updatedAt: data.updatedAt || new Date().toISOString()
+        });
+      });
+
+      // Update cache
+      dbCache.wallets = { data: wallets, timestamp: Date.now() };
+
+      try {
+        fs.writeFileSync(WALLETS_FILE, JSON.stringify(wallets, null, 2), 'utf-8');
+      } catch (err) {
+        console.error('Failed to sync cloud wallets to local cache:', err);
+      }
+
+      return wallets;
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to fetch wallets from cloud, falling back to local files:', err);
+      handleCloudError(err);
+    }
+  }
+
+  try {
+    const data = fs.readFileSync(WALLETS_FILE, 'utf-8');
+    const wallets = JSON.parse(data) as Wallet[];
+    dbCache.wallets = { data: wallets, timestamp: Date.now() };
+    return wallets;
+  } catch (err) {
+    console.error('Failed to read wallets file', err);
+    return [];
+  }
+}
+
+export async function saveWallets(wallets: Wallet[]): Promise<void> {
+  await initializeWalletsDatabase();
+
+  dbCache.wallets = { data: wallets, timestamp: Date.now() };
+
+  try {
+    fs.writeFileSync(WALLETS_FILE, JSON.stringify(wallets, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to write wallets file', err);
+  }
+
+  if (checkCloudStatus()) {
+    try {
+      const batch = writeBatch(db);
+      wallets.forEach(w => {
+        const docRef = doc(db, 'wallets', w.id);
+        batch.set(docRef, cleanForFirestore(w));
+      });
+      await runWithTimeout(batch.commit(), 2000);
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to save wallets to cloud:', err);
+      handleCloudError(err);
+    }
+  }
+}
+
+export async function getWalletByUsername(username: string): Promise<Wallet> {
+  const wallets = await getWallets();
+  const cleanUser = String(username).trim().toLowerCase();
+  let wallet = wallets.find(w => w.username.toLowerCase() === cleanUser);
+  
+  if (!wallet) {
+    // Lazy initialize a new wallet for this coordinator
+    const coords = await getCoordinators();
+    const coord = coords.find(c => c.username.toLowerCase() === cleanUser);
+    
+    wallet = {
+      id: cleanUser,
+      username: cleanUser,
+      displayName: coord ? coord.displayName : username,
+      balance: 0,
+      transactions: [],
+      updatedAt: new Date().toISOString()
+    };
+    wallets.push(wallet);
+    await saveWallets(wallets);
+  }
+  
+  return wallet;
+}
+
+export async function addWalletTransaction(
+  username: string, 
+  type: 'credit' | 'debit', 
+  amount: number, 
+  reason: string, 
+  leadId?: string
+): Promise<Wallet> {
+  const wallet = await getWalletByUsername(username);
+  
+  const transaction: WalletTransaction = {
+    id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    type,
+    amount: Number(amount),
+    reason,
+    leadId,
+    timestamp: new Date().toISOString()
+  };
+
+  if (!wallet.transactions) wallet.transactions = [];
+  wallet.transactions.unshift(transaction); // Add to beginning for newest first
+  
+  if (type === 'credit') {
+    wallet.balance += Number(amount);
+  } else {
+    wallet.balance = Math.max(0, wallet.balance - Number(amount));
+  }
+  
+  wallet.updatedAt = new Date().toISOString();
+  
+  // Save to database
+  const wallets = await getWallets();
+  const idx = wallets.findIndex(w => w.id === wallet.id);
+  if (idx !== -1) {
+    wallets[idx] = wallet;
+  } else {
+    wallets.push(wallet);
+  }
+  await saveWallets(wallets);
+  
+  return wallet;
+}
+
+// Ensure incentive rules database exists with default seed rules
+export async function initializeIncentiveRulesDatabase() {
+  const defaultRules: IncentiveRule[] = [
+    {
+      id: 'rule_japan_all',
+      projectName: 'any',
+      country: 'Japan',
+      amount: 1000,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'rule_kuwait_napkin',
+      projectName: 'Napkin affairs',
+      country: 'Kuwait',
+      amount: 400,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'rule_kuwait_all',
+      projectName: 'any',
+      country: 'Kuwait',
+      amount: 400,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'rule_all_fallback',
+      projectName: 'any',
+      country: 'All',
+      amount: 400,
+      createdAt: new Date().toISOString()
+    }
+  ];
+
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(INCENTIVE_RULES_FILE)) {
+    fs.writeFileSync(INCENTIVE_RULES_FILE, JSON.stringify(defaultRules, null, 2), 'utf-8');
+  }
+
+  if (checkCloudStatus()) {
+    try {
+      const statusRef = doc(db, 'metadata', 'incentive_rules_status');
+      const statusSnap = await runWithTimeout(getDoc(statusRef), 2000);
+      if (!statusSnap.exists()) {
+        console.log('[Firestore Client] Seeding default incentive rules to cloud...');
+        const batch = writeBatch(db);
+        defaultRules.forEach(rule => {
+          const docRef = doc(db, 'incentive_rules', rule.id);
+          batch.set(docRef, cleanForFirestore(rule));
+        });
+        batch.set(statusRef, { seeded: true, updatedAt: new Date().toISOString() });
+        await runWithTimeout(batch.commit(), 2000);
+        console.log('[Firestore Client] Seeded incentive rules successfully.');
+      }
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to check/seed incentive rules, falling back to local file:', err);
+      handleCloudError(err);
+    }
+  }
+}
+
+async function getIncentiveRulesInternal(): Promise<IncentiveRule[]> {
+  await initializeIncentiveRulesDatabase();
+
+  if (dbCache.incentive_rules && (Date.now() - dbCache.incentive_rules.timestamp < CACHE_TTL_MS)) {
+    return dbCache.incentive_rules.data;
+  }
+
+  if (checkCloudStatus()) {
+    try {
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'incentive_rules')), 2000);
+      const rules: IncentiveRule[] = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data) {
+          rules.push({
+            id: docSnap.id,
+            projectName: data.projectName || '',
+            country: data.country || '',
+            amount: Number(data.amount) || 0,
+            createdAt: data.createdAt || new Date().toISOString()
+          } as IncentiveRule);
+        }
+      });
+
+      dbCache.incentive_rules = { data: rules, timestamp: Date.now() };
+
+      try {
+        fs.writeFileSync(INCENTIVE_RULES_FILE, JSON.stringify(rules, null, 2), 'utf-8');
+      } catch (err) {
+        console.error('Failed to sync cloud incentive rules to local cache:', err);
+      }
+
+      return rules;
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to fetch incentive rules from cloud, falling back to local files:', err);
+      handleCloudError(err);
+    }
+  }
+
+  try {
+    const data = fs.readFileSync(INCENTIVE_RULES_FILE, 'utf-8');
+    const rules = JSON.parse(data) as IncentiveRule[];
+    dbCache.incentive_rules = { data: rules, timestamp: Date.now() };
+    return rules;
+  } catch (err) {
+    console.error('Failed to read incentive rules file', err);
+    return [];
+  }
+}
+
+async function saveIncentiveRulesInternal(rules: IncentiveRule[]): Promise<void> {
+  await initializeIncentiveRulesDatabase();
+  const validRules = (rules || []).filter(r => r && typeof r === 'object' && r.id);
+
+  dbCache.incentive_rules = { data: validRules, timestamp: Date.now() };
+
+  try {
+    fs.writeFileSync(INCENTIVE_RULES_FILE, JSON.stringify(validRules, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to write incentive rules file', err);
+  }
+
+  if (checkCloudStatus()) {
+    try {
+      const batch = writeBatch(db);
+      validRules.forEach(r => {
+        const docRef = doc(db, 'incentive_rules', r.id);
+        batch.set(docRef, cleanForFirestore(r));
+      });
+      await runWithTimeout(batch.commit(), 2000);
+
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'incentive_rules')), 2000);
+      const deleteBatch = writeBatch(db);
+      let hasDeletes = false;
+      snapshot.forEach(docSnap => {
+        if (!validRules.some(r => r.id === docSnap.id)) {
+          deleteBatch.delete(docSnap.ref);
+          hasDeletes = true;
+        }
+      });
+      if (hasDeletes) {
+        await runWithTimeout(deleteBatch.commit(), 2000);
+      }
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to save incentive rules to cloud:', err);
+      handleCloudError(err);
+    }
+  }
+}
+
+export async function getIncentiveRules(): Promise<IncentiveRule[]> {
+  return dbMutex.run(() => getIncentiveRulesInternal());
+}
+
+export async function saveIncentiveRules(rules: IncentiveRule[]): Promise<void> {
+  return dbMutex.run(() => saveIncentiveRulesInternal(rules));
+}
+
 

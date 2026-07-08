@@ -17,9 +17,13 @@ import {
   ShieldCheck,
   AlertCircle,
   Globe,
-  Megaphone
+  Megaphone,
+  TrendingUp,
+  TrendingDown,
+  Wallet as WalletIcon,
+  PiggyBank
 } from 'lucide-react';
-import { Job, ImportantUpdate } from '../types';
+import { Job, ImportantUpdate, Wallet, WalletTransaction } from '../types';
 import { getCountryFlagUrl, getCountryCode } from '../utils';
 
 interface ActiveJobsProps {
@@ -30,12 +34,117 @@ interface ActiveJobsProps {
     role: 'admin' | 'agent';
   } | null;
   countries?: string[];
+  view?: 'jobs' | 'wallet';
 }
 
-export default function ActiveJobs({ currentUser, countries }: ActiveJobsProps) {
+export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsProps) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Wallet Feature Sub-Tab State
+  const [subTab, setSubTab] = useState<'jobs' | 'wallet'>(view || 'jobs');
+
+  useEffect(() => {
+    if (view) {
+      setSubTab(view);
+    }
+  }, [view]);
+  const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [selectedWallet, setSelectedWallet] = useState<Wallet | null>(null);
+  const [activeWalletUsername, setActiveWalletUsername] = useState<string>('');
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletAmount, setWalletAmount] = useState<string>('');
+  const [walletType, setWalletType] = useState<'credit' | 'debit'>('credit');
+  const [walletReason, setWalletReason] = useState<string>('');
+  const [walletError, setWalletError] = useState<string | null>(null);
+  const [walletSuccess, setWalletSuccess] = useState<string | null>(null);
+  const [walletSubmitting, setWalletSubmitting] = useState(false);
+
+  const fetchWalletData = async () => {
+    setWalletLoading(true);
+    setWalletError(null);
+    try {
+      if (currentUser?.role === 'admin') {
+        const res = await fetch('/api/wallets');
+        if (!res.ok) throw new Error('Failed to fetch coordinator wallets.');
+        const data = await res.json();
+        setWallets(data);
+        
+        if (data.length > 0) {
+          const defaultUser = activeWalletUsername || data[0].username;
+          setActiveWalletUsername(defaultUser);
+          const found = data.find((w: Wallet) => w.username === defaultUser);
+          setSelectedWallet(found || data[0]);
+        }
+      } else if (currentUser?.username) {
+        const res = await fetch(`/api/wallets/${currentUser.username}`);
+        if (!res.ok) throw new Error('Failed to fetch wallet.');
+        const data = await res.json();
+        setSelectedWallet(data);
+        setActiveWalletUsername(currentUser.username);
+      }
+    } catch (err: any) {
+      setWalletError(err.message);
+    } finally {
+      setWalletLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (subTab === 'wallet') {
+      fetchWalletData();
+    }
+  }, [subTab, activeWalletUsername, currentUser]);
+
+  const handleWalletAdjustment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeWalletUsername) return;
+    if (!walletAmount || Number(walletAmount) <= 0) {
+      setWalletError('Please enter a valid positive amount.');
+      return;
+    }
+    if (!walletReason.trim()) {
+      setWalletError('Please provide a reason.');
+      return;
+    }
+
+    setWalletSubmitting(true);
+    setWalletError(null);
+    setWalletSuccess(null);
+
+    try {
+      const res = await fetch(`/api/wallets/${activeWalletUsername}/transaction`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser?.role || 'user'
+        },
+        body: JSON.stringify({
+          type: walletType,
+          amount: Number(walletAmount),
+          reason: walletReason.trim()
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to apply wallet adjustment.');
+      }
+
+      setWalletSuccess(`Successfully adjusted balance! New balance: INR ${data.wallet.balance}`);
+      setWalletAmount('');
+      setWalletReason('');
+      
+      await fetchWalletData();
+      
+      setTimeout(() => setWalletSuccess(null), 4000);
+    } catch (err: any) {
+      setWalletError(err.message);
+    } finally {
+      setWalletSubmitting(false);
+    }
+  };
 
   const safeCountries = Array.isArray(countries) ? countries : ['Kuwait', 'Dubai', 'Qatar', 'Germany', 'Japan', 'Albania'];
 
@@ -411,24 +520,59 @@ export default function ActiveJobs({ currentUser, countries }: ActiveJobsProps) 
           <div className="space-y-1.5">
             <div className="inline-flex items-center gap-2 px-2.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider rounded-full">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Live Demand Requirement Hub
+              {subTab === 'wallet' ? 'Live Compensation Ledger' : 'Live Demand Requirement Hub'}
             </div>
             <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight font-sans">
-              Overseas Vacancy Tracker
+              {subTab === 'wallet' ? 'Incentive Wallet' : 'Overseas Vacancy Tracker'}
             </h1>
           </div>
           
-          <button 
-            id="add-vacancy-btn"
-            type="button"
-            onClick={handleOpenCreate}
-            className="self-start md:self-center px-5 py-3 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-zinc-950 font-black rounded-xl transition duration-150 shadow-lg shadow-emerald-500/25 inline-flex items-center gap-2 cursor-pointer text-xs select-none z-25 relative"
-          >
-            <Plus className="w-4 h-4" />
-            Add Active Job
-          </button>
+          {subTab === 'jobs' && currentUser?.role === 'admin' && (
+            <button 
+              id="add-vacancy-btn"
+              type="button"
+              onClick={handleOpenCreate}
+              className="self-start md:self-center px-5 py-3 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-zinc-950 font-black rounded-xl transition duration-150 shadow-lg shadow-emerald-500/25 inline-flex items-center gap-2 cursor-pointer text-xs select-none z-25 relative"
+            >
+              <Plus className="w-4 h-4" />
+              Add Active Job
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Premium Sub-Tab Navigation Bar */}
+      {!view && (
+        <div className="flex bg-slate-900/60 p-1.5 rounded-2xl border border-slate-800 max-w-md text-left">
+          <button
+            type="button"
+            onClick={() => setSubTab('jobs')}
+            className={`flex-1 py-2.5 px-4 font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all rounded-xl cursor-pointer ${
+              subTab === 'jobs'
+                ? 'bg-emerald-500 text-zinc-950 font-black shadow-md'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Briefcase className="w-4 h-4" />
+            Active Vacancies
+          </button>
+          <button
+            type="button"
+            onClick={() => setSubTab('wallet')}
+            className={`flex-1 py-2.5 px-4 font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all rounded-xl cursor-pointer ${
+              subTab === 'wallet'
+                ? 'bg-emerald-500 text-zinc-950 font-black shadow-md'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <PiggyBank className="w-4 h-4" />
+            Incentive Wallet
+          </button>
+        </div>
+      )}
+
+      {subTab === 'jobs' && (
+        <>
 
       {/* Admin Important Updates Control Panel */}
       {currentUser?.role === 'admin' && (
@@ -815,6 +959,290 @@ export default function ActiveJobs({ currentUser, countries }: ActiveJobsProps) 
           )}
         </div>
       )}
+      </>
+    )}
+
+    {/* Incentive Wallet View */}
+    {subTab === 'wallet' && (
+      <div className="space-y-6 text-left animate-fade-in">
+        
+        {/* Motivation & Incentive Structure Infotip Banner */}
+        <div className="bg-emerald-950/15 dark:bg-emerald-950/40 border border-emerald-800/30 rounded-xl py-2 px-4 shadow-sm flex items-center gap-3">
+          <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+            <PiggyBank className="w-3.5 h-3.5" />
+          </div>
+          <div className="space-y-0.5">
+            <h4 className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">Coordinator Incentive & Compensation Rules</h4>
+            <p className="text-[10px] text-slate-300 dark:text-slate-300 leading-normal font-medium">
+              Automated compensations: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">Closed Won</strong> yields Japan: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">INR 1,000</strong>, Kuwait: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">INR 400</strong>, others: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">INR 400</strong>. Reaching <strong className="text-emerald-600 dark:text-emerald-400 font-bold">Interview Attended</strong> yields <strong className="text-emerald-600 dark:text-emerald-400 font-bold">INR 11</strong> bonus!
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* LEFT COLUMN: WALLETS LIST (For Admin only) */}
+          {currentUser?.role === 'admin' ? (
+            <div className="bg-slate-900 border border-slate-750 rounded-3xl p-5.5 shadow-xl space-y-4">
+              <div>
+                <h3 className="text-sm font-black text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                  <Users className="w-4 h-4 text-emerald-400" />
+                  Coordinators Ledgers
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-1 font-semibold">
+                  Select a staff member's wallet below to inspect their audit timeline or post manual transactions.
+                </p>
+              </div>
+
+              {walletLoading && wallets.length === 0 ? (
+                <div className="flex justify-center py-10">
+                  <Loader2 className="w-6 h-6 text-emerald-500 animate-spin" />
+                </div>
+              ) : wallets.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-6 font-bold">No coordinator wallets found.</p>
+              ) : (
+                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+                  {wallets.map((w) => {
+                    const isActive = activeWalletUsername === w.username;
+                    return (
+                      <button
+                        key={w.username}
+                        type="button"
+                        onClick={() => {
+                          setActiveWalletUsername(w.username);
+                          setSelectedWallet(w);
+                          setWalletError(null);
+                          setWalletSuccess(null);
+                        }}
+                        className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                          isActive
+                            ? 'bg-emerald-500/10 border-emerald-500 text-slate-100 shadow-md'
+                            : 'bg-slate-850/50 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                        }`}
+                      >
+                        <div className="space-y-0.5">
+                          <p className="text-xs font-extrabold uppercase">{w.displayName || w.username}</p>
+                          <p className="text-[10px] font-mono text-slate-500">@{w.username}</p>
+                        </div>
+                        <span className={`text-xs font-black font-mono px-2.5 py-1 rounded-lg ${
+                          isActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-900 text-slate-300'
+                        }`}>
+                          INR {w.balance?.toLocaleString()}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            // For coordinators, display a beautiful overview card
+            <div className="bg-slate-900 border border-slate-750 rounded-3xl p-5.5 shadow-xl flex flex-col justify-between min-h-[220px]">
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider rounded-full">
+                  <WalletIcon className="w-3 h-3" /> My Personal Ledger
+                </div>
+                <h3 className="text-base font-black text-slate-100 uppercase tracking-tight">
+                  {currentUser?.displayName || currentUser?.username}
+                </h3>
+                <p className="text-xs text-slate-400 font-semibold leading-relaxed">
+                  Welcome to your live earnings ledger. Every lead that you convert or coordinate automatically accrues incentives here.
+                </p>
+              </div>
+              
+              <div className="mt-6 pt-4 border-t border-slate-800">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">Current Balance</p>
+                <p className="text-3xl font-extrabold text-emerald-400 font-mono mt-1">
+                  INR {selectedWallet?.balance?.toLocaleString() || 0}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* MIDDLE/RIGHT COLUMN: CURRENT WALLET TIMELINE & ADJUSTMENT (Colspan 2) */}
+          <div className="lg:col-span-2 space-y-6">
+            
+            {/* CURRENT WALLET BALANCE OVERVIEW (Admin view gets a smaller version of balance card inside) */}
+            {currentUser?.role === 'admin' && selectedWallet && (
+              <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/20 border border-slate-750 rounded-3xl p-6 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">SELECTED COORDINATOR</p>
+                  <h3 className="text-lg font-black text-slate-100 uppercase">
+                    {selectedWallet.displayName || selectedWallet.username}
+                  </h3>
+                  <p className="text-xs font-mono text-slate-400">Username: @{selectedWallet.username}</p>
+                </div>
+                
+                <div className="text-left sm:text-right">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">CURRENT TOTAL WALLET VALUE</p>
+                  <p className="text-3xl font-extrabold text-emerald-400 font-mono tracking-tight mt-0.5">
+                    INR {selectedWallet.balance?.toLocaleString() || 0}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* TRANSACTIONS AUDIT TIMELINE */}
+            <div className="bg-slate-900 border border-slate-750 rounded-3xl p-5.5 shadow-xl space-y-4">
+              <div>
+                <h3 className="text-sm font-black text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-emerald-400" />
+                  Transaction Audit History Timeline
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-1 font-semibold">
+                  A transparent timeline of credits (CR) and manual adjustment logs.
+                </p>
+              </div>
+
+              {walletLoading ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+                </div>
+              ) : !selectedWallet || !selectedWallet.transactions || selectedWallet.transactions.length === 0 ? (
+                <div className="text-center py-12 border border-slate-800 border-dashed rounded-2xl bg-slate-850/20">
+                  <PiggyBank className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                  <p className="text-xs text-slate-500 font-bold">No transactions recorded for this coordinator.</p>
+                </div>
+              ) : (
+                <div className="space-y-3.5 max-h-[350px] overflow-y-auto pr-1">
+                  {selectedWallet.transactions.slice().reverse().map((t: WalletTransaction) => {
+                    const isCredit = t.type === 'credit';
+                    return (
+                      <div 
+                        key={t.id} 
+                        className="bg-slate-850 border border-slate-800/80 p-3 rounded-2xl flex items-center justify-between gap-4 hover:border-slate-700 transition"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                            isCredit ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                          }`}>
+                            {isCredit ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                          </div>
+                          <div className="text-left space-y-0.5">
+                            <p className="text-xs font-bold text-slate-200 leading-snug">{t.reason}</p>
+                            <p className="text-[10px] text-slate-500 font-mono">
+                              {new Date(t.timestamp).toLocaleString()}
+                              {t.leadId && ` • Lead ID: ${t.leadId.substring(0,8)}`}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <span className={`text-xs font-black font-mono shrink-0 whitespace-nowrap px-2 py-0.5 rounded-md ${
+                          isCredit ? 'text-emerald-400 bg-emerald-500/10' : 'text-rose-400 bg-rose-500/10'
+                        }`}>
+                          {isCredit ? '+' : '-'} INR {t.amount}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ADMIN ADJUSTMENT PANEL (Only shown for Admin) */}
+            {currentUser?.role === 'admin' && selectedWallet && (
+              <form onSubmit={handleWalletAdjustment} className="bg-slate-900 border border-slate-750 rounded-3xl p-5.5 shadow-xl space-y-4">
+                <div>
+                  <h3 className="text-sm font-black text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                    <WalletIcon className="w-4 h-4 text-emerald-400" />
+                    Post Manual Wallet Transaction (Debit/Credit Adjustment)
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-1 font-semibold">
+                    Withdraw money (Debit) or manually reward/correct coordinator balance. This adds a live, permanent timeline log.
+                  </p>
+                </div>
+
+                {walletError && (
+                  <div className="bg-rose-500/10 border border-rose-500/20 text-rose-300 p-3 rounded-xl flex items-center gap-2 text-xs font-bold">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    <span>{walletError}</span>
+                  </div>
+                )}
+
+                {walletSuccess && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3 rounded-xl flex items-center gap-2 text-xs font-bold">
+                    <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                    <span>{walletSuccess}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Action Type</label>
+                    <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setWalletType('credit')}
+                        className={`py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                          walletType === 'credit'
+                            ? 'bg-emerald-500 text-zinc-950 font-black'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Credit (CR)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWalletType('debit')}
+                        className={`py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                          walletType === 'debit'
+                            ? 'bg-rose-600 text-slate-100 font-black'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Withdraw (DR)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Amount (INR)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={walletAmount}
+                      onChange={(e) => setWalletAmount(e.target.value)}
+                      placeholder="e.g. 2000"
+                      className="w-full text-xs px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 focus:ring-1 focus:ring-emerald-500 focus:outline-none font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Timeline Note / Reason</label>
+                    <input
+                      type="text"
+                      required
+                      value={walletReason}
+                      onChange={(e) => setWalletReason(e.target.value)}
+                      placeholder="e.g. INR 2000 Withdraw on 10th"
+                      className="w-full text-xs px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 focus:ring-1 focus:ring-emerald-500 focus:outline-none font-semibold uppercase placeholder-slate-600"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={walletSubmitting}
+                    className={`px-5 py-2.5 rounded-xl font-bold text-xs select-none shadow-md cursor-pointer transition ${
+                      walletType === 'credit'
+                        ? 'bg-emerald-500 text-zinc-950 hover:bg-emerald-600'
+                        : 'bg-rose-600 text-white hover:bg-rose-700'
+                    }`}
+                  >
+                    {walletSubmitting ? 'Posting...' : `Post Manual ${walletType === 'credit' ? 'Credit' : 'Debit/Withdraw'}`}
+                  </button>
+                </div>
+              </form>
+            )}
+
+          </div>
+
+        </div>
+
+      </div>
+    )}
 
       {/* Custom Delete Confirmation Modal */}
       {deletingJobId && (

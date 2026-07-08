@@ -8,8 +8,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Load local database helper
-import { getLeads, addLead, saveLeads, getStats, getLeadById, getCoordinators, saveCoordinators, initializeCoordinatorsDatabase, getJobs, saveJobs, getUpdates, saveUpdates, getMetadata, saveMetadata } from './src/server/db.ts';
-import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate } from './src/types.ts';
+import { getLeads, addLead, saveLeads, getStats, getLeadById, getCoordinators, saveCoordinators, initializeCoordinatorsDatabase, getJobs, saveJobs, getUpdates, saveUpdates, getMetadata, saveMetadata, getWallets, saveWallets, getWalletByUsername, addWalletTransaction, getIncentiveRules, saveIncentiveRules } from './src/server/db.ts';
+import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule } from './src/types.ts';
 
 const app = express();
 const PORT = 3000;
@@ -787,6 +787,65 @@ app.delete('/api/coordinators/:id', async (req, res) => {
 });
 
 
+// ---------------- WALLET API ENDPOINTS ----------------
+
+// GET /api/wallets
+app.get('/api/wallets', async (req, res) => {
+  try {
+    const wallets = await getWallets();
+    res.json(wallets);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /api/wallets/:username
+app.get('/api/wallets/:username', async (req, res) => {
+  try {
+    const { username } = req.params;
+    const wallet = await getWalletByUsername(username);
+    res.json(wallet);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /api/wallets/:username/transaction (Admin Only)
+app.post('/api/wallets/:username/transaction', async (req, res) => {
+  try {
+    const role = req.headers['x-user-role'] || 'user';
+    if (role !== 'admin') {
+      res.status(403).json({ error: 'Forbidden: Only administrators can adjust wallet balances manually.' });
+      return;
+    }
+
+    const { username } = req.params;
+    const { type, amount, reason } = req.body;
+
+    if (!type || !amount || !reason) {
+      res.status(400).json({ error: 'Type (credit/debit), amount, and reason are required.' });
+      return;
+    }
+
+    if (type !== 'credit' && type !== 'debit') {
+      res.status(400).json({ error: 'Type must be either "credit" or "debit".' });
+      return;
+    }
+
+    const numericAmount = Number(amount);
+    if (isNaN(numericAmount) || numericAmount <= 0) {
+      res.status(400).json({ error: 'Amount must be a positive number.' });
+      return;
+    }
+
+    const updatedWallet = await addWalletTransaction(username, type, numericAmount, String(reason).trim());
+    res.json({ success: true, wallet: updatedWallet });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+
 // GET statistics summary
 app.get('/api/stats', async (req, res) => {
   try {
@@ -829,6 +888,156 @@ app.put('/api/leads/:id', async (req, res) => {
     }
 
     const lead = leads[idx];
+
+    // Check wallet incentive triggers
+    const coordinatorToIncentivize = assignedTo !== undefined ? assignedTo : lead.assignedTo;
+    if (coordinatorToIncentivize) {
+      const cleanCoord = String(coordinatorToIncentivize).trim().toLowerCase();
+      const prevCoord = lead.assignedTo ? String(lead.assignedTo).trim().toLowerCase() : cleanCoord;
+      
+      // 1. Closed Won Trigger
+      const isClosedWonTransition = (stage === 'won' && lead.stage !== 'won');
+      if (isClosedWonTransition) {
+        try {
+          const wallet = await getWalletByUsername(cleanCoord);
+          const alreadyCredited = (wallet.transactions || []).some(
+            tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Closed Won')
+          );
+          if (!alreadyCredited) {
+            // Dynamic Rule Match
+            const rules = await getIncentiveRules();
+            let incentiveAmount = 400; // Ultimate fallback default
+            const pName = String(project !== undefined ? project : (lead.project || '')).trim().toLowerCase();
+            const cName = String(country !== undefined ? country : (lead.country || '')).trim().toLowerCase();
+            
+            const matchedRules = rules.filter(r => {
+              const rProject = (r.projectName || '').trim().toLowerCase();
+              const rCountry = (r.country || '').trim().toLowerCase();
+              
+              const projectMatches = rProject === 'all' || rProject === 'any' || rProject === '' || rProject === pName;
+              const countryMatches = rCountry === 'all' || rCountry === 'any' || rCountry === '' || rCountry === 'all countries' || rCountry === cName;
+              
+              return projectMatches && countryMatches;
+            });
+            
+            if (matchedRules.length > 0) {
+              // Sort by specificity
+              matchedRules.sort((a, b) => {
+                const aProjSpecific = !['all', 'any', ''].includes((a.projectName || '').trim().toLowerCase());
+                const aCtrySpecific = !['all', 'any', '', 'all countries'].includes((a.country || '').trim().toLowerCase());
+                const bProjSpecific = !['all', 'any', ''].includes((b.projectName || '').trim().toLowerCase());
+                const bCtrySpecific = !['all', 'any', '', 'all countries'].includes((b.country || '').trim().toLowerCase());
+                
+                const aScore = (aProjSpecific ? 1 : 0) + (aCtrySpecific ? 2 : 0);
+                const bScore = (bProjSpecific ? 1 : 0) + (bCtrySpecific ? 2 : 0);
+                
+                return bScore - aScore; // highest score first
+              });
+              incentiveAmount = matchedRules[0].amount;
+            }
+            
+            await addWalletTransaction(
+              cleanCoord,
+              'credit',
+              incentiveAmount,
+              `Closed Won incentive for candidate: ${name || lead.name} (Project: ${project !== undefined ? project : (lead.project || 'General')}, Country: ${country !== undefined ? country : (lead.country || 'Unknown')})`,
+              lead.id
+            );
+          }
+        } catch (walletErr) {
+          console.error('Failed to auto-credit Closed Won incentive:', walletErr);
+        }
+      }
+
+      // 2. Closed Won Reversal (Debit) Trigger
+      const isClosedWonReversal = (lead.stage === 'won' && stage !== undefined && stage !== 'won');
+      if (isClosedWonReversal) {
+        try {
+          const wallet = await getWalletByUsername(prevCoord);
+          
+          const creditsForLead = (wallet.transactions || []).filter(
+            tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Closed Won')
+          );
+          
+          const reversalsForLead = (wallet.transactions || []).filter(
+            tx => tx.leadId === lead.id && tx.type === 'debit' && tx.reason.includes('Reversal: Closed Won')
+          );
+          
+          if (creditsForLead.length > reversalsForLead.length) {
+            const amountToDebit = creditsForLead[0].amount;
+            
+            await addWalletTransaction(
+              prevCoord,
+              'debit',
+              amountToDebit,
+              `Reversal: Closed Won stage corrected/removed. Candidate: ${name || lead.name} (moved to ${stage})`,
+              lead.id
+            );
+          }
+        } catch (walletErr) {
+          console.error('Failed to auto-debit Closed Won reversal:', walletErr);
+        }
+      }
+
+      // 3. Interview Attended / Office Visited Trigger & Reversal
+      const wasOfficeVisitedActive = !!(
+        lead.docOfficeVisited || 
+        lead.stage === 'proposal' || 
+        lead.stage === 'won'
+      );
+      
+      const isOfficeVisitedActiveNow = !!(
+        (docOfficeVisited !== undefined ? docOfficeVisited : lead.docOfficeVisited) || 
+        (stage !== undefined ? stage : lead.stage) === 'proposal' ||
+        (stage !== undefined ? stage : lead.stage) === 'won'
+      );
+
+      const isOfficeVisitedTransition = !wasOfficeVisitedActive && isOfficeVisitedActiveNow;
+      const isOfficeVisitedReversal = wasOfficeVisitedActive && !isOfficeVisitedActiveNow;
+
+      if (isOfficeVisitedTransition) {
+        try {
+          const wallet = await getWalletByUsername(cleanCoord);
+          const alreadyCredited = (wallet.transactions || []).some(
+            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Interview Attended') || tx.reason.includes('Office Visited'))
+          );
+          if (!alreadyCredited) {
+            await addWalletTransaction(
+              cleanCoord,
+              'credit',
+              11,
+              `Interview Attended / Office Visited incentive for candidate: ${name || lead.name}`,
+              lead.id
+            );
+          }
+        } catch (walletErr) {
+          console.error('Failed to auto-credit Office Visited incentive:', walletErr);
+        }
+      }
+
+      if (isOfficeVisitedReversal) {
+        try {
+          const wallet = await getWalletByUsername(prevCoord);
+          const creditsForLead = (wallet.transactions || []).filter(
+            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Interview Attended') || tx.reason.includes('Office Visited'))
+          );
+          const reversalsForLead = (wallet.transactions || []).filter(
+            tx => tx.leadId === lead.id && tx.type === 'debit' && tx.reason.includes('Reversal: Interview Attended')
+          );
+          if (creditsForLead.length > reversalsForLead.length) {
+            await addWalletTransaction(
+              prevCoord,
+              'debit',
+              11,
+              `Reversal: Interview Attended / Office Visited milestone removed. Candidate: ${name || lead.name}`,
+              lead.id
+            );
+          }
+        } catch (walletErr) {
+          console.error('Failed to auto-debit Office Visited reversal:', walletErr);
+        }
+      }
+    }
     
     // Ensure lists exist
     if (!lead.timeline) lead.timeline = [];
@@ -1200,6 +1409,93 @@ app.delete('/api/updates/:id', async (req, res) => {
     }
 
     await saveUpdates(filtered);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET all incentive rules
+app.get('/api/incentive-rules', async (req, res) => {
+  try {
+    const rules = await getIncentiveRules();
+    res.json(rules);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST a new incentive rule
+app.post('/api/incentive-rules', async (req, res) => {
+  try {
+    const { projectName, country, amount } = req.body;
+    if (!projectName || !country || amount === undefined) {
+      res.status(400).json({ error: 'ProjectName, country, and amount are required.' });
+      return;
+    }
+
+    const rules = await getIncentiveRules();
+    const newRule: IncentiveRule = {
+      id: `rule_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      projectName: String(projectName).trim(),
+      country: String(country).trim(),
+      amount: Number(amount),
+      createdAt: new Date().toISOString()
+    };
+
+    rules.unshift(newRule);
+    await saveIncentiveRules(rules);
+
+    res.status(201).json(newRule);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// PUT update an incentive rule
+app.put('/api/incentive-rules/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { projectName, country, amount } = req.body;
+
+    if (!projectName || !country || amount === undefined) {
+      res.status(400).json({ error: 'ProjectName, country, and amount are required.' });
+      return;
+    }
+
+    const rules = await getIncentiveRules();
+    const idx = rules.findIndex(r => r.id === id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Incentive rule not found' });
+      return;
+    }
+
+    rules[idx] = {
+      ...rules[idx],
+      projectName: String(projectName).trim(),
+      country: String(country).trim(),
+      amount: Number(amount)
+    };
+
+    await saveIncentiveRules(rules);
+    res.json(rules[idx]);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// DELETE an incentive rule
+app.delete('/api/incentive-rules/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const rules = await getIncentiveRules();
+    const filtered = rules.filter(r => r.id !== id);
+    if (rules.length === filtered.length) {
+      res.status(404).json({ error: 'Incentive rule not found' });
+      return;
+    }
+
+    await saveIncentiveRules(filtered);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
