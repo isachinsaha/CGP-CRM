@@ -62,15 +62,18 @@ export function SearchableSelect({
     opt.value.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const isFullWidth = className.includes('w-full');
+
   return (
-    <div className="relative inline-block text-left" ref={containerRef}>
+    <div className={`relative text-left ${isFullWidth ? 'w-full block' : 'inline-block'}`} ref={containerRef}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center justify-between gap-1.5 ${className}`}
+        className={`flex items-center justify-between gap-1.5 min-w-0 ${className}`}
       >
-        <span className="truncate flex items-center gap-1.5">
-          {selectedOption ? selectedOption.label : placeholder}
+        <span className="flex items-center gap-1.5 min-w-0 truncate">
+          {selectedOption?.icon && <span className="shrink-0">{selectedOption.icon}</span>}
+          <span className="truncate text-left">{selectedOption ? selectedOption.label : placeholder}</span>
         </span>
         <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0" />
       </button>
