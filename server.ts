@@ -992,7 +992,10 @@ app.put('/api/leads/:id', async (req, res) => {
         (stage !== undefined ? stage : lead.stage) === 'won'
       );
 
-      const isOfficeVisitedTransition = !wasOfficeVisitedActive && isOfficeVisitedActiveNow;
+      const isOfficeVisitedTransition = 
+        (!wasOfficeVisitedActive && isOfficeVisitedActiveNow) || 
+        (stage === 'proposal' && lead.stage !== 'proposal' && lead.stage !== 'won') ||
+        (docOfficeVisited === true && !lead.docOfficeVisited);
       const isOfficeVisitedReversal = wasOfficeVisitedActive && !isOfficeVisitedActiveNow;
 
       if (isOfficeVisitedTransition) {

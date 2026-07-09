@@ -1,0 +1,196 @@
+[
+  {
+    "id": "admin",
+    "username": "admin",
+    "displayName": "Master Admin",
+    "balance": 0,
+    "transactions": [],
+    "updatedAt": "2026-07-07T12:05:37.234Z"
+  },
+  {
+    "id": "edenla",
+    "username": "edenla",
+    "displayName": "Edenla",
+    "balance": 0,
+    "transactions": [],
+    "updatedAt": "2026-07-07T12:05:37.234Z"
+  },
+  {
+    "id": "joyce",
+    "username": "joyce",
+    "displayName": "Joyce",
+    "balance": 0,
+    "transactions": [
+      {
+        "timestamp": "2026-07-07T13:31:26.355Z",
+        "amount": 11,
+        "leadId": "MINGMA_DOMA_TAMANG_07-07-2026",
+        "type": "debit",
+        "id": "tx_1783431086355_rgohl",
+        "reason": "Reversal: Interview Attended / Office Visited milestone removed. Candidate: Mingma Doma Tamang"
+      },
+      {
+        "reason": "Interview Attended / Office Visited incentive for candidate: Mingma Doma Tamang",
+        "id": "tx_1783430134112_ni6g8",
+        "leadId": "MINGMA_DOMA_TAMANG_07-07-2026",
+        "type": "credit",
+        "timestamp": "2026-07-07T13:15:34.112Z",
+        "amount": 11
+      },
+      {
+        "id": "tx_1783430106185_5h3w5",
+        "reason": "Chandra kala Bhuje",
+        "type": "debit",
+        "amount": 1000,
+        "timestamp": "2026-07-07T13:15:06.185Z"
+      },
+      {
+        "amount": 1000,
+        "timestamp": "2026-07-07T13:14:06.681Z",
+        "reason": "Closed Won incentive for candidate: Chandra kala Bhuje (Project: , Country: Japan)",
+        "id": "tx_1783430046681_bmgkd",
+        "leadId": "CHANDRA_KALA_BHUJE_03-07-2026",
+        "type": "credit"
+      },
+      {
+        "leadId": "MINGMA_DOMA_TAMANG_07-07-2026",
+        "type": "debit",
+        "id": "tx_1783430006022_dhlm2",
+        "reason": "Reversal: Closed Won stage corrected/removed. Candidate: Mingma Doma Tamang (moved to negotiating)",
+        "amount": 400,
+        "timestamp": "2026-07-07T13:13:26.022Z"
+      },
+      {
+        "amount": 400,
+        "timestamp": "2026-07-07T13:12:02.145Z",
+        "type": "debit",
+        "leadId": "ANISHA_TAMANG_03-07-2026",
+        "id": "tx_1783429922145_icib0",
+        "reason": "Reversal: Closed Won stage corrected/removed. Candidate: Anisha tamang (moved to negotiating)"
+      },
+      {
+        "timestamp": "2026-07-07T13:08:55.175Z",
+        "amount": 1000,
+        "leadId": "RAJAT_07-07-2026",
+        "type": "debit",
+        "reason": "Reversal: Closed Won stage corrected/removed. Candidate: RAJAT (moved to negotiating)",
+        "id": "tx_1783429735175_vmpqg"
+      },
+      {
+        "reason": "Closed Won incentive for candidate: Anisha tamang (Project: Pistachio Kuwait, Country: Kuwait)",
+        "id": "tx_1783429681907_yl0a5",
+        "type": "credit",
+        "leadId": "ANISHA_TAMANG_03-07-2026",
+        "timestamp": "2026-07-07T13:08:01.907Z",
+        "amount": 400
+      },
+      {
+        "timestamp": "2026-07-07T12:34:23.469Z",
+        "amount": 1000,
+        "reason": "Closed Won incentive for candidate: RAJAT (Project: General, Country: Japan)",
+        "id": "tx_1783427663469_kkl5w",
+        "type": "credit",
+        "leadId": "RAJAT_07-07-2026"
+      },
+      {
+        "id": "tx_1783427491674_azwbq",
+        "reason": "Closed Won incentive for candidate: Mingma Doma Tamang (Project: General, Country: Kuwait)",
+        "type": "credit",
+        "leadId": "MINGMA_DOMA_TAMANG_07-07-2026",
+        "amount": 400,
+        "timestamp": "2026-07-07T12:31:31.674Z"
+      }
+    ],
+    "updatedAt": "2026-07-07T13:31:26.355Z"
+  },
+  {
+    "id": "maryada",
+    "username": "maryada",
+    "displayName": "Maryada",
+    "balance": 11,
+    "transactions": [
+      {
+        "reason": "Reversal: Interview Attended / Office Visited milestone removed. Candidate: PLAMA",
+        "id": "tx_1783573858282_6kztt",
+        "type": "debit",
+        "leadId": "PLAMA_08-07-2026",
+        "timestamp": "2026-07-09T05:10:58.282Z",
+        "amount": 11
+      },
+      {
+        "timestamp": "2026-07-09T05:10:33.782Z",
+        "amount": 11,
+        "type": "credit",
+        "leadId": "PLAMA_08-07-2026",
+        "reason": "Interview Attended / Office Visited incentive for candidate: PLAMA",
+        "id": "tx_1783573833782_mx14p"
+      },
+      {
+        "timestamp": "2026-07-07T13:26:13.054Z",
+        "amount": 11,
+        "id": "tx_1783430773054_1304b",
+        "reason": "Interview Attended / Office Visited incentive for candidate: Sumit Sunar",
+        "leadId": "SUMIT_SUNAR_06-07-2026",
+        "type": "credit"
+      }
+    ],
+    "updatedAt": "2026-07-09T05:10:58.282Z"
+  },
+  {
+    "id": "priya",
+    "username": "priya",
+    "displayName": "Priya",
+    "balance": 0,
+    "transactions": [],
+    "updatedAt": "2026-07-07T12:05:37.234Z"
+  },
+  {
+    "id": "sarina",
+    "username": "sarina",
+    "displayName": "Sarina",
+    "balance": 11,
+    "transactions": [
+      {
+        "timestamp": "2026-07-09T05:12:20.788Z",
+        "amount": 11,
+        "reason": "Reversal: Interview Attended / Office Visited milestone removed. Candidate: RAZAN PRADHAN",
+        "id": "tx_1783573940788_ho9fb",
+        "type": "debit",
+        "leadId": "RAZAN_PRADHAN_08-07-2026"
+      },
+      {
+        "timestamp": "2026-07-09T05:12:04.189Z",
+        "amount": 11,
+        "id": "tx_1783573924189_1e5ft",
+        "reason": "Interview Attended / Office Visited incentive for candidate: RAZAN PRADHAN",
+        "type": "credit",
+        "leadId": "RAZAN_PRADHAN_08-07-2026"
+      },
+      {
+        "timestamp": "2026-07-07T13:01:40.886Z",
+        "amount": 11,
+        "leadId": "BIPLOB_LIMBU_07-07-2026",
+        "type": "credit",
+        "id": "tx_1783429300886_63nzh",
+        "reason": "Interview Attended / Office Visited incentive for candidate: Biplob limbu"
+      }
+    ],
+    "updatedAt": "2026-07-09T05:12:20.788Z"
+  },
+  {
+    "id": "shreya",
+    "username": "shreya",
+    "displayName": "Shreya",
+    "balance": 0,
+    "transactions": [],
+    "updatedAt": "2026-07-07T12:05:37.234Z"
+  },
+  {
+    "id": "test",
+    "username": "test",
+    "displayName": "test",
+    "balance": 0,
+    "transactions": [],
+    "updatedAt": "2026-07-07T12:05:37.234Z"
+  }
+]
