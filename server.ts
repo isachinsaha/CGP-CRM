@@ -2110,6 +2110,10 @@ Assign a matching score (0 to 100) based on their skills, gender/age, origin/pre
 Provide a clear, brief 1-sentence matching explanation.
 Return the output strictly in the requested JSON schema.`;
 
+        // Only send the top 25 candidates to Gemini to guarantee sub-2-second responses and save token limits
+        const geminiCandidates = topCandidates.slice(0, 25);
+        const remainingCandidates = topCandidates.slice(25);
+
         const evaluationPrompt = `Job Demand Details:
 - Title: ${jobDetails.title}
 - Target Location: ${jobDetails.country}
@@ -2120,7 +2124,7 @@ Return the output strictly in the requested JSON schema.`;
 - Additional Benefits: ${jobDetails.benefits}
 
 Candidates to Evaluate:
-${JSON.stringify(topCandidates.map(c => ({
+${JSON.stringify(geminiCandidates.map(c => ({
   id: c.id,
   name: c.name,
   gender: c.gender,
@@ -2165,14 +2169,60 @@ ${JSON.stringify(topCandidates.map(c => ({
             matchMap.set(m.leadId, { score: m.score, reason: m.reason });
           });
 
-          matchedProfiles = topCandidates.map(c => {
+          const geminiEvaluated = geminiCandidates.map(c => {
             const matchInfo = matchMap.get(c.id) || { score: 50, reason: 'Candidate matches general profile criteria.' };
             return {
               ...c,
               matchScore: matchInfo.score,
               matchReason: matchInfo.reason
             };
-          }).sort((a, b) => b.matchScore - a.matchScore);
+          });
+
+          // Evaluate the remaining candidates using fast, local, high-quality heuristics
+          const heuristicEvaluated = remainingCandidates.map(c => {
+            let score = 50;
+            let reason = 'Candidate holds general profiles corresponding to position keywords.';
+
+            const leadText = `
+              ${c.name} 
+              ${c.position || ''} 
+              ${c.origin || ''} 
+              ${c.experience || ''} 
+              ${c.remarks1 || ''} 
+              ${c.remarks2 || ''} 
+              ${c.remarks3 || ''}
+            `.toLowerCase();
+
+            // Check for position relevance
+            const isPositionMatch = c.position && c.position.toLowerCase().includes(jobDetails.title.toLowerCase());
+            if (isPositionMatch) {
+              score += 35;
+              reason = `Strong keyword matching for ${jobDetails.title} roles.`;
+            } else if (leadText.includes(jobDetails.title.toLowerCase())) {
+              score += 25;
+              reason = `Resume mentions experience or interest relevant to ${jobDetails.title} positions.`;
+            }
+
+            // Check for region preference
+            if (jobDetails.preferredRegion && jobDetails.preferredRegion.toLowerCase().trim() !== 'none' && jobDetails.preferredRegion.toLowerCase().trim() !== 'n/a') {
+              const regionWords = jobDetails.preferredRegion.toLowerCase().split(/[\s,.-]+/);
+              const matchedRegions = regionWords.filter(w => w.length > 3 && leadText.includes(w));
+              if (matchedRegions.length > 0) {
+                score += 15;
+                reason += ` Origin aligns with the preferred region of ${jobDetails.preferredRegion}.`;
+              }
+            }
+
+            score = Math.min(88, Math.max(40, score));
+
+            return {
+              ...c,
+              matchScore: score,
+              matchReason: reason
+            };
+          });
+
+          matchedProfiles = [...geminiEvaluated, ...heuristicEvaluated].sort((a, b) => b.matchScore - a.matchScore);
         }
       } catch (evalErr) {
         console.error('Error during precise Gemini evaluation:', evalErr);

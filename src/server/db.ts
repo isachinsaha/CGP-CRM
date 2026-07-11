@@ -10,6 +10,7 @@ import {
   deleteDoc,
   doc, 
   query, 
+  where,
   orderBy, 
   limit, 
   writeBatch,
@@ -230,6 +231,8 @@ const dbCache = {
   wallets: null as CacheEntry<Wallet[]> | null,
   incentive_rules: null as CacheEntry<IncentiveRule[]> | null,
 };
+
+let lastFullLeadsSyncTime = 0;
 
 // Helper to recursively strip or replace undefined values with empty/null for Firestore compatibility
 function cleanForFirestore(obj: any): any {
@@ -846,13 +849,63 @@ async function getLeadsInternal(): Promise<Lead[]> {
   // 3. Try to sync with Cloud
   if (checkCloudStatus()) {
     try {
-      // Fetch latest cloud leads
-      const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
-      const snapshot = await runWithTimeout(getDocs(q), 5000);
-      const cloudLeads: Lead[] = [];
-      snapshot.forEach(docSnap => {
-        cloudLeads.push(docSnap.data() as Lead);
-      });
+      const nowTime = Date.now();
+      const doFullSync = (nowTime - lastFullLeadsSyncTime) > 5 * 60 * 1000 || lastSyncedLeads.length === 0;
+      let cloudLeads: Lead[] = [];
+
+      if (doFullSync) {
+        console.log('[Firestore Client] Performing FULL sync of leads to check for deletions and reconcile all changes...');
+        const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
+        const snapshot = await runWithTimeout(getDocs(q), 5000);
+        snapshot.forEach(docSnap => {
+          cloudLeads.push(docSnap.data() as Lead);
+        });
+        lastFullLeadsSyncTime = nowTime;
+      } else {
+        // Delta sync! Find latest updatedAt timestamp in lastSyncedLeads or localLeads
+        let maxUpdatedAt = 0;
+        const allReferenceLeads = lastSyncedLeads.length > 0 ? lastSyncedLeads : localLeads;
+        allReferenceLeads.forEach(l => {
+          if (l) {
+            const upTime = new Date(l.updatedAt || l.createdAt || 0).getTime();
+            if (upTime > maxUpdatedAt) {
+              maxUpdatedAt = upTime;
+            }
+          }
+        });
+
+        // Use a 3-minute overlap to capture any concurrent writes safely
+        const lastSyncThreshold = maxUpdatedAt > 0 
+          ? new Date(maxUpdatedAt - 3 * 60 * 1000).toISOString() 
+          : '1970-01-01T00:00:00.000Z';
+
+        console.log(`[Firestore Client] Performing DELTA sync for leads modified since: ${lastSyncThreshold} (Saving Firestore Quotas)`);
+
+        const q = query(
+          collection(db, 'leads'),
+          where('updatedAt', '>=', lastSyncThreshold)
+        );
+        const snapshot = await runWithTimeout(getDocs(q), 5000);
+        
+        const cloudLeadsDelta: Lead[] = [];
+        snapshot.forEach(docSnap => {
+          cloudLeadsDelta.push(docSnap.data() as Lead);
+        });
+
+        console.log(`[Firestore Client] Delta query returned ${cloudLeadsDelta.length} updated/new leads.`);
+
+        // Reconstruct full cloud list by overlaying delta on lastSyncedLeads
+        const reconstructedMap = new Map<string, Lead>();
+        lastSyncedLeads.forEach(l => {
+          if (l && l.id) reconstructedMap.set(l.id, l);
+        });
+
+        cloudLeadsDelta.forEach(c => {
+          if (c && c.id) reconstructedMap.set(c.id, c);
+        });
+
+        cloudLeads = Array.from(reconstructedMap.values());
+      }
 
       // Execute Merge and Sync!
       const mergeResult = syncAndMergeLeadsList(localLeads, cloudLeads, lastSyncedLeads);

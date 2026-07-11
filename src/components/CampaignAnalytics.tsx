@@ -69,7 +69,7 @@ export default function CampaignAnalytics({
   const [selectedCoordFilter, setSelectedCoordFilter] = useState<string>('All');
   const [todoCoordFilter, setTodoCoordFilter] = useState<string>('All');
   const [attributionChartType, setAttributionChartType] = useState<'bar' | 'pie'>('bar');
-  const [pipelineChartType, setPipelineChartType] = useState<'funnel' | 'mountain'>('funnel');
+  const [pipelineChartType, setPipelineChartType] = useState<'funnel' | 'pie'>('funnel');
 
   // Selected coordinator display name for filtering
   const selectedCoordinatorName = useMemo(() => {
@@ -1618,14 +1618,14 @@ export default function CampaignAnalytics({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPipelineChartType('mountain')}
+                  onClick={() => setPipelineChartType('pie')}
                   className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-lg transition-all cursor-pointer ${
-                    pipelineChartType === 'mountain'
+                    pipelineChartType === 'pie'
                       ? 'bg-emerald-500 text-zinc-950 font-black shadow-md'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Mountain
+                  Pie
                 </button>
               </div>
             </div>
@@ -1634,7 +1634,7 @@ export default function CampaignAnalytics({
               <div className="space-y-2.5">
                 {[
                   { label: 'New Lead Inbound', key: 'new', color: 'bg-slate-600 hover:bg-slate-500' },
-                  { label: 'In Negotiation', key: 'negotiating', color: 'bg-amber-600 hover:bg-amber-500' },
+                  { label: 'In Discussion', key: 'negotiating', color: 'bg-amber-600 hover:bg-amber-500' },
                   { label: 'In Rotations', key: 'rotations', color: 'bg-indigo-600 hover:bg-indigo-500' },
                   { label: 'Office Visited/Interview attendant', key: 'proposal', color: 'bg-purple-650 hover:bg-purple-605' },
                   { label: 'Closed Converted', key: 'won', color: 'bg-accent-emerald hover:bg-emerald-500' },
@@ -1663,43 +1663,52 @@ export default function CampaignAnalytics({
                 })}
               </div>
             ) : (
-              <div className="h-[280px] w-full mt-2">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart
-                    data={[
-                      { stage: 'Inbound', count: pipelineStagesFiltered.new || 0 },
-                      { stage: 'Negotiation', count: pipelineStagesFiltered.negotiating || 0 },
-                      { stage: 'Rotation', count: pipelineStagesFiltered.rotations || 0 },
-                      { stage: 'Interview', count: pipelineStagesFiltered.proposal || 0 },
-                      { stage: 'Converted', count: pipelineStagesFiltered.won || 0 },
-                      { stage: 'Lost', count: pipelineStagesFiltered.lost || 0 }
-                    ]}
-                    margin={{ top: 10, right: 10, left: -25, bottom: 5 }}
-                  >
-                    <defs>
-                      <linearGradient id="colorPipeline" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                    <XAxis dataKey="stage" stroke="#94a3b8" fontSize={9} tickLine={false} />
-                    <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
-                      labelStyle={{ color: '#f1f5f9', fontWeight: 'bold', fontSize: '11px' }}
-                      itemStyle={{ color: '#10b981', fontSize: '11px' }}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="count" 
-                      stroke="#10b981" 
-                      strokeWidth={3} 
-                      fillOpacity={1} 
-                      fill="url(#colorPipeline)" 
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+              <div className="h-[280px] w-full mt-2 flex items-center justify-center">
+                {(() => {
+                  const pieData = [
+                    { name: 'New Inbound', value: pipelineStagesFiltered.new || 0, color: '#475569' },
+                    { name: 'In Discussion', value: pipelineStagesFiltered.negotiating || 0, color: '#d97706' },
+                    { name: 'In Rotations', value: pipelineStagesFiltered.rotations || 0, color: '#2563eb' },
+                    { name: 'Office Visited/Interview', value: pipelineStagesFiltered.proposal || 0, color: '#7c3aed' },
+                    { name: 'Closed Converted', value: pipelineStagesFiltered.won || 0, color: '#10b981' },
+                    { name: 'Unqualified / Lost', value: pipelineStagesFiltered.lost || 0, color: '#334155' }
+                  ].filter(item => item.value > 0);
+
+                  if (pieData.length === 0) {
+                    return <div className="text-xs text-slate-450 py-10 text-center font-sans">No pipeline data for Pie Chart.</div>;
+                  }
+
+                  return (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={pieData}
+                          cx="50%"
+                          cy="45%"
+                          innerRadius={60}
+                          outerRadius={85}
+                          paddingAngle={4}
+                          dataKey="value"
+                        >
+                          {pieData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
+                          itemStyle={{ color: '#f1f5f9', fontSize: '11px' }}
+                        />
+                        <Legend 
+                          verticalAlign="bottom" 
+                          height={36} 
+                          iconType="circle"
+                          iconSize={8}
+                          wrapperStyle={{ fontSize: '10px', color: '#94a3b8' }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  );
+                })()}
               </div>
             )}
           </div>
