@@ -1943,6 +1943,46 @@ Provide the Strategic Analysis Report now. Do not include introductory notes or 
 });
 
 
+// Programmatic helper to deduplicate repeating text, sentences, or phrases
+function deduplicateText(text: string): string {
+  if (!text) return '';
+  // Clean multiple spaces and linebreaks
+  let cleaned = text.replace(/\s+/g, ' ').trim();
+  
+  // Split on common delimiters
+  const parts = cleaned.split(/[\-\.\,\|\n\r;\(\):]+/);
+  const seen = new Set<string>();
+  const uniqueParts: string[] = [];
+  
+  for (let part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    
+    // Normalize to check for duplicates
+    const normalized = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normalized.length < 3) {
+      uniqueParts.push(trimmed);
+      continue;
+    }
+    
+    let isDuplicate = false;
+    for (const existing of seen) {
+      if (existing.includes(normalized) || normalized.includes(existing)) {
+        isDuplicate = true;
+        break;
+      }
+    }
+    
+    if (!isDuplicate) {
+      seen.add(normalized);
+      uniqueParts.push(trimmed);
+    }
+  }
+  
+  return uniqueParts.length > 0 ? uniqueParts.join(' - ') : cleaned;
+}
+
+
 // POST Smart AI Candidate Profiler and Matcher
 app.post('/api/ai-match-leads', async (req, res) => {
   try {
@@ -2000,13 +2040,18 @@ app.post('/api/ai-match-leads', async (req, res) => {
         };
 
         const parsePrompt = `Analyze this job vacancy flyer/advertisement creative.
-Extract the job requirements and details. Return a JSON object with these fields:
+Extract the job requirements and details.
+
+CRITICAL INSTRUCTIONS FOR TEXT DEDUPLICATION:
+If you notice any phrase, sentence, requirement, slogan, or benefit repeated multiple times in the image, DO NOT repeat them in the JSON output fields. Clean up the extracted text to be unique, concise, and professional. Only extract each piece of information ONCE.
+
+Return a JSON object with these fields:
 {
   "title": "the job position title, e.g. Receptionist",
   "country": "the country/region of work, e.g. Maldives, Germany, Qatar",
   "salary": "the salary details listed, e.g. USD 450 per month",
-  "experience": "required experience, e.g. 3 years as receptionist",
-  "skills": "required skills/criteria, e.g. English speaking",
+  "experience": "required experience, e.g. 3 years as receptionist. Ensure no repeating lines/text.",
+  "skills": "required skills/criteria, e.g. English speaking. Ensure no repeating phrases.",
   "preferredRegion": "any preferred region of origin, e.g. West Bengal, Darjeeling, or Siliguri region",
   "benefits": "benefits listed, e.g. Free food, free accommodation"
 }
@@ -2035,6 +2080,16 @@ Ensure the output is valid JSON.`;
 
         if (parseRes.text) {
           const parsed = JSON.parse(parseRes.text.trim());
+          
+          // Apply deduplication to all parsed fields to prevent repetitive looping
+          if (parsed.title) parsed.title = deduplicateText(parsed.title);
+          if (parsed.country) parsed.country = deduplicateText(parsed.country);
+          if (parsed.salary) parsed.salary = deduplicateText(parsed.salary);
+          if (parsed.experience) parsed.experience = deduplicateText(parsed.experience);
+          if (parsed.skills) parsed.skills = deduplicateText(parsed.skills);
+          if (parsed.preferredRegion) parsed.preferredRegion = deduplicateText(parsed.preferredRegion);
+          if (parsed.benefits) parsed.benefits = deduplicateText(parsed.benefits);
+
           jobDetails = { ...jobDetails, ...parsed };
           isFlyerParsed = true;
         }
@@ -2046,6 +2101,27 @@ Ensure the output is valid JSON.`;
     // Merge custom command rules on top of parsed values if both exist
     if (textCommand && isFlyerParsed) {
       jobDetails.experience += ` | Additional requirement: ${textCommand}`;
+    }
+
+    // Apply overall deduplication to ensure final job details are extremely clean
+    jobDetails.title = deduplicateText(jobDetails.title);
+    jobDetails.country = deduplicateText(jobDetails.country);
+    jobDetails.salary = deduplicateText(jobDetails.salary);
+    jobDetails.experience = deduplicateText(jobDetails.experience);
+    jobDetails.skills = deduplicateText(jobDetails.skills);
+    jobDetails.preferredRegion = deduplicateText(jobDetails.preferredRegion);
+    jobDetails.benefits = deduplicateText(jobDetails.benefits);
+
+    // Determine required gender from parsed job context
+    const combinedJobText = `${jobDetails.title} ${jobDetails.skills} ${jobDetails.experience}`.toLowerCase();
+    const requiresFemale = /\b(female|girls|women|woman|lady|ladies)\b/i.test(combinedJobText);
+    const requiresMale = /\b(male|boys|men|man|gentleman|gentlemen)\b/i.test(combinedJobText);
+
+    let requiredGender: 'female' | 'male' | 'any' = 'any';
+    if (requiresFemale && !requiresMale) {
+      requiredGender = 'female';
+    } else if (requiresMale && !requiresFemale) {
+      requiredGender = 'male';
     }
 
     const leads = await getLeads();
@@ -2069,6 +2145,18 @@ Ensure the output is valid JSON.`;
         ${lead.remarks3 || ''}
       `.toLowerCase();
 
+      // Check if this lead is a strict gender mismatch
+      const leadGenderStr = String(lead.gender || '').trim().toUpperCase();
+      const isLeadFemale = leadGenderStr === 'F' || leadGenderStr === 'FEMALE';
+      const isLeadMale = leadGenderStr === 'M' || leadGenderStr === 'MALE';
+
+      let genderMismatch = false;
+      if (requiredGender === 'female' && isLeadMale) {
+        genderMismatch = true;
+      } else if (requiredGender === 'male' && isLeadFemale) {
+        genderMismatch = true;
+      }
+
       // Position Match weights high
       if (lead.position && lead.position.toLowerCase().includes(jobDetails.title.toLowerCase())) {
         score += 60;
@@ -2089,11 +2177,12 @@ Ensure the output is valid JSON.`;
 
       if (lead.stage === 'lost') score -= 30; // lower priority for lost leads
 
-      return { lead, preScore: score };
+      return { lead, preScore: score, genderMismatch };
     });
 
-    // Select the top 120 leads for high-precision Gemini evaluation
+    // Select the top 120 leads for high-precision Gemini evaluation, filtering out gender mismatches strictly
     const topCandidates = preScored
+      .filter(item => !item.genderMismatch)
       .sort((a, b) => b.preScore - a.preScore)
       .slice(0, 120)
       .map(item => item.lead);
@@ -2107,6 +2196,7 @@ Ensure the output is valid JSON.`;
         const systemInstruction = `You are an elite, highly professional AI recruiter for overseas placements.
 Evaluate the candidate list against the given Job Demand requirements.
 Assign a matching score (0 to 100) based on their skills, gender/age, origin/preferred regions, experience, and Remarks Log.
+Strictly respect the required gender constraint (do not match candidates of the wrong gender).
 Provide a clear, brief 1-sentence matching explanation.
 Return the output strictly in the requested JSON schema.`;
 
@@ -2120,8 +2210,9 @@ Return the output strictly in the requested JSON schema.`;
 - Salary Package: ${jobDetails.salary}
 - Required Experience: ${jobDetails.experience}
 - Skills Preference: ${jobDetails.skills}
-- Origin Region Preference: ${jobDetails.preferredRegion}
+- Origin Group/Region Preference: ${jobDetails.preferredRegion}
 - Additional Benefits: ${jobDetails.benefits}
+- Required Gender: ${requiredGender === 'female' ? 'Strictly Female Only' : requiredGender === 'male' ? 'Strictly Male Only' : 'Any Gender'}
 
 Candidates to Evaluate:
 ${JSON.stringify(geminiCandidates.map(c => ({
@@ -2193,6 +2284,25 @@ ${JSON.stringify(geminiCandidates.map(c => ({
               ${c.remarks3 || ''}
             `.toLowerCase();
 
+            // Double check gender mismatch programmatically just in case
+            const leadGenderStr = String(c.gender || '').trim().toUpperCase();
+            const isLeadFemale = leadGenderStr === 'F' || leadGenderStr === 'FEMALE';
+            const isLeadMale = leadGenderStr === 'M' || leadGenderStr === 'MALE';
+
+            if (requiredGender === 'female' && isLeadMale) {
+              return {
+                ...c,
+                matchScore: 0,
+                matchReason: 'Candidate gender mismatch (Job requires Female).'
+              };
+            } else if (requiredGender === 'male' && isLeadFemale) {
+              return {
+                ...c,
+                matchScore: 0,
+                matchReason: 'Candidate gender mismatch (Job requires Male).'
+              };
+            }
+
             // Check for position relevance
             const isPositionMatch = c.position && c.position.toLowerCase().includes(jobDetails.title.toLowerCase());
             if (isPositionMatch) {
@@ -2222,7 +2332,10 @@ ${JSON.stringify(geminiCandidates.map(c => ({
             };
           });
 
-          matchedProfiles = [...geminiEvaluated, ...heuristicEvaluated].sort((a, b) => b.matchScore - a.matchScore);
+          matchedProfiles = [...geminiEvaluated, ...heuristicEvaluated]
+            // Keep scores > 0 to filter out potential mismatches
+            .filter(item => item.matchScore > 0)
+            .sort((a, b) => b.matchScore - a.matchScore);
         }
       } catch (evalErr) {
         console.error('Error during precise Gemini evaluation:', evalErr);
@@ -2249,10 +2362,10 @@ ${JSON.stringify(geminiCandidates.map(c => ({
         `.toLowerCase();
 
         // Check for position relevance
-        const isReceptionist = leadText.includes('reception') || leadText.includes('front') || leadText.includes('hotel') || leadText.includes('office') || leadText.includes('admin');
+        const isReceptionist = leadText.includes('reception') || leadText.includes('front') || leadText.includes('hotel') || leadText.includes('office') || leadText.includes('admin') || leadText.includes('cook') || leadText.includes('housekeep');
         if (isReceptionist) {
           score += 35;
-          reason = 'Excellent matches found in resume keywords for Receptionist/Front Office roles.';
+          reason = `Excellent matches found in resume keywords for ${jobDetails.title} roles.`;
         }
 
         // Check for region preference
