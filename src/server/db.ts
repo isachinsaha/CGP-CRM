@@ -57,8 +57,8 @@ let dbVerifying = false;
 
 // Helper to enforce timeouts on async Firestore promises so they never hang the server
 function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 20000): Promise<T> {
-  // Override low timeouts with a safe minimum of 5000ms to keep response times snappy while permitting some latency
-  const actualTimeout = Math.max(timeoutMs, 5000);
+  // Override low timeouts with a safe minimum of 15000ms to keep response times snappy while permitting some latency
+  const actualTimeout = Math.max(timeoutMs, 15000);
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`Firestore operation timed out after ${actualTimeout}ms`));

@@ -400,10 +400,35 @@ export default function CampaignAnalytics({
       percent: calculatePercent(count, weeklyLeads.length)
     })).sort((a, b) => b.count - a.count);
 
+    const activeOutreachCount = activeLeads.filter(l => {
+      const updatedDate = new Date(l.updatedAt).getTime();
+      const isOutreach = l.stage !== 'new' && (l.remarks1 || l.remarks2 || l.notes);
+      return updatedDate >= oneWeekAgo && isOutreach;
+    }).length;
+
+    const wonCount = activeLeads.filter(l => {
+      const updatedDate = new Date(l.updatedAt).getTime();
+      return updatedDate >= oneWeekAgo && l.stage === 'won';
+    }).length;
+
+    const remarksWeekly = activeLeads.filter(l => {
+      const updatedDate = new Date(l.updatedAt).getTime();
+      return updatedDate >= oneWeekAgo && (l.remarks1 || l.remarks2 || l.remarks3);
+    }).map(l => ({
+      id: l.id,
+      name: l.name,
+      assignedTo: l.assignedTo,
+      country: l.country,
+      remarks: l.remarks3 || l.remarks2 || l.remarks1,
+      time: new Date(l.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + new Date(l.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }));
+
     return {
       count: weeklyLeads.length,
-      wonCount: weeklyLeads.filter(l => l.stage === 'won').length,
+      wonCount,
       countries: sortedCountries,
+      activeOutreachCount,
+      remarksWeekly
     };
   }, [activeLeads]);
 
@@ -1047,11 +1072,13 @@ export default function CampaignAnalytics({
               </div>
             </div>
 
-            <div className="lg:col-span-8 border border-slate-800 rounded-xl p-4 bg-slate-950/40">
-              <h4 className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-3 flex items-center gap-1.5 font-display">
-                <Clock className="h-4 w-4 text-accent-emerald" />
-                Latest Remarks Logged Today
-              </h4>
+            <div className="lg:col-span-8 border border-slate-800 rounded-xl p-4 bg-slate-950/40 space-y-3">
+              <div className="bg-slate-900/90 border border-slate-800 px-3 py-2 rounded-xl flex items-center gap-2 shadow-xs">
+                <Clock className="h-4 w-4 text-accent-emerald shrink-0" />
+                <h4 className="text-xs font-bold uppercase text-slate-200 tracking-wider font-display">
+                  Latest Remarks Logged Today
+                </h4>
+              </div>
               {dailyStats.remarksToday.length > 0 ? (
                 <div className="space-y-3 max-h-[290px] overflow-y-auto pr-1">
                   {dailyStats.remarksToday.map((item, idx) => (
@@ -1091,62 +1118,102 @@ export default function CampaignAnalytics({
         {reportTab === 'weekly' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-left">
-            <div className="lg:col-span-5 space-y-4">
-              <div className="bg-emerald-950/20 p-5 border border-emerald-900/30 rounded-xl">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 font-display">Weekly Highlights</h4>
-                <div className="space-y-2 mt-4">
-                  <div className="flex justify-between items-center bg-slate-900 p-3 rounded-lg border border-slate-800">
-                    <span className="text-xs font-medium text-slate-350">Total Inbounds (Last 7 Days)</span>
-                    <span className="font-bold text-slate-100 text-sm">{weeklyStats.count} candidates</span>
-                  </div>
-                  <div className="flex justify-between items-center bg-slate-900 p-3 rounded-lg border border-slate-800">
-                    <span className="text-xs font-medium text-slate-350">Visas Cleared This Week</span>
-                    <span className="font-bold text-accent-emerald text-sm">{weeklyStats.wonCount} candidate(s)</span>
-                  </div>
+              <div className="lg:col-span-4 space-y-4">
+                <div className="p-4 bg-emerald-950/20 border border-emerald-900/20 rounded-xl space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wide block">Inflow This Week</span>
+                  <span className="text-3xl font-black text-slate-100 block">{weeklyStats.count}</span>
+                  <p className="text-xs text-slate-450 font-sans">Newly assigned job leads received this week.</p>
+                </div>
+
+                <div className="p-4 bg-purple-950/20 border border-purple-900/20 rounded-xl space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wide block">Telecaller Touches This Week</span>
+                  <span className="text-3xl font-black text-slate-100 block">{weeklyStats.activeOutreachCount}</span>
+                  <p className="text-xs text-slate-450 font-sans">Calls placed and remark notes updated this week.</p>
+                </div>
+
+                {/* Placements Finalized Today(weekly) / This Week in Green Colour */}
+                <div className="p-4 bg-emerald-950/30 border border-emerald-500/30 rounded-xl space-y-1 shadow-md shadow-emerald-950/5">
+                  <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wide block">Placements Finalized Today (Weekly)</span>
+                  <span className="text-3xl font-black text-emerald-400 block">{weeklyStats.wonCount}</span>
+                  <p className="text-xs text-emerald-300 font-sans">Candidates confirmed and visa-cleared this week.</p>
                 </div>
               </div>
 
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-850">
-                <span className="text-[10px] font-bold text-accent-purple uppercase tracking-widest block mb-1 font-mono">PROMOTION INSIGHTS</span>
-                <p className="text-xs text-slate-450 leading-relaxed font-sans">
-                  Meta ad recruitment campaigns for <strong>Qatar Withstand</strong> and <strong>Germany Nursing visa service</strong> showed 40% higher response frequency on weekends.
-                </p>
-              </div>
-            </div>
-
-            <div className="lg:col-span-7 border border-slate-800 rounded-xl p-5 bg-slate-900">
-              <h4 className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-4 flex items-center gap-1.5 font-display">
-                <MapPin className="h-4 w-4 text-accent-emerald" />
-                Abroad Country Demands (Weekly Attributions)
-              </h4>
-              <div className="space-y-3.5">
-                {weeklyStats.countries.length > 0 ? (
-                  weeklyStats.countries.map((item, idx) => (
-                    <div key={idx} className="space-y-1">
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="font-bold text-slate-200">{item.country} Candidates</span>
-                        <span className="font-mono text-slate-400">{item.count} leads ({item.percent}%)</span>
-                      </div>
-                      <div className="w-full bg-slate-950 h-3 rounded-lg overflow-hidden p-0.5 border border-slate-850">
-                        <div 
-                          className="h-full bg-accent-emerald rounded-md" 
-                          style={{ width: `${item.percent}%` }}
-                        />
-                      </div>
+              <div className="lg:col-span-8 border border-slate-800 rounded-xl p-4 bg-slate-950/40">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                  {/* Left Column: Abroad Country Demands */}
+                  <div className="md:col-span-5 space-y-3">
+                    <div className="bg-slate-900/90 border border-slate-800 px-3 py-2 rounded-xl flex items-center gap-2 shadow-xs">
+                      <MapPin className="h-4 w-4 text-accent-emerald shrink-0" />
+                      <h4 className="text-xs font-bold uppercase text-slate-200 tracking-wider font-display">
+                        Abroad Country Demands
+                      </h4>
                     </div>
-                  ))
-                ) : (
-                  <div className="py-10 text-center text-xs text-slate-450">No leads captured in the last 7 days.</div>
-                )}
+                    <div className="space-y-3 max-h-[290px] overflow-y-auto pr-1">
+                      {weeklyStats.countries.length > 0 ? (
+                        weeklyStats.countries.map((item, idx) => (
+                          <div key={idx} className="space-y-1 bg-slate-900/50 p-2.5 rounded-lg border border-slate-800/60">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="font-bold text-slate-200">{item.country}</span>
+                              <span className="font-mono text-slate-400 text-[10px]">{item.count} ({item.percent}%)</span>
+                            </div>
+                            <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden p-0.5 border border-slate-850">
+                              <div 
+                                className="h-full bg-accent-emerald rounded-full" 
+                                style={{ width: `${item.percent}%` }}
+                              />
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="py-10 text-center text-xs text-slate-450">No leads captured in the last 7 days.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Column: Latest Remarks Logged This Week */}
+                  <div className="md:col-span-7 border-t md:border-t-0 md:border-l border-slate-800 pt-4 md:pt-0 md:pl-5 space-y-3">
+                    <div className="bg-slate-900/90 border border-slate-800 px-3 py-2 rounded-xl flex items-center gap-2 shadow-xs">
+                      <Clock className="h-4 w-4 text-accent-emerald shrink-0" />
+                      <h4 className="text-xs font-bold uppercase text-slate-200 tracking-wider font-display">
+                        Latest Remarks Logged This Week
+                      </h4>
+                    </div>
+                    {weeklyStats.remarksWeekly.length > 0 ? (
+                      <div className="space-y-2.5 max-h-[290px] overflow-y-auto pr-1">
+                        {weeklyStats.remarksWeekly.map((item, idx) => (
+                          <div key={idx} className="bg-slate-900 p-2.5 rounded-xl border border-slate-800/80 shadow-md flex justify-between items-start gap-3">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-slate-100 text-[11px]">{item.name}</span>
+                                <span className="text-[9px] bg-slate-800 px-1 rounded font-mono font-medium text-slate-350 uppercase border border-slate-750">
+                                  ✈️ {item.country}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-300 italic">"{item.remarks}"</p>
+                              <div className="text-[9px] text-slate-450">
+                                Caller: <span className="font-bold text-accent-emerald">{item.assignedTo}</span>
+                              </div>
+                            </div>
+                            <span className="text-[9px] text-slate-450 font-mono shrink-0">{item.time}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="py-12 text-center text-xs text-slate-450 border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-1.5">
+                        <p>No remarks logged this week.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {renderConversionGraph()}
+              {renderTargetAchievementGraph()}
+            </div>
           </div>
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            {renderConversionGraph()}
-            {renderTargetAchievementGraph()}
-          </div>
-        </div>
-      )}
+        )}
 
         {/* --- MONTHLY REPORT & LEADERBOARD CONTENT --- */}
         {reportTab === 'monthly' && (
@@ -1652,10 +1719,10 @@ export default function CampaignAnalytics({
                       <div className="flex-1 h-8 bg-slate-950 rounded-lg flex items-center px-1 overflow-hidden border border-slate-850">
                         <div
                           style={{ width: `${barWidth}%` }}
-                          className={`h-6 rounded-md ${funnel.color} transition-all duration-500 flex items-center justify-between px-2 text-white font-mono text-[10px] font-bold`}
+                          className={`h-6 rounded-md ${funnel.color} transition-all duration-500 flex items-center justify-between px-2.5 text-white font-sans text-xs font-bold`}
                         >
-                          <span className="text-slate-950 drop-shadow-xs font-black">{count}</span>
-                          {pct > 0 && <span className="text-[8px] opacity-80 text-slate-950 font-extrabold">{pct}%</span>}
+                          <span className="text-white drop-shadow-md font-black text-[12px] sm:text-[14px]">{count}</span>
+                          {pct > 0 && <span className="text-[10px] sm:text-[11px] opacity-95 text-white font-extrabold">{pct}%</span>}
                         </div>
                       </div>
                     </div>
