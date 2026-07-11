@@ -17,6 +17,7 @@ import {
   RotateCw,
   Search
 } from 'lucide-react';
+import { motion } from 'motion/react';
 import { getCountryFlagUrl, formatCandidateName } from '../utils';
 import ImportantUpdatesBar from './ImportantUpdatesBar.tsx';
 import { SearchableSelect } from './SearchableSelect.tsx';
@@ -195,14 +196,19 @@ export default function LeadBoard({
     const hasRemarks = lead.remarks1 || lead.remarks2 || lead.remarks3;
 
     return (
-      <div
+      <motion.div
         key={lead.id}
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        whileHover={{ scale: 1.015, y: -3, borderColor: "var(--color-accent-emerald)" }}
+        whileTap={{ scale: 0.995 }}
+        transition={{ type: "spring", stiffness: 400, damping: 28 }}
         draggable="true"
         onDragStart={(e) => {
           e.dataTransfer.setData('text/plain', lead.id);
           e.dataTransfer.effectAllowed = 'move';
         }}
-        className="bg-slate-850 rounded-xl border border-slate-700 p-3.5 shadow-sm hover:shadow-xl hover:border-accent-purple hover:-translate-y-0.5 transition-all duration-200 cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full"
+        className="bg-slate-850 rounded-2xl border border-slate-750 p-4 shadow-xs cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full hover:shadow-lg hover:shadow-accent-emerald/5"
         onClick={() => onSelectLead(lead)}
       >
         {/* Target country badge & Stars */}
@@ -330,7 +336,7 @@ export default function LeadBoard({
           </div>
         </div>
 
-      </div>
+      </motion.div>
     );
   };
 

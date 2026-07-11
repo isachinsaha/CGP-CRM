@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { motion } from 'motion/react';
 import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
 import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Bell, Download, Sparkles, TrendingUp, X, UploadCloud } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -1252,8 +1253,11 @@ export default function LeadList({
                 paginatedLeads.map((lead) => {
                   const isSavingThis = savingId === lead.id;
                   return (
-                    <tr
+                    <motion.tr
                       key={lead.id}
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.12 }}
                       onClick={() => !isInlineEdit && onSelectLead(lead)}
                       className={`transition-colors text-xs text-left ${
                         isInlineEdit 
@@ -1535,7 +1539,7 @@ export default function LeadList({
                           )}
                         </div>
                       </td>
-                    </tr>
+                    </motion.tr>
                   );
                 })
               ) : (

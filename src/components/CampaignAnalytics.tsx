@@ -1139,75 +1139,72 @@ export default function CampaignAnalytics({
                 </div>
               </div>
 
-              <div className="lg:col-span-8 border border-slate-800 rounded-xl p-4 bg-slate-950/40">
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                  {/* Left Column: Abroad Country Demands */}
-                  <div className="md:col-span-5 space-y-3">
-                    <div className="bg-slate-900/90 border border-slate-800 px-3 py-2 rounded-xl flex items-center gap-2 shadow-xs">
-                      <MapPin className="h-4 w-4 text-accent-emerald shrink-0" />
-                      <h4 className="text-xs font-bold uppercase text-slate-200 tracking-wider font-display">
-                        Abroad Country Demands
-                      </h4>
-                    </div>
-                    <div className="space-y-3 max-h-[290px] overflow-y-auto pr-1">
-                      {weeklyStats.countries.length > 0 ? (
-                        weeklyStats.countries.map((item, idx) => (
-                          <div key={idx} className="space-y-1 bg-slate-900/50 p-2.5 rounded-lg border border-slate-800/60">
-                            <div className="flex justify-between items-center text-xs">
-                              <span className="font-bold text-slate-200">{item.country}</span>
-                              <span className="font-mono text-slate-400 text-[10px]">{item.count} ({item.percent}%)</span>
-                            </div>
-                            <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden p-0.5 border border-slate-850">
-                              <div 
-                                className="h-full bg-accent-emerald rounded-full" 
-                                style={{ width: `${item.percent}%` }}
-                              />
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="py-10 text-center text-xs text-slate-450">No leads captured in the last 7 days.</div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Right Column: Latest Remarks Logged This Week */}
-                  <div className="md:col-span-7 border-t md:border-t-0 md:border-l border-slate-800 pt-4 md:pt-0 md:pl-5 space-y-3">
-                    <div className="bg-slate-900/90 border border-slate-800 px-3 py-2 rounded-xl flex items-center gap-2 shadow-xs">
-                      <Clock className="h-4 w-4 text-accent-emerald shrink-0" />
-                      <h4 className="text-xs font-bold uppercase text-slate-200 tracking-wider font-display">
-                        Latest Remarks Logged This Week
-                      </h4>
-                    </div>
-                    {weeklyStats.remarksWeekly.length > 0 ? (
-                      <div className="space-y-2.5 max-h-[290px] overflow-y-auto pr-1">
-                        {weeklyStats.remarksWeekly.map((item, idx) => (
-                          <div key={idx} className="bg-slate-900 p-2.5 rounded-xl border border-slate-800/80 shadow-md flex justify-between items-start gap-3">
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-bold text-slate-100 text-[11px]">{item.name}</span>
-                                <span className="text-[9px] bg-slate-800 px-1 rounded font-mono font-medium text-slate-350 uppercase border border-slate-750">
-                                  ✈️ {item.country}
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-slate-300 italic">"{item.remarks}"</p>
-                              <div className="text-[9px] text-slate-450">
-                                Caller: <span className="font-bold text-accent-emerald">{item.assignedTo}</span>
-                              </div>
-                            </div>
-                            <span className="text-[9px] text-slate-450 font-mono shrink-0">{item.time}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="py-12 text-center text-xs text-slate-450 border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-1.5">
-                        <p>No remarks logged this week.</p>
-                      </div>
-                    )}
-                  </div>
+              <div className="lg:col-span-8 border border-slate-800 rounded-xl p-4 bg-slate-950/40 space-y-3">
+                <div className="bg-slate-900/90 border border-slate-800 px-3 py-2 rounded-xl flex items-center gap-2 shadow-xs">
+                  <Clock className="h-4 w-4 text-accent-emerald shrink-0" />
+                  <h4 className="text-xs font-bold uppercase text-slate-200 tracking-wider font-display">
+                    Latest Remarks Logged This Week
+                  </h4>
                 </div>
+                {weeklyStats.remarksWeekly.length > 0 ? (
+                  <div className="space-y-3 max-h-[290px] overflow-y-auto pr-1">
+                    {weeklyStats.remarksWeekly.map((item, idx) => (
+                      <div key={idx} className="bg-slate-900 p-3 rounded-xl border border-slate-800/80 shadow-md flex justify-between items-start gap-4 animate-fade-in">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-100 text-xs">{item.name}</span>
+                            <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded font-mono font-medium text-slate-350 uppercase border border-slate-750">
+                              ✈️ {item.country}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-300 italic">"{item.remarks}"</p>
+                          <div className="text-[10px] text-slate-450">
+                            Caller: <span className="font-bold text-accent-emerald">{item.assignedTo}</span>
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-slate-450 font-mono shrink-0">{item.time}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-1.5">
+                    <p>No remarks logged this week.</p>
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* Abroad Country Demands as a standalone beautifully matched block */}
+            <div className="border border-slate-800 rounded-xl p-5 bg-slate-950/40 text-left space-y-4">
+              <div className="bg-slate-900/90 border border-slate-800 px-3 py-2.5 rounded-xl flex items-center gap-2 shadow-xs max-w-sm">
+                <MapPin className="h-4 w-4 text-accent-emerald shrink-0" />
+                <h4 className="text-xs font-bold uppercase text-slate-200 tracking-wider font-display">
+                  Abroad Country Demands This Week
+                </h4>
+              </div>
+              
+              {weeklyStats.countries.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {weeklyStats.countries.map((item, idx) => (
+                    <div key={idx} className="bg-slate-900/50 p-3.5 rounded-xl border border-slate-800/80 space-y-2">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-bold text-slate-200">{item.country}</span>
+                        <span className="font-mono text-slate-400 text-[10px] font-bold">{item.count} leads ({item.percent}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden p-0.5 border border-slate-850">
+                        <div 
+                          className="h-full bg-accent-emerald rounded-full" 
+                          style={{ width: `${item.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-xs text-slate-450">No lead counts found for this week.</div>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               {renderConversionGraph()}
               {renderTargetAchievementGraph()}
@@ -1713,16 +1710,22 @@ export default function CampaignAnalytics({
                   const barWidth = Math.max(10, calculatePercent(count, maxVal));
                   return (
                     <div key={idx} className="flex items-center gap-3">
-                      <div className="w-28 text-xs font-semibold text-slate-450 text-right truncate">
+                      <div className="w-28 text-xs font-bold text-slate-400 text-right leading-tight">
                         {funnel.label}
                       </div>
-                      <div className="flex-1 h-8 bg-slate-950 rounded-lg flex items-center px-1 overflow-hidden border border-slate-850">
+                      <div className="flex-1 h-11 bg-slate-950 rounded-xl flex items-center px-1.5 overflow-hidden border border-slate-850">
                         <div
                           style={{ width: `${barWidth}%` }}
-                          className={`h-6 rounded-md ${funnel.color} transition-all duration-500 flex items-center justify-between px-2.5 text-white font-sans text-xs font-bold`}
+                          className={`h-8 rounded-lg ${funnel.color} transition-all duration-500 flex items-center justify-between px-3.5 text-white font-sans`}
                         >
-                          <span className="text-white drop-shadow-md font-black text-[12px] sm:text-[14px]">{count}</span>
-                          {pct > 0 && <span className="text-[10px] sm:text-[11px] opacity-95 text-white font-extrabold">{pct}%</span>}
+                          <span className="text-white drop-shadow-md font-black text-base sm:text-lg font-display tracking-wide">
+                            {count}
+                          </span>
+                          {pct > 0 && (
+                            <span className="text-xs sm:text-sm font-black text-white/90 font-mono tracking-tight bg-slate-950/20 px-1.5 py-0.5 rounded-md">
+                              {pct}%
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>

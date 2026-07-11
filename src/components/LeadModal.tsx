@@ -5,6 +5,7 @@ import {
   Calendar, Clipboard, Check, Star, ListTodo, History, 
   Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Bell, Plus, PhoneCall
 } from 'lucide-react';
+import { motion } from 'motion/react';
 import { getCountryFlagUrl, formatCandidateName } from '../utils';
 import { SearchableSelect } from './SearchableSelect.tsx';
 
@@ -409,8 +410,19 @@ export default function LeadModal({
   const isSubAgent = userRole === 'agent';
 
   return (
-    <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 text-left" id="cgp-leads-modal">
-      <div className="bg-slate-850 rounded-3xl shadow-2xl border border-slate-750 w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-300">
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2 }}
+      className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 text-left" 
+      id="cgp-leads-modal"
+    >
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 380, damping: 26 }}
+        className="bg-slate-850 rounded-3xl shadow-2xl border border-slate-750 w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden"
+      >
         
         {/* Header ribbon */}
         <div className="bg-slate-900/30 px-6 py-4 border-b border-slate-750 flex flex-col sm:flex-row gap-4 justify-between sm:items-center">
@@ -1592,7 +1604,7 @@ export default function LeadModal({
 
         </div>
 
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

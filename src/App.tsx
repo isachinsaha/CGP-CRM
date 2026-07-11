@@ -659,71 +659,125 @@ export default function App() {
         ) : (
           <div className="flex-1 flex flex-col">
             {activeTab === 'board' && (
-              <LeadBoard
-                leads={leads}
-                onSelectLead={setSelectedLead}
-                onUpdateStage={handleUpdateStage}
-                userRole={userRole}
-                currentAgentId={currentAgentId}
-                coordinators={coordinatorsList}
-              />
+              <motion.div
+                key="board-tab"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className="flex-1 flex flex-col"
+              >
+                <LeadBoard
+                  leads={leads}
+                  onSelectLead={setSelectedLead}
+                  onUpdateStage={handleUpdateStage}
+                  userRole={userRole}
+                  currentAgentId={currentAgentId}
+                  coordinators={coordinatorsList}
+                />
+              </motion.div>
             )}
 
             {activeTab === 'list' && (
-              <LeadList
-                leads={leads}
-                onSelectLead={setSelectedLead}
-                onUpdateStage={handleUpdateStage}
-                onDeleteLead={handleDeleteLead}
-                userRole={userRole}
-                currentAgentId={currentAgentId}
-                onRefreshData={() => pullCrmData(true)}
-                coordinators={coordinatorsList}
-                totalLeadsCount={totalLeadsCount}
-                totalPagesCount={totalPagesCount}
-                currentPageOverride={currentPage}
-                onPageChange={setCurrentPage}
-                onFiltersChange={setFilters}
-                metaCountries={metaCountries}
-                metaProjects={metaProjects}
-                metaTags={metaTags}
-              />
+              <motion.div
+                key="list-tab"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className="flex-1 flex flex-col"
+              >
+                <LeadList
+                  leads={leads}
+                  onSelectLead={setSelectedLead}
+                  onUpdateStage={handleUpdateStage}
+                  onDeleteLead={handleDeleteLead}
+                  userRole={userRole}
+                  currentAgentId={currentAgentId}
+                  onRefreshData={() => pullCrmData(true)}
+                  coordinators={coordinatorsList}
+                  totalLeadsCount={totalLeadsCount}
+                  totalPagesCount={totalPagesCount}
+                  currentPageOverride={currentPage}
+                  onPageChange={setCurrentPage}
+                  onFiltersChange={setFilters}
+                  metaCountries={metaCountries}
+                  metaProjects={metaProjects}
+                  metaTags={metaTags}
+                />
+              </motion.div>
             )}
 
             {activeTab === 'analytics' && stats && (
-              <CampaignAnalytics 
-                stats={stats} 
-                leads={leads} 
-                onRefreshData={() => pullCrmData(true)} 
-                userRole={userRole}
-                currentAgentId={currentAgentId}
-                onSelectLead={setSelectedLead}
-                coordinators={coordinatorsList}
-              />
+              <motion.div
+                key="analytics-tab"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className="flex-1 flex flex-col"
+              >
+                <CampaignAnalytics 
+                  stats={stats} 
+                  leads={leads} 
+                  onRefreshData={() => pullCrmData(true)} 
+                  userRole={userRole}
+                  currentAgentId={currentAgentId}
+                  onSelectLead={setSelectedLead}
+                  coordinators={coordinatorsList}
+                />
+              </motion.div>
             )}
 
             {activeTab === 'jobs' && (
-              <ActiveJobs
-                currentUser={currentUser}
-                countries={countries}
-                view="jobs"
-              />
+              <motion.div
+                key="jobs-tab"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className="flex-1 flex flex-col"
+              >
+                <ActiveJobs
+                  currentUser={currentUser}
+                  countries={countries}
+                  view="jobs"
+                />
+              </motion.div>
             )}
 
             {activeTab === 'wallet' && (
-              <ActiveJobs
-                currentUser={currentUser}
-                countries={countries}
-                view="wallet"
-              />
+              <motion.div
+                key="wallet-tab"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className="flex-1 flex flex-col"
+              >
+                <ActiveJobs
+                  currentUser={currentUser}
+                  countries={countries}
+                  view="wallet"
+                />
+              </motion.div>
             )}
 
             {activeTab === 'ai-matcher' && (
-              <AiProfileMatcher
-                onSelectLead={setSelectedLead}
-                onUpdateLead={async () => { await pullCrmData(true); }}
-                userRole={userRole}
-              />
+              <motion.div
+                key="ai-matcher-tab"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className="flex-1 flex flex-col"
+              >
+                <AiProfileMatcher
+                  onSelectLead={setSelectedLead}
+                  onUpdateLead={async () => { await pullCrmData(true); }}
+                  userRole={userRole}
+                />
+              </motion.div>
             )}
           </div>
         )}
