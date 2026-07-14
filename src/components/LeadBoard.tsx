@@ -246,7 +246,12 @@ export default function LeadBoard({
         <div className="flex items-center justify-between mt-1 pb-1.5 border-b border-slate-700">
           <span className="text-[11px] text-slate-300 font-semibold font-mono tracking-wide">{lead.phone}</span>
           <span className="text-[10px] bg-slate-750 border border-slate-700 font-bold px-2 py-0.5 rounded text-slate-200 uppercase font-mono">
-            {lead.gender === 'F' ? 'F' : 'M'}, Age {lead.age || 'N/A'}
+            {(() => {
+              const g = String(lead.gender || '').toUpperCase().trim();
+              if (g === 'F' || g === 'FEMALE') return 'F';
+              if (g === 'M' || g === 'MALE') return 'M';
+              return 'N/A';
+            })()}, Age {lead.age || 'N/A'}
           </span>
         </div>
 

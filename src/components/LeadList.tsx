@@ -1310,7 +1310,12 @@ export default function LeadList({
                           </div>
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">{lead.phone}</div>
                           <div className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                            {lead.gender === 'FEMALE' || lead.gender === 'F' ? 'Female' : 'Male'}, Age {lead.age || 'N/A'} ({lead.origin || 'No State'})
+                            {(() => {
+                              const g = String(lead.gender || '').toUpperCase().trim();
+                              if (g === 'F' || g === 'FEMALE') return 'Female';
+                              if (g === 'M' || g === 'MALE') return 'Male';
+                              return 'Not Defined';
+                            })()}, Age {lead.age || 'N/A'} ({lead.origin || 'No State'})
                           </div>
                           {lead.tags && lead.tags.length > 0 && (
                             <div className="flex flex-wrap gap-1 mt-1.5">
