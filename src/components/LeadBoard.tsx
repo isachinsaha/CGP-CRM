@@ -193,7 +193,12 @@ export default function LeadBoard({
   // Lead Card Render Helper to avoid duplicate JSX
   const renderLeadCard = (lead: Lead) => {
     const { prev, next } = getStageNeighbors(lead.stage);
-    const hasRemarks = lead.remarks1 || lead.remarks2 || lead.remarks3;
+    const r1 = lead.remarks1?.trim() || '';
+    const r2 = lead.remarks2?.trim() || '';
+    const r3 = lead.remarks3?.trim() || '';
+    const hasRemarks = r1 !== '' || r2 !== '' || r3 !== '';
+    const latestRemarkLabel = r3 !== '' ? '📞 3rd Remark' : r2 !== '' ? '📞 2nd Remark' : '📞 1st Remark';
+    const latestRemarkValue = r3 !== '' ? r3 : r2 !== '' ? r2 : r1;
 
     return (
       <motion.div
@@ -272,32 +277,49 @@ export default function LeadBoard({
           </span>
         )}
 
-        {/* Telecaller Remarks Log Indicator */}
+        {/* Telecaller & Admin Remarks Log Indicators */}
         {hasRemarks ? (
-          <div className="bg-slate-950 p-2 rounded-lg border border-slate-700 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-slate-900 group/remarks cursor-help">
+          <div className="bg-slate-400/10 dark:bg-slate-950 p-2 rounded-lg border border-slate-400/20 dark:border-slate-700 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-slate-400/15 dark:hover:bg-slate-900 group/remarks cursor-help">
             <span className="text-[10px] uppercase font-bold text-accent-emerald block mb-0.5 tracking-wider flex justify-between items-center font-sans">
-              <span>{lead.remarks3 ? "📞 3rd" : lead.remarks2 ? "📞 2nd" : "📞 1st"} Remark</span>
-              <span className="text-[8px] text-slate-400 normal-case font-normal group-hover/remarks:hidden">Full</span>
+              <span>{latestRemarkLabel}</span>
+              <span className="text-[8px] text-slate-500 dark:text-slate-400 normal-case font-normal group-hover/remarks:hidden">Full</span>
             </span>
-            <p className="text-slate-200 truncate group-hover/remarks:whitespace-normal group-hover/remarks:break-all italic font-medium font-mono text-[11px] transition-all duration-250">
-              "{lead.remarks3 || lead.remarks2 || lead.remarks1}"
+            <p className="text-slate-700 dark:text-slate-200 truncate group-hover/remarks:whitespace-normal group-hover/remarks:break-all italic font-medium font-mono text-[11px] transition-all duration-250">
+              "{latestRemarkValue}"
+            </p>
+          </div>
+        ) : lead.adminRemarks && lead.adminRemarks.trim() !== '' ? (
+          <div className="bg-rose-400/10 dark:bg-rose-950/20 p-2 rounded-lg border border-rose-500/20 dark:border-rose-500/30 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-rose-400/15 dark:hover:bg-rose-950/30 group/adminRemarks cursor-help">
+            <span className="text-[10px] uppercase font-bold text-rose-600 dark:text-rose-400 block mb-0.5 tracking-wider flex justify-between items-center font-sans">
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse" />
+                👑 Admin Remark
+              </span>
+              <span className="text-[8px] text-rose-500 normal-case font-normal group-hover/adminRemarks:hidden">Full</span>
+            </span>
+            <p className="text-rose-600 dark:text-rose-400 font-bold truncate group-hover/adminRemarks:whitespace-normal group-hover/adminRemarks:break-all italic font-mono text-[11px] transition-all duration-250">
+              "{lead.adminRemarks}"
             </p>
           </div>
         ) : (
-          <div className="text-[11px] text-left text-slate-300 mt-2 font-sans font-medium">
+          <div className="text-[11px] text-left text-slate-500 dark:text-slate-300 mt-2 font-sans font-medium">
             No Remarks Logged
           </div>
         )}
 
         {/* Coordinator Badge */}
-        {lead.assignedTo && (
-          <div className="text-[11px] mt-2 flex justify-between items-center border-t border-slate-700 pt-2 text-left">
-            <span className="text-slate-300 font-extrabold">Coordinator:</span>
+        <div className="text-[11px] mt-2 flex justify-between items-center border-t border-slate-700/50 pt-2 text-left">
+          <span className="text-slate-700 dark:text-slate-300 font-extrabold">Coordinator:</span>
+          {lead.assignedTo && lead.assignedTo.trim() !== '' && lead.assignedTo.toLowerCase() !== 'unassigned' ? (
             <span className="text-accent-purple font-black bg-purple-950 border border-purple-400/60 px-2.5 py-1 rounded text-[10px] uppercase tracking-wider font-sans shadow-2xs">
               👤 {lead.assignedTo}
             </span>
-          </div>
-        )}
+          ) : (
+            <span className="text-rose-600 dark:text-rose-400 font-black bg-rose-500/10 dark:bg-rose-950 border border-rose-300 dark:border-rose-800 px-2.5 py-1 rounded text-[10px] uppercase tracking-wider font-sans shadow-2xs">
+              👤 UNASSIGNED
+            </span>
+          )}
+        </div>
 
         {/* Spacer */}
         <div className="flex-1 min-h-[8px]" />
