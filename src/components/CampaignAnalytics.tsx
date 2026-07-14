@@ -85,7 +85,9 @@ export default function CampaignAnalytics({
     // Filter leads for the chosen coordinator (or all active leads if 'All' is selected)
     const filteredLeadsForCharts = selectedCoordinatorName === 'All'
       ? leads
-      : leads.filter(l => l.assignedTo?.toLowerCase() === selectedCoordinatorName.toLowerCase() || l.assignedTo === selectedCoordinatorName);
+      : selectedCoordinatorName === 'Unassigned'
+        ? leads.filter(l => !l.assignedTo || l.assignedTo.trim() === '' || l.assignedTo === 'Unassigned')
+        : leads.filter(l => l.assignedTo?.toLowerCase() === selectedCoordinatorName.toLowerCase() || l.assignedTo === selectedCoordinatorName);
 
     // 1. Compute Pipeline Funnel Stages
     const pipelineStages: Record<string, number> = {
@@ -180,12 +182,13 @@ export default function CampaignAnalytics({
 
   // Dynamic Coordinator Interval Stats
   const coordinatorIntervalStats = useMemo(() => {
-    const coordinatorsList = coordinators && coordinators.length > 0
+    const baseCoordinatorsList = coordinators && coordinators.length > 0
       ? coordinators.filter(c => c.role === 'agent').map(c => c.displayName)
       : [
           'Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 
           'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'
         ];
+    const coordinatorsList = [...baseCoordinatorsList, 'Unassigned'];
 
     let intervalLeads = activeLeads;
     if (reportTab === 'daily') {
@@ -219,7 +222,9 @@ export default function CampaignAnalytics({
     }
 
     return coordinatorsList.map(name => {
-      const agentLeads = intervalLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase());
+      const agentLeads = name === 'Unassigned'
+        ? intervalLeads.filter(l => !l.assignedTo || l.assignedTo.trim() === '' || l.assignedTo === 'Unassigned')
+        : intervalLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase() || l.assignedTo === name);
       const total = agentLeads.length;
       const won = agentLeads.filter(l => l.stage === 'won').length;
       const progress = agentLeads.filter(l => ['negotiating', 'proposal'].includes(l.stage)).length;
@@ -261,7 +266,9 @@ export default function CampaignAnalytics({
       if (lead.tasks && Array.isArray(lead.tasks)) {
         // Filter by coordinator if selected
         if (todoCoordFilter !== 'All') {
-          const matched = lead.assignedTo?.toLowerCase() === todoCoordFilter.toLowerCase() || lead.assignedTo === todoCoordFilter;
+          const matched = todoCoordFilter === 'Unassigned'
+            ? (!lead.assignedTo || lead.assignedTo.trim() === '' || lead.assignedTo === 'Unassigned')
+            : (lead.assignedTo?.toLowerCase() === todoCoordFilter.toLowerCase() || lead.assignedTo === todoCoordFilter);
           if (!matched) return;
         }
         lead.tasks.forEach(task => {
@@ -318,7 +325,10 @@ export default function CampaignAnalytics({
   const reminderLeads = useMemo(() => {
     let filtered = activeLeads.filter(l => l.reminderEnabled);
     if (todoCoordFilter !== 'All') {
-      filtered = filtered.filter(l => l.assignedTo?.toLowerCase() === todoCoordFilter.toLowerCase() || l.assignedTo === todoCoordFilter);
+      filtered = filtered.filter(l => todoCoordFilter === 'Unassigned'
+        ? (!l.assignedTo || l.assignedTo.trim() === '' || l.assignedTo === 'Unassigned')
+        : (l.assignedTo?.toLowerCase() === todoCoordFilter.toLowerCase() || l.assignedTo === todoCoordFilter)
+      );
     }
     return filtered;
   }, [activeLeads, todoCoordFilter]);
@@ -438,16 +448,19 @@ export default function CampaignAnalytics({
     const monthlyLeads = activeLeads.filter(l => new Date(l.createdAt).getTime() >= oneMonthAgo);
 
     // List of sub agents
-    const coordinatorsList = coordinators && coordinators.length > 0
+    const baseCoordinatorsList = coordinators && coordinators.length > 0
       ? coordinators.filter(c => c.role === 'agent').map(c => c.displayName)
       : [
           'Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 
           'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'
         ];
+    const coordinatorsList = [...baseCoordinatorsList, 'Unassigned'];
 
     // Compute stats for each coordinator
     const agentLeaderboard = coordinatorsList.map(name => {
-      const agentLeads = activeLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase());
+      const agentLeads = name === 'Unassigned'
+        ? activeLeads.filter(l => !l.assignedTo || l.assignedTo.trim() === '' || l.assignedTo === 'Unassigned')
+        : activeLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase() || l.assignedTo === name);
       const total = agentLeads.length;
       const won = agentLeads.filter(l => l.stage === 'won').length;
       const progress = agentLeads.filter(l => ['negotiating', 'proposal'].includes(l.stage)).length;
@@ -527,15 +540,18 @@ export default function CampaignAnalytics({
     })).sort((a, b) => b.count - a.count);
 
     // Leaderboard
-    const coordinatorsList = coordinators && coordinators.length > 0
+    const baseCoordinatorsList = coordinators && coordinators.length > 0
       ? coordinators.filter(c => c.role === 'agent').map(c => c.displayName)
       : [
           'Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 
           'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'
         ];
+    const coordinatorsList = [...baseCoordinatorsList, 'Unassigned'];
 
     const agentLeaderboard = coordinatorsList.map(name => {
-      const agentLeads = customLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase());
+      const agentLeads = name === 'Unassigned'
+        ? customLeads.filter(l => !l.assignedTo || l.assignedTo.trim() === '' || l.assignedTo === 'Unassigned')
+        : customLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase() || l.assignedTo === name);
       const total = agentLeads.length;
       const won = agentLeads.filter(l => l.stage === 'won').length;
       const progress = agentLeads.filter(l => ['negotiating', 'proposal'].includes(l.stage)).length;
@@ -804,6 +820,7 @@ export default function CampaignAnalytics({
               className="bg-transparent text-xs text-slate-200 font-black outline-none border-0 p-0 cursor-pointer focus:ring-0 uppercase font-display max-w-[200px]"
             >
               <option value="All" className="bg-slate-950 text-slate-200">All Coordinators</option>
+              <option value="Unassigned" className="bg-slate-950 text-slate-200">Unassigned Only</option>
               {coordinators.filter(c => c.role === 'agent').map(c => (
                 <option key={c.id} value={c.displayName} className="bg-slate-950 text-slate-200">{c.displayName}</option>
               ))}
@@ -1533,6 +1550,7 @@ export default function CampaignAnalytics({
               className="bg-transparent text-xs text-slate-200 font-extrabold outline-none border-0 p-0 cursor-pointer focus:ring-0 uppercase font-display"
             >
               <option value="All" className="bg-slate-950 text-slate-200">All Coordinators</option>
+              <option value="Unassigned" className="bg-slate-950 text-slate-200">Unassigned Only</option>
               {coordinators.filter(c => c.role === 'agent').map(c => (
                 <option key={c.id} value={c.displayName} className="bg-slate-950 text-slate-200">{c.displayName}</option>
               ))}
