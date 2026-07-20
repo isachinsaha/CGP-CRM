@@ -67,7 +67,8 @@ export default function App() {
     customStartDate: '',
     customEndDate: '',
     bucket: 'all',
-    gender: 'All'
+    gender: 'All',
+    remarksFilter: 'All'
   });
 
   // Environment metadata
@@ -261,7 +262,8 @@ export default function App() {
         agentId: currentAgentId,
         userRole: userRole,
         all: activeTab !== 'list' ? 'true' : 'false',
-        gender: filters.gender || 'All'
+        gender: filters.gender || 'All',
+        remarksFilter: filters.remarksFilter || 'All'
       });
 
       const leadsRes = await fetch(`/api/leads?${params.toString()}`);

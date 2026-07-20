@@ -169,7 +169,8 @@ app.get('/api/leads', async (req, res) => {
       agentId = '',
       userRole = '',
       all = 'false',
-      gender = 'All'
+      gender = 'All',
+      remarksFilter = 'All'
     } = req.query as Record<string, string>;
 
     const pageNum = parseInt(page, 10) || 1;
@@ -297,6 +298,31 @@ app.get('/api/leads', async (req, res) => {
           if (g !== 'M' && g !== 'MALE') return false;
         } else if (filterG === 'FEMALE' || filterG === 'F') {
           if (g !== 'F' && g !== 'FEMALE') return false;
+        }
+      }
+
+      // K. Remarks-wise filter
+      if (remarksFilter && remarksFilter !== 'All') {
+        const r1 = !!(lead.remarks1 && lead.remarks1.trim());
+        const r2 = !!(lead.remarks2 && lead.remarks2.trim());
+        const r3 = !!(lead.remarks3 && lead.remarks3.trim());
+
+        if (remarksFilter === 'remarks1') {
+          if (!r1) return false;
+        } else if (remarksFilter === 'remarks2') {
+          if (!r2) return false;
+        } else if (remarksFilter === 'remarks3') {
+          if (!r3) return false;
+        } else if (remarksFilter === 'remarks1Only') {
+          if (!r1 || r2 || r3) return false;
+        } else if (remarksFilter === 'remarks2Only') {
+          if (!r2 || r1 || r3) return false;
+        } else if (remarksFilter === 'remarks3Only') {
+          if (!r3 || r1 || r2) return false;
+        } else if (remarksFilter === 'noRemarks') {
+          if (r1 || r2 || r3) return false;
+        } else if (remarksFilter === 'allRemarks') {
+          if (!r1 || !r2 || !r3) return false;
         }
       }
 

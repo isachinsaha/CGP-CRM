@@ -57,6 +57,7 @@ export default function LeadList({
   const [tagFilter, setTagFilter] = useState('All');
   const [projectFilter, setProjectFilter] = useState('All');
   const [genderFilter, setGenderFilter] = useState('All');
+  const [remarksFilter, setRemarksFilter] = useState('All');
   const [dateFilter, setDateFilter] = useState('All'); // 'All', 'Today', 'Yesterday', 'Last7Days', 'Last30Days', 'Custom'
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -105,7 +106,7 @@ export default function LeadList({
   // Reset pagination to first page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, countryFilter, projectFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter]);
+  }, [searchQuery, countryFilter, projectFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter, remarksFilter]);
 
   // Synchronize filter updates back to parent if server-side filtering is enabled
   useEffect(() => {
@@ -121,10 +122,11 @@ export default function LeadList({
         customStartDate,
         customEndDate,
         bucket: bucketToggle,
-        gender: genderFilter
+        gender: genderFilter,
+        remarksFilter
       });
     }
-  }, [searchQuery, countryFilter, coordinatorFilter, fitScoreFilter, tagFilter, projectFilter, genderFilter, dateFilter, customStartDate, customEndDate, bucketToggle]);
+  }, [searchQuery, countryFilter, coordinatorFilter, fitScoreFilter, tagFilter, projectFilter, genderFilter, dateFilter, customStartDate, customEndDate, bucketToggle, remarksFilter]);
 
   // Synchronize page index back to parent
   useEffect(() => {
@@ -528,6 +530,44 @@ export default function LeadList({
     { value: 'Custom', label: '📅 Custom Range...' }
   ], []);
 
+  const remarksOptions = useMemo(() => {
+    let r1Count = 0;
+    let r2Count = 0;
+    let r3Count = 0;
+    let r1OnlyCount = 0;
+    let r2OnlyCount = 0;
+    let r3OnlyCount = 0;
+    let noneCount = 0;
+    let allCount = 0;
+
+    leads.forEach(lead => {
+      const h1 = !!(lead.remarks1 && lead.remarks1.trim());
+      const h2 = !!(lead.remarks2 && lead.remarks2.trim());
+      const h3 = !!(lead.remarks3 && lead.remarks3.trim());
+
+      if (h1) r1Count++;
+      if (h2) r2Count++;
+      if (h3) r3Count++;
+      if (h1 && !h2 && !h3) r1OnlyCount++;
+      if (h2 && !h1 && !h3) r2OnlyCount++;
+      if (h3 && !h1 && !h2) r3OnlyCount++;
+      if (!h1 && !h2 && !h3) noneCount++;
+      if (h1 && h2 && h3) allCount++;
+    });
+
+    return [
+      { value: 'All', label: `💬 Remarks: All (${leads.length})` },
+      { value: 'remarks1', label: `💬 Has 1st Remarks (${r1Count})` },
+      { value: 'remarks2', label: `💬 Has 2nd Remarks (${r2Count})` },
+      { value: 'remarks3', label: `💬 Has 3rd Remarks (${r3Count})` },
+      { value: 'remarks1Only', label: `💬 1st Remarks Only (${r1OnlyCount})` },
+      { value: 'remarks2Only', label: `💬 2nd Remarks Only (${r2OnlyCount})` },
+      { value: 'remarks3Only', label: `💬 3rd Remarks Only (${r3OnlyCount})` },
+      { value: 'noRemarks', label: `💬 No Remarks (${noneCount})` },
+      { value: 'allRemarks', label: `💬 Has All 3 Remarks (${allCount})` }
+    ];
+  }, [leads]);
+
   // Handle comprehensive search & multi-layer filters
   const filteredLeads = useMemo(() => {
     if (onFiltersChange) {
@@ -627,9 +667,35 @@ export default function LeadList({
         }
       }
 
-      return matchesSearch && matchesCountry && matchesProject && matchesFit && matchesTag && matchesDate && matchesCoordinator && matchesGender;
+      // 8.6 Remarks Filter
+      let matchesRemarks = true;
+      if (remarksFilter !== 'All') {
+        const r1 = !!(lead.remarks1 && lead.remarks1.trim());
+        const r2 = !!(lead.remarks2 && lead.remarks2.trim());
+        const r3 = !!(lead.remarks3 && lead.remarks3.trim());
+
+        if (remarksFilter === 'remarks1') {
+          matchesRemarks = r1;
+        } else if (remarksFilter === 'remarks2') {
+          matchesRemarks = r2;
+        } else if (remarksFilter === 'remarks3') {
+          matchesRemarks = r3;
+        } else if (remarksFilter === 'remarks1Only') {
+          matchesRemarks = r1 && !r2 && !r3;
+        } else if (remarksFilter === 'remarks2Only') {
+          matchesRemarks = r2 && !r1 && !r3;
+        } else if (remarksFilter === 'remarks3Only') {
+          matchesRemarks = r3 && !r1 && !r2;
+        } else if (remarksFilter === 'noRemarks') {
+          matchesRemarks = !r1 && !r2 && !r3;
+        } else if (remarksFilter === 'allRemarks') {
+          matchesRemarks = r1 && r2 && r3;
+        }
+      }
+
+      return matchesSearch && matchesCountry && matchesProject && matchesFit && matchesTag && matchesDate && matchesCoordinator && matchesGender && matchesRemarks;
     });
-  }, [leads, searchQuery, countryFilter, projectFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter, onFiltersChange]);
+  }, [leads, searchQuery, countryFilter, projectFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter, remarksFilter, onFiltersChange]);
 
   // Paginated leads for page-wise viewport listing
   const paginatedLeads = useMemo(() => {
@@ -811,6 +877,14 @@ export default function LeadList({
             onChange={setGenderFilter}
             options={genderOptions}
             className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
+          />
+
+          {/* Remarks wise Filter */}
+          <SearchableSelect
+            value={remarksFilter}
+            onChange={setRemarksFilter}
+            options={remarksOptions}
+            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer"
           />
 
           {/* Date Wise Filter */}

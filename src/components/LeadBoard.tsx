@@ -63,6 +63,9 @@ export default function LeadBoard({
   // Search input state for Pipeline
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Remarks filter state
+  const [remarksFilter, setRemarksFilter] = useState('All');
+
   // Memoized options list for searchable coordinator select
   const coordinatorOptions = React.useMemo(() => {
     const list = [
@@ -79,6 +82,44 @@ export default function LeadBoard({
     }
     return list;
   }, [coordinators]);
+
+  const remarksOptions = React.useMemo(() => {
+    let r1Count = 0;
+    let r2Count = 0;
+    let r3Count = 0;
+    let r1OnlyCount = 0;
+    let r2OnlyCount = 0;
+    let r3OnlyCount = 0;
+    let noneCount = 0;
+    let allCount = 0;
+
+    leads.forEach(lead => {
+      const h1 = !!(lead.remarks1 && lead.remarks1.trim());
+      const h2 = !!(lead.remarks2 && lead.remarks2.trim());
+      const h3 = !!(lead.remarks3 && lead.remarks3.trim());
+
+      if (h1) r1Count++;
+      if (h2) r2Count++;
+      if (h3) r3Count++;
+      if (h1 && !h2 && !h3) r1OnlyCount++;
+      if (h2 && !h1 && !h3) r2OnlyCount++;
+      if (h3 && !h1 && !h2) r3OnlyCount++;
+      if (!h1 && !h2 && !h3) noneCount++;
+      if (h1 && h2 && h3) allCount++;
+    });
+
+    return [
+      { value: 'All', label: `💬 Remarks: All (${leads.length})` },
+      { value: 'remarks1', label: `💬 Has 1st Remarks (${r1Count})` },
+      { value: 'remarks2', label: `💬 Has 2nd Remarks (${r2Count})` },
+      { value: 'remarks3', label: `💬 Has 3rd Remarks (${r3Count})` },
+      { value: 'remarks1Only', label: `💬 1st Remarks Only (${r1OnlyCount})` },
+      { value: 'remarks2Only', label: `💬 2nd Remarks Only (${r2OnlyCount})` },
+      { value: 'remarks3Only', label: `💬 3rd Remarks Only (${r3OnlyCount})` },
+      { value: 'noRemarks', label: `💬 No Remarks (${noneCount})` },
+      { value: 'allRemarks', label: `💬 Has All 3 Remarks (${allCount})` }
+    ];
+  }, [leads]);
 
   // Date filter state: 'all' | 'today' | 'yesterday' | 'date-wise'
   const [pipelineDateFilter, setPipelineDateFilter] = useState<'all' | 'today' | 'yesterday' | 'date-wise'>('all');
@@ -187,8 +228,36 @@ export default function LeadBoard({
       }
     }
 
+    // Remarks Wise Filter
+    if (remarksFilter && remarksFilter !== 'All') {
+      filtered = filtered.filter(lead => {
+        const r1 = !!(lead.remarks1 && lead.remarks1.trim());
+        const r2 = !!(lead.remarks2 && lead.remarks2.trim());
+        const r3 = !!(lead.remarks3 && lead.remarks3.trim());
+
+        if (remarksFilter === 'remarks1') {
+          return r1;
+        } else if (remarksFilter === 'remarks2') {
+          return r2;
+        } else if (remarksFilter === 'remarks3') {
+          return r3;
+        } else if (remarksFilter === 'remarks1Only') {
+          return r1 && !r2 && !r3;
+        } else if (remarksFilter === 'remarks2Only') {
+          return r2 && !r1 && !r3;
+        } else if (remarksFilter === 'remarks3Only') {
+          return r3 && !r1 && !r2;
+        } else if (remarksFilter === 'noRemarks') {
+          return !r1 && !r2 && !r3;
+        } else if (remarksFilter === 'allRemarks') {
+          return r1 && r2 && r3;
+        }
+        return true;
+      });
+    }
+
     return filtered;
-  }, [leads, searchQuery, userRole, currentAgentId, coordinatorFilter, pipelineDateFilter, filterStartDate, filterEndDate]);
+  }, [leads, searchQuery, userRole, currentAgentId, coordinatorFilter, pipelineDateFilter, filterStartDate, filterEndDate, remarksFilter]);
 
   // Lead Card Render Helper to avoid duplicate JSX
   const renderLeadCard = (lead: Lead) => {
@@ -411,6 +480,14 @@ export default function LeadBoard({
                 className="text-xs px-2.5 py-1.5 rounded-xl border border-slate-750 bg-slate-900 text-accent-purple font-black focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase shadow-inner shrink-0"
               />
             )}
+
+            {/* Remarks wise Filter */}
+            <SearchableSelect
+              value={remarksFilter}
+              onChange={setRemarksFilter}
+              options={remarksOptions}
+              className="text-xs px-2.5 py-1.5 rounded-xl border border-slate-750 bg-slate-900 text-slate-100 font-extrabold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer shadow-inner shrink-0"
+            />
 
             {/* 3. Time filters: All, Today, Yesterday, Date */}
             <div className="flex items-center gap-1 bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
