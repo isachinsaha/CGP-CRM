@@ -428,6 +428,7 @@ export default function CampaignAnalytics({
       return updatedDate >= oneWeekAgo && (l.remarks1 || l.remarks2 || l.remarks3);
     }).map(l => ({
       id: l.id,
+      lead: l,
       name: l.name,
       assignedTo: l.assignedTo,
       country: l.country,
@@ -520,6 +521,7 @@ export default function CampaignAnalytics({
        return isWithinRange(l.updatedAt) && (l.remarks1 || l.remarks2 || l.remarks3);
     }).map(l => ({
       id: l.id,
+      lead: l,
       name: l.name,
       assignedTo: l.assignedTo,
       country: l.country,
@@ -1181,23 +1183,37 @@ export default function CampaignAnalytics({
                 </div>
                 {weeklyStats.remarksWeekly.length > 0 ? (
                   <div className="space-y-3 max-h-[290px] overflow-y-auto pr-1">
-                    {weeklyStats.remarksWeekly.map((item, idx) => (
-                      <div key={idx} className="bg-slate-900 p-3 rounded-xl border border-slate-800/80 shadow-md flex justify-between items-start gap-4 animate-fade-in">
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-100 text-xs">{item.name}</span>
-                            <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded font-mono font-medium text-slate-350 uppercase border border-slate-750">
-                              ✈️ {item.country}
-                            </span>
+                    {weeklyStats.remarksWeekly.map((item, idx) => {
+                      const targetLead = item.lead || leads.find(l => l.id === item.id);
+                      return (
+                        <div 
+                          key={idx} 
+                          onClick={() => {
+                            if (targetLead && onSelectLead) {
+                              onSelectLead(targetLead);
+                            }
+                          }}
+                          className="bg-slate-900 p-3 rounded-xl border border-slate-800/80 shadow-md flex justify-between items-start gap-4 hover:border-emerald-500/50 hover:bg-slate-850/80 cursor-pointer transition-all group animate-fade-in"
+                        >
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-100 text-xs group-hover:text-emerald-400 group-hover:underline flex items-center gap-1 transition-colors">
+                                {item.name}
+                                <ExternalLink className="w-3 h-3 text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </span>
+                              <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded font-mono font-medium text-slate-350 uppercase border border-slate-750">
+                                ✈️ {item.country}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-300 italic">"{item.remarks}"</p>
+                            <div className="text-[10px] text-slate-450">
+                              Caller: <span className="font-bold text-accent-emerald">{item.assignedTo}</span>
+                            </div>
                           </div>
-                          <p className="text-xs text-slate-300 italic">"{item.remarks}"</p>
-                          <div className="text-[10px] text-slate-450">
-                            Caller: <span className="font-bold text-accent-emerald">{item.assignedTo}</span>
-                          </div>
+                          <span className="text-[10px] text-slate-450 font-mono shrink-0">{item.time}</span>
                         </div>
-                        <span className="text-[10px] text-slate-450 font-mono shrink-0">{item.time}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-1.5">
@@ -1304,8 +1320,16 @@ export default function CampaignAnalytics({
                               <span className="inline-flex items-center gap-1 bg-slate-800 text-slate-300 font-extrabold text-[9px] px-2 py-0.5 rounded-full uppercase tracking-wider border border-slate-750">
                                 📢 {agent.assignedToday.length} Assigned
                               </span>
-                              <div className="text-[11px] text-slate-200 font-bold leading-tight">
-                                {agent.assignedToday.map((lead: Lead) => formatCandidateName(lead.name)).join(', ')}
+                              <div className="text-[11px] text-slate-200 font-bold leading-tight flex flex-wrap gap-1">
+                                {agent.assignedToday.map((lead: Lead, lIdx: number) => (
+                                  <span
+                                    key={lead.id || lIdx}
+                                    onClick={() => onSelectLead?.(lead)}
+                                    className="hover:text-emerald-400 hover:underline cursor-pointer transition-colors"
+                                  >
+                                    {formatCandidateName(lead.name)}{lIdx < agent.assignedToday.length - 1 ? ',' : ''}
+                                  </span>
+                                ))}
                               </div>
                             </div>
                           ) : (
@@ -1412,26 +1436,40 @@ export default function CampaignAnalytics({
               </h4>
               {customStats.remarksInPeriod.length > 0 ? (
                 <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
-                  {customStats.remarksInPeriod.slice(0, 15).map((item, idx) => (
-                    <div key={idx} className="bg-slate-900 p-3 rounded-xl border border-slate-800/80 shadow-md flex justify-between items-start gap-4">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-100 text-xs">{item.name}</span>
-                          <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded font-mono font-medium text-slate-350 uppercase border border-slate-750">
-                            ✈️ {item.country || 'QATAR'}
-                          </span>
+                  {customStats.remarksInPeriod.slice(0, 15).map((item, idx) => {
+                    const targetLead = item.lead || leads.find(l => l.id === item.id);
+                    return (
+                      <div 
+                        key={idx} 
+                        onClick={() => {
+                          if (targetLead && onSelectLead) {
+                            onSelectLead(targetLead);
+                          }
+                        }}
+                        className="bg-slate-900 p-3 rounded-xl border border-slate-800/80 shadow-md flex justify-between items-start gap-4 hover:border-emerald-500/50 hover:bg-slate-850/80 cursor-pointer transition-all group"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-100 text-xs group-hover:text-emerald-400 group-hover:underline flex items-center gap-1 transition-colors">
+                              {item.name}
+                              <ExternalLink className="w-3 h-3 text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </span>
+                            <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded font-mono font-medium text-slate-350 uppercase border border-slate-750">
+                              ✈️ {item.country || 'QATAR'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-300 italic">"{item.remarks}"</p>
+                          <div className="text-[10px] text-slate-450">
+                            Caller: <span className="font-bold text-accent-emerald">{item.assignedTo || 'Unassigned'}</span>
+                          </div>
                         </div>
-                        <p className="text-xs text-slate-300 italic">"{item.remarks}"</p>
-                        <div className="text-[10px] text-slate-450">
-                          Caller: <span className="font-bold text-accent-emerald">{item.assignedTo || 'Unassigned'}</span>
+                        <div className="text-right shrink-0">
+                          <span className="text-[9px] text-slate-400 block font-mono font-bold">{item.date}</span>
+                          <span className="text-[9px] text-slate-500 block font-mono">{item.time}</span>
                         </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <span className="text-[9px] text-slate-400 block font-mono font-bold">{item.date}</span>
-                        <span className="text-[9px] text-slate-500 block font-mono">{item.time}</span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {customStats.remarksInPeriod.length > 15 && (
                     <div className="text-center text-[10px] text-slate-450 pt-1">
                       ...and {customStats.remarksInPeriod.length - 15} more remarks logged in this range.
@@ -1504,8 +1542,16 @@ export default function CampaignAnalytics({
                               <span className="inline-flex items-center gap-1 bg-slate-800 text-slate-300 font-extrabold text-[9px] px-2 py-0.5 rounded-full uppercase tracking-wider border border-slate-750">
                                 📢 {agent.assignedInPeriod.length} Assigned
                               </span>
-                              <div className="text-[11px] text-slate-200 font-bold leading-tight line-clamp-2">
-                                {agent.assignedInPeriod.map((lead: Lead) => formatCandidateName(lead.name)).join(', ')}
+                              <div className="text-[11px] text-slate-200 font-bold leading-tight line-clamp-2 flex flex-wrap gap-1">
+                                {agent.assignedInPeriod.map((lead: Lead, lIdx: number) => (
+                                  <span
+                                    key={lead.id || lIdx}
+                                    onClick={() => onSelectLead?.(lead)}
+                                    className="hover:text-emerald-400 hover:underline cursor-pointer transition-colors"
+                                  >
+                                    {formatCandidateName(lead.name)}{lIdx < agent.assignedInPeriod.length - 1 ? ',' : ''}
+                                  </span>
+                                ))}
                               </div>
                             </div>
                           ) : (
