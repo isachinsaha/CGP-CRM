@@ -161,6 +161,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
   const [title, setTitle] = useState('');
   const [country, setCountry] = useState('Kuwait');
   const [customCountry, setCustomCountry] = useState('');
+  const [salaryRange, setSalaryRange] = useState('');
   const [requirement, setRequirement] = useState('');
   const [processingFeeMale, setProcessingFeeMale] = useState('');
   const [processingFeeFemale, setProcessingFeeFemale] = useState('');
@@ -266,6 +267,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     setTitle('');
     setCountry(safeCountries[0] || 'Kuwait');
     setCustomCountry('');
+    setSalaryRange('');
     setRequirement('');
     setProcessingFeeMale('');
     setProcessingFeeFemale('');
@@ -302,6 +304,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
       setCustomCountry(jobCountry);
     }
 
+    setSalaryRange(job.salaryRange || '');
     setRequirement(job.requirement || '');
     setProcessingFeeMale(job.processingFeeMale || '');
     setProcessingFeeFemale(job.processingFeeFemale || '');
@@ -334,6 +337,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     const payload = {
       title: title.trim(),
       country: selectedCountry,
+      salaryRange: (salaryRange || '').trim(),
       requirement: (requirement || '').trim(),
       processingFeeMale: (processingFeeMale || '').trim(),
       processingFeeFemale: (processingFeeFemale || '').trim(),
@@ -801,6 +805,11 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                         <h3 className="text-base font-black text-slate-100 tracking-tight leading-snug">
                           {job.title}
                         </h3>
+                        {job.salaryRange && (
+                          <div className="text-sm sm:text-base font-black text-emerald-700 tracking-wide mt-1.5">
+                            Salary Range: <span className="font-extrabold text-emerald-800">{job.salaryRange}</span>
+                          </div>
+                        )}
                       </div>
                       
                       {/* Actions & Status Switch */}
@@ -1345,7 +1354,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                   />
                 </div>
 
-                {/* Country dropdown selection */}
+                {/* Country dropdown selection & Salary Range */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Target Country</label>
@@ -1361,8 +1370,19 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                     </select>
                   </div>
 
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Salary Range</label>
+                    <input
+                      type="text"
+                      value={salaryRange}
+                      onChange={(e) => setSalaryRange(e.target.value)}
+                      placeholder="e.g. 1400 - 2000 AED or $800 - $1200 / month"
+                      className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
+                    />
+                  </div>
+
                   {country === 'Custom' && (
-                    <div>
+                    <div className="sm:col-span-2">
                       <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Custom Country Name</label>
                       <input
                         type="text"

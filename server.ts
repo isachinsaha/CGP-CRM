@@ -1269,7 +1269,7 @@ app.get('/api/jobs', async (req, res) => {
 // POST add a new job
 app.post('/api/jobs', async (req, res) => {
   try {
-    const { title, country, requirement, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
+    const { title, country, salaryRange, requirement, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
     if (!title) {
       res.status(400).json({ error: 'Job title is required.' });
       return;
@@ -1280,6 +1280,7 @@ app.post('/api/jobs', async (req, res) => {
       id: `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       title: String(title).trim(),
       country: country ? String(country).trim() : 'Kuwait',
+      salaryRange: salaryRange ? String(salaryRange).trim() : '',
       requirement: requirement ? String(requirement).trim() : 'General Requirement',
       processingFeeMale: processingFeeMale ? String(processingFeeMale).trim() : 'No fee listed',
       processingFeeFemale: processingFeeFemale ? String(processingFeeFemale).trim() : 'No fee listed',
@@ -1306,7 +1307,7 @@ app.post('/api/jobs', async (req, res) => {
 app.put('/api/jobs/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, country, requirement, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
+    const { title, country, salaryRange, requirement, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
 
     const jobs = await getJobs();
     const idx = jobs.findIndex(j => j.id === id);
@@ -1319,6 +1320,7 @@ app.put('/api/jobs/:id', async (req, res) => {
       ...jobs[idx],
       title: title !== undefined ? String(title).trim() : (jobs[idx].title || ''),
       country: country !== undefined ? String(country).trim() : (jobs[idx].country || 'Kuwait'),
+      salaryRange: salaryRange !== undefined ? String(salaryRange).trim() : (jobs[idx].salaryRange || ''),
       requirement: requirement !== undefined ? String(requirement).trim() : (jobs[idx].requirement || 'General Requirement'),
       processingFeeMale: processingFeeMale !== undefined ? String(processingFeeMale).trim() : (jobs[idx].processingFeeMale || 'No fee listed'),
       processingFeeFemale: processingFeeFemale !== undefined ? String(processingFeeFemale).trim() : (jobs[idx].processingFeeFemale || 'No fee listed'),

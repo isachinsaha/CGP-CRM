@@ -1326,6 +1326,7 @@ export default function LeadList({
               {paginatedLeads.length > 0 ? (
                 paginatedLeads.map((lead) => {
                   const isSavingThis = savingId === lead.id;
+
                   return (
                     <motion.tr
                       key={lead.id}
@@ -1383,6 +1384,7 @@ export default function LeadList({
                             </button>
                           </div>
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">{lead.phone}</div>
+
                           <div className="text-[10px] text-slate-400 font-semibold mt-0.5">
                             {(() => {
                               const g = String(lead.gender || '').toUpperCase().trim();

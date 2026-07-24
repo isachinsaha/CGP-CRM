@@ -96,6 +96,7 @@ export interface Job {
   id: string;
   title: string;
   country: string;
+  salaryRange?: string;
   requirement: string;
   processingFeeMale: string;
   processingFeeFemale: string;

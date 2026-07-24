@@ -3,7 +3,8 @@ import { StatSummary, Lead, Coordinator } from '../types.ts';
 import { 
   BarChart3, TrendingUp, Target, Percent, Sparkles, 
   UserCheck, Inbox, Calendar, Users, Award, ShieldAlert, Clock, MapPin, CheckCircle,
-  CheckSquare2, Square, AlertCircle, ListTodo, User, Bell, PieChart as PieIcon, AreaChart as AreaIcon
+  CheckSquare2, Square, AlertCircle, ListTodo, User, Bell, PieChart as PieIcon, AreaChart as AreaIcon,
+  ExternalLink
 } from 'lucide-react';
 import { formatCandidateName } from '../utils';
 import {
@@ -377,6 +378,7 @@ export default function CampaignAnalytics({
        return updatedDate === todayStr && (l.remarks1 || l.remarks2 || l.remarks3);
     }).map(l => ({
       id: l.id,
+      lead: l,
       name: l.name,
       assignedTo: l.assignedTo,
       country: l.country,
@@ -1098,23 +1100,37 @@ export default function CampaignAnalytics({
               </div>
               {dailyStats.remarksToday.length > 0 ? (
                 <div className="space-y-3 max-h-[290px] overflow-y-auto pr-1">
-                  {dailyStats.remarksToday.map((item, idx) => (
-                    <div key={idx} className="bg-slate-900 p-3 rounded-xl border border-slate-800/80 shadow-md flex justify-between items-start gap-4">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-100 text-xs">{item.name}</span>
-                          <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded font-mono font-medium text-slate-350 uppercase border border-slate-750">
-                            ✈️ {item.country}
-                          </span>
+                  {dailyStats.remarksToday.map((item, idx) => {
+                    const targetLead = item.lead || leads.find(l => l.id === item.id);
+                    return (
+                      <div 
+                        key={idx} 
+                        onClick={() => {
+                          if (targetLead && onSelectLead) {
+                            onSelectLead(targetLead);
+                          }
+                        }}
+                        className="bg-slate-900 p-3 rounded-xl border border-slate-800/80 shadow-md flex justify-between items-start gap-4 hover:border-emerald-500/50 hover:bg-slate-850/80 cursor-pointer transition-all group"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-100 text-xs group-hover:text-emerald-400 group-hover:underline flex items-center gap-1 transition-colors">
+                              {item.name}
+                              <ExternalLink className="w-3 h-3 text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </span>
+                            <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded font-mono font-medium text-slate-350 uppercase border border-slate-750">
+                              ✈️ {item.country}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-300 italic">"{item.remarks}"</p>
+                          <div className="text-[10px] text-slate-450">
+                            Caller: <span className="font-bold text-accent-emerald">{item.assignedTo}</span>
+                          </div>
                         </div>
-                        <p className="text-xs text-slate-300 italic">"{item.remarks}"</p>
-                        <div className="text-[10px] text-slate-450">
-                          Caller: <span className="font-bold text-accent-emerald">{item.assignedTo}</span>
-                        </div>
+                        <span className="text-[10px] text-slate-450 font-mono shrink-0">{item.time}</span>
                       </div>
-                      <span className="text-[10px] text-slate-450 font-mono shrink-0">{item.time}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-1.5">
