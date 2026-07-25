@@ -187,20 +187,15 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     try {
       const res = await fetch('/api/jobs');
       if (!res.ok) throw new Error('Failed to load active jobs.');
-           const data = await res.json();
+      const data = await res.json();
       const safeData = Array.isArray(data) ? data.filter(j => j && typeof j === 'object') : [];
       setJobs(safeData);
       
       if (safeData.length > 0) {
-        const uniqueFromData = Array.from(
-          new Set(safeData.map((j: Job) => ((j.country || 'Other').trim())))
-        ).sort() as string[];
-        if (uniqueFromData.length > 0) {
-          if (focusCountry && uniqueFromData.includes(focusCountry)) {
-            setSelectedCountry(focusCountry);
-          } else {
-            setSelectedCountry((prev) => prev && uniqueFromData.includes(prev) ? prev : uniqueFromData[0]);
-          }
+        if (focusCountry) {
+          setSelectedCountry(focusCountry);
+        } else {
+          setSelectedCountry('ALL');
         }
       } else {
         setSelectedCountry(null);
@@ -512,6 +507,11 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
 
   const uniqueCountriesWithJobs = Object.keys(groupedJobs).sort();
 
+  const allJobsList = React.useMemo(() => {
+    if (!Array.isArray(jobs)) return [];
+    return jobs.filter(job => job && (currentUser?.role === 'admin' || job.isActive !== false));
+  }, [jobs, currentUser]);
+
   return (
     <div id="active-jobs-container" className="space-y-8 animate-fade-in pb-16">
       
@@ -684,7 +684,43 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
           </div>
 
           {/* Country Cards Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3.5">
+            {/* ALL COUNTRIES CARD */}
+            <button
+              type="button"
+              onClick={() => setSelectedCountry('ALL')}
+              className={`group p-2.5 px-3.5 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-21 relative overflow-hidden ${
+                selectedCountry === 'ALL'
+                  ? 'bg-accent-purple border-accent-purple text-white shadow-lg shadow-accent-purple/20 scale-[1.02]'
+                  : 'bg-slate-850 border-slate-750 hover:border-slate-600 text-slate-200 hover:bg-slate-800/50 shadow-3xs'
+              }`}
+            >
+              <span className="absolute -right-2 -bottom-3 text-5xl opacity-[0.08] select-none pointer-events-none transition-transform duration-300 group-hover:scale-115 group-hover:-rotate-3">
+                🌐
+              </span>
+
+              <div className="relative z-10 flex items-start justify-between w-full">
+                <div className={`text-sm font-bold flex items-center justify-center w-7 h-7 rounded-lg overflow-hidden border ${selectedCountry === 'ALL' ? 'bg-white/20 border-white/30' : 'bg-slate-800 border-slate-700'}`}>
+                  <span className="text-xs">🌐</span>
+                </div>
+                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md font-mono ${
+                  selectedCountry === 'ALL'
+                    ? 'bg-white/25 text-white border border-white/30'
+                    : 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/30'
+                }`}>
+                  {allJobsList.length} {allJobsList.length === 1 ? 'Job' : 'Jobs'}
+                </span>
+              </div>
+              <div className="relative z-10">
+                <h3 className="font-black text-xs tracking-wide uppercase leading-none truncate">
+                  ALL COUNTRIES
+                </h3>
+                <p className={`text-[8px] font-bold mt-1.5 ${selectedCountry === 'ALL' ? 'text-purple-100' : 'text-slate-500'}`}>
+                  {selectedCountry === 'ALL' ? '● Selected' : 'Show All Jobs'}
+                </p>
+              </div>
+            </button>
+
             {uniqueCountriesWithJobs.map((countryName) => {
               const countryJobs = groupedJobs[countryName] || [];
               const isSelected = selectedCountry === countryName;
@@ -749,33 +785,62 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
             })}
           </div>
 
-          {/* Jobs display area for the selected country */}
-          {selectedCountry && groupedJobs[selectedCountry] && (
-            <div className="bg-slate-950/40 border border-slate-750/80 rounded-3xl p-6 shadow-3xs text-left space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-750/60 pb-4 gap-3">
-                <div>
-                  <h3 className="text-lg font-black text-slate-100 uppercase tracking-wide flex items-center gap-2">
-                    {getCountryFlagUrl(selectedCountry) ? (
-                      <img 
-                        src={getCountryFlagUrl(selectedCountry)} 
-                        alt="" 
-                        className="w-6 h-4.5 object-cover rounded-sm inline-block shadow-sm transform hover:scale-110 transition-transform"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <span className="text-xl">🌐</span>
-                    )} {selectedCountry} Active Vacancies</h3>
-                  <p className="text-xs text-slate-500 font-bold">
-                    Showing {groupedJobs[selectedCountry].length} official career opportunities listed for {selectedCountry}
-                  </p>
-                </div>
-                <span className="self-start sm:self-center text-[10px] uppercase font-black text-emerald-400 bg-emerald-950/40 border border-emerald-900/30 px-3 py-1.5 rounded-full font-mono">
-                  CGP Verified Demand
-                </span>
-              </div>
+          {/* Jobs display area */}
+          {selectedCountry && (() => {
+            const displayedJobs = selectedCountry === 'ALL'
+              ? allJobsList
+              : (groupedJobs[selectedCountry] || []);
 
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                {(groupedJobs[selectedCountry] || []).filter(Boolean).map((job) => (
+            if (displayedJobs.length === 0) return null;
+
+            return (
+              <div className="bg-slate-950/40 border border-slate-750/80 rounded-3xl p-6 shadow-3xs text-left space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-750/60 pb-4 gap-3">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-100 uppercase tracking-wide flex items-center gap-2">
+                      {selectedCountry === 'ALL' ? (
+                        <>
+                          <span className="text-xl">🌐</span> ALL ACTIVE INTERNATIONAL VACANCIES
+                        </>
+                      ) : (
+                        <>
+                          {getCountryFlagUrl(selectedCountry) ? (
+                            <img 
+                              src={getCountryFlagUrl(selectedCountry)} 
+                              alt="" 
+                              className="w-6 h-4.5 object-cover rounded-sm inline-block shadow-sm transform hover:scale-110 transition-transform"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span className="text-xl">🌐</span>
+                          )} {selectedCountry} Active Vacancies
+                        </>
+                      )}
+                    </h3>
+                    <p className="text-xs text-slate-500 font-bold">
+                      {selectedCountry === 'ALL'
+                        ? `Showing ${displayedJobs.length} official career opportunities listed across ${uniqueCountriesWithJobs.length} destinations`
+                        : `Showing ${displayedJobs.length} official career opportunities listed for ${selectedCountry}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {selectedCountry !== 'ALL' && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCountry('ALL')}
+                        className="text-[10px] uppercase font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 border border-slate-700 px-3 py-1.5 rounded-full transition cursor-pointer"
+                      >
+                        Show All ({allJobsList.length} Jobs)
+                      </button>
+                    )}
+                    <span className="self-start sm:self-center text-[10px] uppercase font-black text-emerald-400 bg-emerald-950/40 border border-emerald-900/30 px-3 py-1.5 rounded-full font-mono">
+                      CGP Verified Demand
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  {displayedJobs.filter(Boolean).map((job) => (
                   <div 
                     key={job.id}
                     id={`job-card-${job.id}`}
@@ -965,8 +1030,9 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                 ))}
               </div>
             </div>
-          )}
-        </div>
+          );
+        })()}
+      </div>
       )}
       </>
     )}

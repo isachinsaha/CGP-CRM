@@ -96,6 +96,14 @@ async function verifyDatabaseAccess() {
     console.log(`[Firestore Client] Configured database "${currentDbId}" verified and fully active.`);
   } catch (err: any) {
     const errMsg = err?.message || String(err);
+    const isQuota = errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota') || errMsg.includes('quota') || errMsg.includes('limit exceeded');
+    
+    if (isQuota) {
+      handleCloudError('Database Verification', err);
+      dbVerified = true;
+      return;
+    }
+
     console.warn(`[Firestore Client] Verification of configured database "${currentDbId}" failed:`, errMsg);
     
     // If database does not exist or we get NOT_FOUND / INVALID, fallback to default database
@@ -131,7 +139,7 @@ function checkCloudStatus(): boolean {
   // Trigger verification asynchronously
   if (!dbVerified && !dbVerifying) {
     verifyDatabaseAccess().catch(err => {
-      console.error('[Firestore Client] Error in verifyDatabaseAccess:', err);
+      handleCloudError('verifyDatabaseAccess', err);
     });
   }
 
@@ -150,25 +158,37 @@ function checkCloudStatus(): boolean {
   return true;
 }
 
-function handleCloudError(err: any) {
-  const errMsg = err?.message || String(err);
+function handleCloudError(context: string | any, err?: any) {
+  let contextStr = 'Cloud operation';
+  let errorObj = err;
+  if (typeof context === 'string') {
+    contextStr = context;
+  } else {
+    errorObj = context;
+  }
+
+  const errMsg = errorObj?.message || String(errorObj);
   const isQuota = errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota') || errMsg.includes('quota') || errMsg.includes('limit exceeded');
   const isTimeout = errMsg.includes('timed out') || errMsg.includes('timeout');
   
   if (isQuota) {
+    if (!quotaLimitExceeded) {
+      console.warn(`[Firestore Client] Daily quota limit reached (${contextStr}). Operating seamlessly in local JSON storage mode.`);
+    }
     quotaLimitExceeded = true;
     cloudSyncEnabled = false;
     lastCloudErrorTime = Date.now();
-    cloudBreakerCooldownMs = 60 * 60 * 1000; // 1 hour cooldown for Quota errors since they take long to reset
-    console.error(`[Firestore Client] Quota limit exceeded! Disabling cloud sync for 1 hour: ${errMsg}`);
+    cloudBreakerCooldownMs = 60 * 60 * 1000; // 1 hour cooldown for Quota errors
   } else if (isTimeout) {
     cloudErrorCount++;
     if (cloudErrorCount >= 3) {
-      console.error(`[Firestore Client] Circuit breaker tripped due to timeouts! Temporarily disabling cloud sync for 5 minutes: ${errMsg}`);
+      console.warn(`[Firestore Client] Circuit breaker tripped due to timeouts (${contextStr}). Temporarily disabling cloud sync for 5 minutes.`);
       cloudSyncEnabled = false;
       lastCloudErrorTime = Date.now();
       cloudBreakerCooldownMs = 5 * 60 * 1000;
     }
+  } else {
+    console.warn(`[Firestore Client] Cloud error during ${contextStr}: ${errMsg}`);
   }
 }
 
@@ -220,7 +240,7 @@ interface CacheEntry<T> {
   timestamp: number;
 }
 
-const CACHE_TTL_MS = 15000; // 15 seconds Cache TTL. Perfect to debounce multiple parallel queries or quick navigations!
+const CACHE_TTL_MS = 300000; // 5 minutes Cache TTL (300s). Dramatically reduces Firestore read quota usage!
 
 const dbCache = {
   leads: null as CacheEntry<Lead[]> | null,
@@ -850,7 +870,7 @@ async function getLeadsInternal(): Promise<Lead[]> {
   if (checkCloudStatus()) {
     try {
       const nowTime = Date.now();
-      const doFullSync = (nowTime - lastFullLeadsSyncTime) > 5 * 60 * 1000 || lastSyncedLeads.length === 0;
+      const doFullSync = (nowTime - lastFullLeadsSyncTime) > 60 * 60 * 1000 || lastSyncedLeads.length === 0;
       let cloudLeads: Lead[] = [];
 
       if (doFullSync) {
@@ -1187,6 +1207,49 @@ export async function getStats(): Promise<StatSummary> {
 export async function initializeJobsDatabase() {
   const defaultJobs: Job[] = [
     {
+      id: 'job_malta_online_game_presenter',
+      title: 'ONLINE GAME PRESENTER',
+      country: 'Malta',
+      salaryRange: '1000 euros upto',
+      requirement: 'SMART FEMALE CANDIDATE (SALARY - 1000 EURO)',
+      processingFeeMale: 'NA',
+      processingFeeFemale: 'TBA',
+      accommodation: 'NOT PROVIDED',
+      ageLimit: '21 TO 33',
+      conditions: [
+        'Premedical',
+        'Freshers can apply',
+        'An original passport is mandatory'
+      ],
+      modeOfInterview: 'Face to Face',
+      applicability: 'Only Female Candidates can Apply',
+      otherTerms: 'Medical insurance and flight Tickets is borne by the candidates',
+      isActive: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'job_malta_hospitality',
+      title: 'HOSPITALITY',
+      country: 'Malta',
+      salaryRange: '1000 to 1400 euro',
+      requirement: 'WAITER/WAITRESS/COMII/HOUSEKEEPING',
+      processingFeeMale: 'TBA',
+      processingFeeFemale: 'TBA',
+      accommodation: 'NA',
+      ageLimit: '21 TO 35',
+      conditions: [
+        'MALTESE SKILL TEST IS REQUIRED',
+        'RELEVENT EXPERIENCE IS MANDATORY',
+        'Original Passport is mandatory',
+        '12 PASS IS MANDATORY'
+      ],
+      modeOfInterview: 'Online',
+      applicability: 'Both Male & Female Candidates can Apply',
+      otherTerms: 'MEDICAL INSURANCE AND FLIGHT TICKETS IS NOT INCLUDED IN THE SERVICE CHARGE',
+      isActive: true,
+      createdAt: new Date().toISOString()
+    },
+    {
       id: 'job_nesto_hypermarket',
       title: 'NESTO HYPERMARKET',
       country: 'Dubai',
@@ -1206,17 +1269,18 @@ export async function initializeJobsDatabase() {
       modeOfInterview: 'Online',
       applicability: 'Both Male & Female Candidates can Apply',
       otherTerms: 'Freshers can Apply. Includes International Flight Tickets.',
+      isActive: true,
       createdAt: new Date().toISOString()
     },
     {
       id: 'job_guest_relations_dubai',
-      title: 'GUEST RELATIONSHIP EXECUTIVE(DUBAI) (Highend Fine Dine)',
+      title: 'GUEST RELATIONSHIP EXECUTIVE(DUBAI)',
       country: 'Dubai',
       salaryRange: '2000 - 2700 AED',
       requirement: 'Guest Relations (2000 - 2700 AED)',
       processingFeeMale: '75k',
       processingFeeFemale: '75k',
-      accommodation: 'Free Meal & Transportation + Air ticket every 2 years, Accomodation Free for the 1st month',
+      accommodation: 'Free Meal & Transportation + Air ticket every 2 years, Accomodation Free for 1st month',
       ageLimit: 'Max 32',
       conditions: [
         'Pre Medical',
@@ -1227,6 +1291,195 @@ export async function initializeJobsDatabase() {
       modeOfInterview: 'Online',
       applicability: 'Only Female Candidates can Apply',
       otherTerms: 'Company Name (Highend Fine Dine). Includes International Flight Tickets.',
+      isActive: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'job_kuwait_restaurant_crew',
+      title: 'RESTAURANT & RETAIL CREW',
+      country: 'Kuwait',
+      salaryRange: '150 - 180 KWD',
+      requirement: 'Counter Sales & Kitchen Staff',
+      processingFeeMale: '85k',
+      processingFeeFemale: '60k',
+      accommodation: 'Free Accommodation, Duty Meals & Transport Provided',
+      ageLimit: '21 TO 32',
+      conditions: [
+        'Pre Medical Required',
+        'Good English Communication',
+        'Original Passport Required',
+        '10th / 12th Pass'
+      ],
+      modeOfInterview: 'Online',
+      applicability: 'Both Male & Female Candidates can Apply',
+      otherTerms: '2 Years renewable contract, flight tickets included.',
+      isActive: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'job_kuwait_drivers',
+      title: 'LOGISTICS & HEAVY DRIVER',
+      country: 'Kuwait',
+      salaryRange: '180 - 240 KWD',
+      requirement: 'GCC License Drivers',
+      processingFeeMale: '90k',
+      processingFeeFemale: 'NA',
+      accommodation: 'Company Accommodation Provided',
+      ageLimit: '24 TO 42',
+      conditions: [
+        'Valid GCC License Mandatory',
+        'Clean Driving Record',
+        'PCC Required'
+      ],
+      modeOfInterview: 'Face to Face',
+      applicability: 'Only Male Candidates can Apply',
+      otherTerms: 'Overtime available extra as per company policy.',
+      isActive: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'job_qatar_hotel_facility',
+      title: 'LUXURY HOTEL & FACILITY STAFF',
+      country: 'Qatar',
+      salaryRange: '1600 - 2200 QAR',
+      requirement: 'Front Desk & Housekeeping',
+      processingFeeMale: '80k',
+      processingFeeFemale: '70k',
+      accommodation: 'Free Food, Accommodation & Transport',
+      ageLimit: '20 TO 33',
+      conditions: [
+        'Hotel Management Diploma or Hospitality experience preferred',
+        'Valid Passport'
+      ],
+      modeOfInterview: 'Online',
+      applicability: 'Both Male & Female Candidates can Apply',
+      otherTerms: 'Joining ticket provided by company.',
+      isActive: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'job_singapore_warehouse',
+      title: 'WAREHOUSE & LOGISTICS ASSOCIATE',
+      country: 'Singapore',
+      salaryRange: '1800 - 2400 SGD',
+      requirement: 'Cargo Handler & Picker Packer',
+      processingFeeMale: '110k',
+      processingFeeFemale: '95k',
+      accommodation: 'Housing allowance SGD 300 provided',
+      ageLimit: '21 TO 35',
+      conditions: [
+        'Physical Fitness Required',
+        'Basic Computer Literacy',
+        '12th Pass'
+      ],
+      modeOfInterview: 'Online',
+      applicability: 'Both Male & Female Candidates can Apply',
+      otherTerms: 'S-Pass / Work Permit processing as per MOM Singapore.',
+      isActive: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'job_albania_factory',
+      title: 'FACTORY & MANUFACTURING OPERATOR',
+      country: 'Albania',
+      salaryRange: '450 - 600 Euros',
+      requirement: 'General Factory Worker',
+      processingFeeMale: '85k',
+      processingFeeFemale: '85k',
+      accommodation: 'Free Sharing Accommodation & Food',
+      ageLimit: '20 TO 40',
+      conditions: [
+        'No High Qualification Required',
+        'European Work Permit Route',
+        'Medical Fitness mandatory'
+      ],
+      modeOfInterview: 'Online',
+      applicability: 'Both Male & Female Candidates can Apply',
+      otherTerms: 'Pathway to TRP card in Albania (Europe).',
+      isActive: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'job_japan_ssw_caregiver',
+      title: 'TITLED SKILLED WORKER (CARE WORKER / FOOD)',
+      country: 'Japan',
+      salaryRange: '180,000 - 230,000 JPY',
+      requirement: 'Specified Skilled Worker (SSW-1)',
+      processingFeeMale: '120k',
+      processingFeeFemale: '120k',
+      accommodation: 'Subsidized Apartment Provided',
+      ageLimit: '20 TO 35',
+      conditions: [
+        'JLPT N4 or JFT-Basic Japanese Language Certificate',
+        'Skill Pass Certificate',
+        'Passport valid 2+ yrs'
+      ],
+      modeOfInterview: 'Online',
+      applicability: 'Both Male & Female Candidates can Apply',
+      otherTerms: '5 Years Japanese Residency & Work Visa.',
+      isActive: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'job_israel_caregiver',
+      title: 'CERTIFIED CAREGIVER & ASSISTANT',
+      country: 'Israel',
+      salaryRange: '5300 - 6500 ILS',
+      requirement: 'Elderly & Home Caregiver',
+      processingFeeMale: '130k',
+      processingFeeFemale: '130k',
+      accommodation: 'Free Lodging & Food with Host Family / Facility',
+      ageLimit: '23 TO 42',
+      conditions: [
+        'Nurse / Caregiver Certificate',
+        'Good English Communication',
+        'Clean Criminal Record (PCC)'
+      ],
+      modeOfInterview: 'Online',
+      applicability: 'Both Male & Female Candidates can Apply',
+      otherTerms: 'High salary earning destination with long-term visa options.',
+      isActive: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'job_germany_healthcare',
+      title: 'HEALTHCARE & NURSING ASSISTANT',
+      country: 'Germany',
+      salaryRange: '2200 - 2800 Euros',
+      requirement: 'Hospital & Elderly Care Staff',
+      processingFeeMale: '140k',
+      processingFeeFemale: '140k',
+      accommodation: 'Subsidized Hostel / Flat provided',
+      ageLimit: '22 TO 38',
+      conditions: [
+        'B1 / B2 German Language Certificate',
+        'B.Sc / GNM Nursing Degree or Diploma'
+      ],
+      modeOfInterview: 'Online',
+      applicability: 'Both Male & Female Candidates can Apply',
+      otherTerms: 'EU Blue Card / Fast-track Work Permit in Germany.',
+      isActive: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'job_dubai_security',
+      title: 'SECURITY GUARD (DPS / SIRA)',
+      country: 'Dubai',
+      salaryRange: '2200 - 2500 AED',
+      requirement: 'Certified Security Personnel',
+      processingFeeMale: '90k',
+      processingFeeFemale: '85k',
+      accommodation: 'Company Accommodation & Transportation',
+      ageLimit: '21 TO 35',
+      conditions: [
+        'Min Height 5ft 8in for Male',
+        'Good English',
+        'Clean Medical'
+      ],
+      modeOfInterview: 'Face to Face',
+      applicability: 'Both Male & Female Candidates can Apply',
+      otherTerms: 'SIRA license training provided by company upon arrival.',
+      isActive: true,
       createdAt: new Date().toISOString()
     }
   ];

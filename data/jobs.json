@@ -1,0 +1,278 @@
+[
+  {
+    "id": "job_malta_online_game_presenter",
+    "title": "ONLINE GAME PRESENTER",
+    "country": "Malta",
+    "salaryRange": "1000 euros upto",
+    "requirement": "SMART FEMALE CANDIDATE (SALARY - 1000 EURO)",
+    "processingFeeMale": "NA",
+    "processingFeeFemale": "TBA",
+    "accommodation": "NOT PROVIDED",
+    "ageLimit": "21 TO 33",
+    "conditions": [
+      "Premedical",
+      "Freshers can apply",
+      "An original passport is mandatory"
+    ],
+    "modeOfInterview": "Face to Face",
+    "applicability": "Only Female Candidates can Apply",
+    "otherTerms": "Medical insurance and flight Tickets is borne by the candidates",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_malta_hospitality",
+    "title": "HOSPITALITY",
+    "country": "Malta",
+    "salaryRange": "1000 to 1400 euro",
+    "requirement": "WAITER/WAITRESS/COMII/HOUSEKEEPING",
+    "processingFeeMale": "TBA",
+    "processingFeeFemale": "TBA",
+    "accommodation": "NA",
+    "ageLimit": "21 TO 35",
+    "conditions": [
+      "MALTESE SKILL TEST IS REQUIRED",
+      "RELEVENT EXPERIENCE IS MANDATORY",
+      "Original Passport is mandatory",
+      "12 PASS IS MANDATORY"
+    ],
+    "modeOfInterview": "Online",
+    "applicability": "Both Male & Female Candidates can Apply",
+    "otherTerms": "MEDICAL INSURANCE AND FLIGHT TICKETS IS NOT INCLUDED IN THE SERVICE CHARGE",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_nesto_hypermarket",
+    "title": "NESTO HYPERMARKET",
+    "country": "Dubai",
+    "salaryRange": "1400 AED",
+    "requirement": "Sales (1400 AED)",
+    "processingFeeMale": "95k",
+    "processingFeeFemale": "65k",
+    "accommodation": "Free Accommodation & Transportation + Air ticket every 2 years",
+    "ageLimit": "Max 32",
+    "conditions": [
+      "Pre Medical",
+      "No Stamping Required",
+      "Need to send Introduction Video",
+      "Original Passport is mandatory",
+      "Qualification 10th above"
+    ],
+    "modeOfInterview": "Online",
+    "applicability": "Both Male & Female Candidates can Apply",
+    "otherTerms": "Freshers can Apply. Includes International Flight Tickets.",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_guest_relations_dubai",
+    "title": "GUEST RELATIONSHIP EXECUTIVE(DUBAI)",
+    "country": "Dubai",
+    "salaryRange": "2000 - 2700 AED",
+    "requirement": "Guest Relations (2000 - 2700 AED)",
+    "processingFeeMale": "75k",
+    "processingFeeFemale": "75k",
+    "accommodation": "Free Meal & Transportation + Air ticket every 2 years, Accomodation Free for 1st month",
+    "ageLimit": "Max 32",
+    "conditions": [
+      "Pre Medical",
+      "No Stamping Required",
+      "Min 1 - 2 yrs experience in Restaurant or Hotel Reception",
+      "Original Passport is mandatory"
+    ],
+    "modeOfInterview": "Online",
+    "applicability": "Only Female Candidates can Apply",
+    "otherTerms": "Company Name (Highend Fine Dine). Includes International Flight Tickets.",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_kuwait_restaurant_crew",
+    "title": "RESTAURANT & RETAIL CREW",
+    "country": "Kuwait",
+    "salaryRange": "150 - 180 KWD",
+    "requirement": "Counter Sales & Kitchen Staff",
+    "processingFeeMale": "85k",
+    "processingFeeFemale": "60k",
+    "accommodation": "Free Accommodation, Duty Meals & Transport Provided",
+    "ageLimit": "21 TO 32",
+    "conditions": [
+      "Pre Medical Required",
+      "Good English Communication",
+      "Original Passport Required",
+      "10th / 12th Pass"
+    ],
+    "modeOfInterview": "Online",
+    "applicability": "Both Male & Female Candidates can Apply",
+    "otherTerms": "2 Years renewable contract, flight tickets included.",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_kuwait_drivers",
+    "title": "LOGISTICS & HEAVY DRIVER",
+    "country": "Kuwait",
+    "salaryRange": "180 - 240 KWD",
+    "requirement": "GCC License Drivers",
+    "processingFeeMale": "90k",
+    "processingFeeFemale": "NA",
+    "accommodation": "Company Accommodation Provided",
+    "ageLimit": "24 TO 42",
+    "conditions": [
+      "Valid GCC License Mandatory",
+      "Clean Driving Record",
+      "PCC Required"
+    ],
+    "modeOfInterview": "Face to Face",
+    "applicability": "Only Male Candidates can Apply",
+    "otherTerms": "Overtime available extra as per company policy.",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_qatar_hotel_facility",
+    "title": "LUXURY HOTEL & FACILITY STAFF",
+    "country": "Qatar",
+    "salaryRange": "1600 - 2200 QAR",
+    "requirement": "Front Desk & Housekeeping",
+    "processingFeeMale": "80k",
+    "processingFeeFemale": "70k",
+    "accommodation": "Free Food, Accommodation & Transport",
+    "ageLimit": "20 TO 33",
+    "conditions": [
+      "Hotel Management Diploma or Hospitality experience preferred",
+      "Valid Passport"
+    ],
+    "modeOfInterview": "Online",
+    "applicability": "Both Male & Female Candidates can Apply",
+    "otherTerms": "Joining ticket provided by company.",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_singapore_warehouse",
+    "title": "WAREHOUSE & LOGISTICS ASSOCIATE",
+    "country": "Singapore",
+    "salaryRange": "1800 - 2400 SGD",
+    "requirement": "Cargo Handler & Picker Packer",
+    "processingFeeMale": "110k",
+    "processingFeeFemale": "95k",
+    "accommodation": "Housing allowance SGD 300 provided",
+    "ageLimit": "21 TO 35",
+    "conditions": [
+      "Physical Fitness Required",
+      "Basic Computer Literacy",
+      "12th Pass"
+    ],
+    "modeOfInterview": "Online",
+    "applicability": "Both Male & Female Candidates can Apply",
+    "otherTerms": "S-Pass / Work Permit processing as per MOM Singapore.",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_albania_factory",
+    "title": "FACTORY & MANUFACTURING OPERATOR",
+    "country": "Albania",
+    "salaryRange": "450 - 600 Euros",
+    "requirement": "General Factory Worker",
+    "processingFeeMale": "85k",
+    "processingFeeFemale": "85k",
+    "accommodation": "Free Sharing Accommodation & Food",
+    "ageLimit": "20 TO 40",
+    "conditions": [
+      "No High Qualification Required",
+      "European Work Permit Route",
+      "Medical Fitness mandatory"
+    ],
+    "modeOfInterview": "Online",
+    "applicability": "Both Male & Female Candidates can Apply",
+    "otherTerms": "Pathway to TRP card in Albania (Europe).",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_japan_ssw_caregiver",
+    "title": "TITLED SKILLED WORKER (CARE WORKER / FOOD)",
+    "country": "Japan",
+    "salaryRange": "180,000 - 230,000 JPY",
+    "requirement": "Specified Skilled Worker (SSW-1)",
+    "processingFeeMale": "120k",
+    "processingFeeFemale": "120k",
+    "accommodation": "Subsidized Apartment Provided",
+    "ageLimit": "20 TO 35",
+    "conditions": [
+      "JLPT N4 or JFT-Basic Japanese Language Certificate",
+      "Skill Pass Certificate",
+      "Passport valid 2+ yrs"
+    ],
+    "modeOfInterview": "Online",
+    "applicability": "Both Male & Female Candidates can Apply",
+    "otherTerms": "5 Years Japanese Residency & Work Visa.",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_israel_caregiver",
+    "title": "CERTIFIED CAREGIVER & ASSISTANT",
+    "country": "Israel",
+    "salaryRange": "5300 - 6500 ILS",
+    "requirement": "Elderly & Home Caregiver",
+    "processingFeeMale": "130k",
+    "processingFeeFemale": "130k",
+    "accommodation": "Free Lodging & Food with Host Family / Facility",
+    "ageLimit": "23 TO 42",
+    "conditions": [
+      "Nurse / Caregiver Certificate",
+      "Good English Communication",
+      "Clean Criminal Record (PCC)"
+    ],
+    "modeOfInterview": "Online",
+    "applicability": "Both Male & Female Candidates can Apply",
+    "otherTerms": "High salary earning destination with long-term visa options.",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_germany_healthcare",
+    "title": "HEALTHCARE & NURSING ASSISTANT",
+    "country": "Germany",
+    "salaryRange": "2200 - 2800 Euros",
+    "requirement": "Hospital & Elderly Care Staff",
+    "processingFeeMale": "140k",
+    "processingFeeFemale": "140k",
+    "accommodation": "Subsidized Hostel / Flat provided",
+    "ageLimit": "22 TO 38",
+    "conditions": [
+      "B1 / B2 German Language Certificate",
+      "B.Sc / GNM Nursing Degree or Diploma"
+    ],
+    "modeOfInterview": "Online",
+    "applicability": "Both Male & Female Candidates can Apply",
+    "otherTerms": "EU Blue Card / Fast-track Work Permit in Germany.",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  },
+  {
+    "id": "job_dubai_security",
+    "title": "SECURITY GUARD (DPS / SIRA)",
+    "country": "Dubai",
+    "salaryRange": "2200 - 2500 AED",
+    "requirement": "Certified Security Personnel",
+    "processingFeeMale": "90k",
+    "processingFeeFemale": "85k",
+    "accommodation": "Company Accommodation & Transportation",
+    "ageLimit": "21 TO 35",
+    "conditions": [
+      "Min Height 5ft 8in for Male",
+      "Good English",
+      "Clean Medical"
+    ],
+    "modeOfInterview": "Face to Face",
+    "applicability": "Both Male & Female Candidates can Apply",
+    "otherTerms": "SIRA license training provided by company upon arrival.",
+    "isActive": true,
+    "createdAt": "2026-07-25T05:00:00.000Z"
+  }
+]
