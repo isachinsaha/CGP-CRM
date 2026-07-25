@@ -3,10 +3,10 @@ import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
 import { 
   X, Info, Sparkles, CheckCircle2, RefreshCw, AlertTriangle, 
   Calendar, Clipboard, Check, Star, ListTodo, History, 
-  Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Bell, Plus, PhoneCall
+  Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Bell, Plus, PhoneCall, Search, Copy
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { getCountryFlagUrl, formatCandidateName } from '../utils';
+import { getCountryFlagUrl, formatCandidateName, isDefaultExperience, extractExperienceFromRemarks, getEffectiveExperience } from '../utils';
 import { SearchableSelect } from './SearchableSelect.tsx';
 
 interface LeadModalProps {
@@ -39,6 +39,39 @@ export default function LeadModal({
   const [lead, setLead] = useState<Lead>(initialLead);
   const [activeLeftTab, setActiveLeftTab] = useState<'ai' | 'profile'>('ai');
   const [activeRightTab, setActiveRightTab] = useState<'tasks' | 'timeline'>('tasks');
+  
+  // Activity Timeline filters & search
+  const [timelineFilter, setTimelineFilter] = useState<'all' | 'status' | 'remark' | 'assignment' | 'task'>('all');
+  const [timelineSearch, setTimelineSearch] = useState('');
+  const [copiedLogId, setCopiedLogId] = useState<string | null>(null);
+
+  // Computed timeline items filtered by category and search query
+  const timelineCounts = useMemo(() => {
+    const list = lead.timeline || [];
+    return {
+      total: list.length,
+      status: list.filter(e => e.type === 'status').length,
+      remark: list.filter(e => e.type === 'remark').length,
+      assignment: list.filter(e => e.type === 'assignment').length,
+      task: list.filter(e => e.type === 'task').length,
+    };
+  }, [lead.timeline]);
+
+  const filteredTimeline = useMemo(() => {
+    if (!lead.timeline || !Array.isArray(lead.timeline)) return [];
+    let list = lead.timeline.slice().reverse();
+    if (timelineFilter !== 'all') {
+      list = list.filter(e => e.type === timelineFilter);
+    }
+    if (timelineSearch.trim()) {
+      const q = timelineSearch.trim().toLowerCase();
+      list = list.filter(e => 
+        (e.text && e.text.toLowerCase().includes(q)) ||
+        (e.actor && e.actor.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [lead.timeline, timelineFilter, timelineSearch]);
   
   // Custom Task builder inputs
   const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -122,6 +155,7 @@ export default function LeadModal({
     country: initialLead.country || '',
     position: initialLead.position || '',
     experience: initialLead.experience || '',
+    qualification: initialLead.qualification || '',
     adminRemarks: initialLead.adminRemarks || '',
     assignedTo: initialLead.assignedTo || '',
     importance: initialLead.importance !== undefined ? Number(initialLead.importance) : 3,
@@ -167,6 +201,7 @@ export default function LeadModal({
       country: initialLead.country || '',
       position: initialLead.position || '',
       experience: initialLead.experience || '',
+      qualification: initialLead.qualification || '',
       adminRemarks: initialLead.adminRemarks || '',
       assignedTo: initialLead.assignedTo || '',
       importance: initialLead.importance !== undefined ? Number(initialLead.importance) : 3,
@@ -184,6 +219,38 @@ export default function LeadModal({
     });
     isFirstMountOrChangeRef.current = true;
   }, [initialLead.id]);
+
+  // Dynamically synthesize extracted skills from lead position, experience, qualification, requirements, and tags
+  const extractedSkills = useMemo(() => {
+    const list: string[] = [];
+    const seen = new Set<string>();
+
+    const add = (val?: string) => {
+      if (!val) return;
+      const cleaned = val.trim();
+      if (!cleaned) return;
+      const lower = cleaned.toLowerCase();
+      if (lower === 'whatsapp inbound' || lower === 'general openings' || lower === 'fresh criteria' || lower === 'not defined' || lower === 'fresher' || lower === 'none') return;
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        list.push(cleaned);
+      }
+    };
+
+    if (lead.position) add(lead.position);
+    if (lead.experience) add(lead.experience);
+    if (lead.qualification) add(lead.qualification);
+
+    if (Array.isArray(lead.requirements)) {
+      lead.requirements.forEach(r => add(r));
+    }
+
+    if (Array.isArray(lead.tags)) {
+      lead.tags.forEach(t => add(t));
+    }
+
+    return list;
+  }, [lead.position, lead.experience, lead.qualification, lead.requirements, lead.tags]);
 
   // Background auto-save has been disabled to prevent continuous re-rendering and the modal re-opening bug.
   // Changes are now explicitly committed using the Save buttons.
@@ -203,6 +270,17 @@ export default function LeadModal({
         value.trim() !== ''
       ) {
         updated.stage = 'negotiating';
+      }
+
+      // Automatically extract experience from remarks if experience is not explicitly filled
+      if (
+        ['remarks1', 'remarks2', 'remarks3', 'adminRemarks'].includes(name) &&
+        isDefaultExperience(prev.experience)
+      ) {
+        const autoExtracted = extractExperienceFromRemarks(value);
+        if (autoExtracted) {
+          updated.experience = autoExtracted;
+        }
       }
       
       return updated;
@@ -228,6 +306,16 @@ export default function LeadModal({
     try {
       const actorRole = userRole;
       const actorId = currentAgentId;
+
+      // Compute effective experience if default or blank
+      let finalExp = formFields.experience;
+      if (isDefaultExperience(finalExp)) {
+        const autoExp = getEffectiveExperience(formFields);
+        if (!isDefaultExperience(autoExp)) {
+          finalExp = autoExp;
+        }
+      }
+
       const res = await fetch(`/api/leads/${lead.id}`, {
         method: 'PUT',
         headers: { 
@@ -237,6 +325,7 @@ export default function LeadModal({
         },
         body: JSON.stringify({
           ...formFields,
+          experience: finalExp,
           age: Number(formFields.age) || 0,
           importance: Number(formFields.importance) || 3,
           tags
@@ -655,16 +744,12 @@ export default function LeadModal({
                       </button>
                     </div>
 
-                    <div className="space-y-2.5 text-xs">
-                      <div>
-                        <span className="text-slate-400 font-semibold block">Inbound Intent Summary:</span>
-                        <p className="text-slate-300 leading-relaxed font-semibold mt-0.5">{lead.summary}</p>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-2 text-xs">
+                      {/* Extracted Target Details */}
+                      <div className="grid grid-cols-2 gap-2 bg-slate-900/60 p-2 rounded-lg border border-slate-700/80">
                         <div>
-                          <span className="text-slate-400 font-semibold block">Extracted Target Country:</span>
-                          <span className="text-slate-100 font-bold flex items-center gap-1.5 mt-0.5">
+                          <span className="text-slate-400 font-semibold block text-[11px]">Extracted Target Country:</span>
+                          <span className="text-slate-100 font-bold flex items-center gap-1.5 mt-0.5 text-xs">
                             {lead.country && getCountryFlagUrl(lead.country) ? (
                               <img 
                                 src={getCountryFlagUrl(lead.country)} 
@@ -679,25 +764,54 @@ export default function LeadModal({
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-400 font-semibold block">Placement Target Position:</span>
-                          <span className="text-slate-100 font-extrabold block mt-0.5">
+                          <span className="text-slate-400 font-semibold block text-[11px]">Placement Target Position:</span>
+                          <span className="text-slate-100 font-semibold block mt-0.5 text-xs">
                             💼 {lead.position || 'General Openings'}
                           </span>
                         </div>
                       </div>
 
-                      <div>
-                        <span className="text-slate-400 font-semibold block">Skills Extracted:</span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {lead.requirements && lead.requirements.length > 0 ? (
-                            lead.requirements.map((req, idx) => (
-                              <span key={idx} className="bg-emerald-950/40 text-emerald-400 border border-emerald-900/20 text-[9px] px-2 py-0.5 rounded font-bold uppercase">
-                                {req}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-slate-400 italic text-[10px]">None extracted</span>
-                          )}
+                      {/* CANDIDATE KEY DETAILS LIST-WISE CONTAINER */}
+                      <div className="pt-1.5 border-t border-emerald-900/30 space-y-1.5">
+                        <span className="text-[10.5px] font-bold text-emerald-400 uppercase tracking-wider block">
+                          Candidate Key Profile Details:
+                        </span>
+                        <div className="bg-slate-900/90 rounded-xl border border-slate-700/80 divide-y divide-slate-700/80 overflow-hidden">
+                          <div className="flex items-center justify-between px-3 py-2 gap-3">
+                            <span className="text-slate-400 font-bold text-[11px] shrink-0 flex items-center gap-1.5">
+                              <span>⏱️</span> Experience
+                            </span>
+                            <span className="text-slate-100 font-semibold text-xs text-right break-words">
+                              {getEffectiveExperience(lead)}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between px-3 py-2 gap-3">
+                            <span className="text-slate-400 font-bold text-[11px] shrink-0 flex items-center gap-1.5">
+                              <span>🎓</span> Qualification
+                            </span>
+                            <span className="text-slate-100 font-semibold text-xs text-right break-words">
+                              {lead.qualification || 'Not Specified'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between px-3 py-2 gap-3">
+                            <span className="text-slate-400 font-bold text-[11px] shrink-0 flex items-center gap-1.5">
+                              <span>🎂</span> Age
+                            </span>
+                            <span className="text-slate-100 font-semibold text-xs text-right break-words">
+                              {lead.age ? `${lead.age} Yrs` : 'Not Specified'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between px-3 py-2 gap-3">
+                            <span className="text-slate-400 font-bold text-[11px] shrink-0 flex items-center gap-1.5">
+                              <span>📍</span> Origin / State
+                            </span>
+                            <span className="text-slate-100 font-semibold text-xs text-right break-words">
+                              {lead.origin || 'Not Specified'}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1154,6 +1268,18 @@ export default function LeadModal({
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
+                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Qualification</label>
+                      <input
+                        type="text"
+                        name="qualification"
+                        placeholder="e.g. 10th Pass, 12th, Graduate, ITI"
+                        value={formFields.qualification || ''}
+                        onChange={handleFieldChange}
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-semibold"
+                      />
+                    </div>
+
+                    <div>
                       <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Lead Source</label>
                       <SearchableSelect
                         value={formFields.source}
@@ -1407,7 +1533,7 @@ export default function LeadModal({
               <button
                 type="button"
                 onClick={() => setActiveRightTab('tasks')}
-                className={`flex-1 py-2.5 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-2 shadow-3xs ${
+                className={`flex-1 py-2.5 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-2 shadow-3xs cursor-pointer ${
                   activeRightTab === 'tasks'
                     ? 'bg-slate-850 text-slate-100 border border-slate-700'
                     : 'bg-transparent text-slate-400 hover:text-slate-100 font-bold'
@@ -1419,13 +1545,13 @@ export default function LeadModal({
               <button
                 type="button"
                 onClick={() => setActiveRightTab('timeline')}
-                className={`flex-1 py-2.5 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-2 shadow-3xs ${
+                className={`flex-1 py-2.5 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-2 shadow-3xs cursor-pointer ${
                   activeRightTab === 'timeline'
                     ? 'bg-slate-850 text-slate-100 border border-slate-700'
                     : 'bg-transparent text-slate-400 hover:text-slate-100 font-bold'
                 }`}
               >
-                <History className="h-3.5 w-3.5 text-blue-500" /> Audit Timeline
+                <History className="h-3.5 w-3.5 text-blue-500" /> Activity Timeline ({ timelineCounts.total })
               </button>
             </div>
 
@@ -1532,62 +1658,206 @@ export default function LeadModal({
                 </div>
               )}
 
-              {/* TAB 2: AUDIT TIMELINE (Audit log feed) */}
+              {/* TAB 2: ACTIVITY TIMELINE */}
               {activeRightTab === 'timeline' && (
                 <div className="space-y-4 animate-in fade-in duration-200">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-black text-slate-350 uppercase tracking-widest flex items-center gap-1.5">
-                      <History className="h-4.5 w-4.5 text-blue-500" /> Live Audit Log
-                    </h4>
-                    <span className="text-[9px] uppercase font-bold text-slate-400 font-mono bg-slate-900 border border-slate-750 rounded-sm px-2 py-0.5">
-                      Cloud Recorders
-                    </span>
+                  {/* Timeline Header & Count */}
+                  <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-750 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <History className="h-4.5 w-4.5 text-blue-400" />
+                        <h4 className="text-xs font-black text-slate-100 uppercase tracking-wider">
+                          Activity Timeline & Audit Trail
+                        </h4>
+                      </div>
+                      <span className="text-[10px] font-extrabold text-blue-400 font-mono bg-blue-950/60 border border-blue-800/40 px-2.5 py-0.5 rounded-full">
+                        {timelineCounts.total} Events Recorded
+                      </span>
+                    </div>
+
+                    {/* Filter Pills */}
+                    <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setTimelineFilter('all')}
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                          timelineFilter === 'all'
+                            ? 'bg-blue-600 text-white border-blue-500 shadow-xs'
+                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                        }`}
+                      >
+                        All ({timelineCounts.total})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTimelineFilter('status')}
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                          timelineFilter === 'status'
+                            ? 'bg-purple-600 text-white border-purple-500 shadow-xs'
+                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                        }`}
+                      >
+                        📈 Stage ({timelineCounts.status})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTimelineFilter('remark')}
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                          timelineFilter === 'remark'
+                            ? 'bg-amber-600 text-white border-amber-500 shadow-xs'
+                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                        }`}
+                      >
+                        📞 Remarks ({timelineCounts.remark})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTimelineFilter('assignment')}
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                          timelineFilter === 'assignment'
+                            ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
+                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                        }`}
+                      >
+                        👤 Coordinator ({timelineCounts.assignment})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTimelineFilter('task')}
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                          timelineFilter === 'task'
+                            ? 'bg-teal-600 text-white border-teal-500 shadow-xs'
+                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                        }`}
+                      >
+                        📝 Tasks ({timelineCounts.task})
+                      </button>
+                    </div>
+
+                    {/* Search Input Box */}
+                    <div className="relative mt-1">
+                      <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search timeline by coordinator or remark keywords..."
+                        value={timelineSearch}
+                        onChange={(e) => setTimelineSearch(e.target.value)}
+                        className="w-full text-xs pl-8 pr-7 py-1.5 rounded-lg bg-slate-950 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-100 placeholder-slate-500"
+                      />
+                      {timelineSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setTimelineSearch('')}
+                          className="absolute right-2 top-2 text-slate-400 hover:text-slate-200 text-xs font-bold"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  {lead.timeline && lead.timeline.length > 0 ? (
-                    <div className="relative pl-4 border-l border-slate-750 ml-2 space-y-5.5">
-                      {lead.timeline.slice().reverse().map((event) => (
-                        <div key={event.id} className="relative group text-left">
-                          
-                          {/* Anchor point style icon marker */}
-                          <div className={`absolute -left-6.5 top-0.5 h-5 w-5 rounded-full border-2 flex items-center justify-center text-[10px] ${
-                            event.type === 'status' 
-                              ? 'bg-purple-950/40 text-purple-400 border-purple-900/30'
-                              : event.type === 'assignment'
-                              ? 'bg-emerald-950/40 text-emerald-400 border-emerald-900/30'
-                              : event.type === 'remark'
-                              ? 'bg-amber-950/40 text-amber-400 border-amber-900/30'
-                              : event.type === 'task'
-                              ? 'bg-teal-950/40 text-teal-400 border-teal-900/30'
-                              : 'bg-slate-900 text-slate-400 border-slate-700'
-                          }`}>
-                            {event.type === 'status' && '📈'}
-                            {event.type === 'assignment' && '👤'}
-                            {event.type === 'remark' && '📞'}
-                            {event.type === 'task' && '📝'}
-                            {event.type === 'creation' && '✨'}
-                            {!['status', 'assignment', 'remark', 'task', 'creation'].includes(event.type) && '⚙️'}
-                          </div>
+                  {/* Activity List */}
+                  {filteredTimeline && filteredTimeline.length > 0 ? (
+                    <div className="relative pl-5 border-l-2 border-slate-750 ml-2 space-y-4">
+                      {filteredTimeline.map((event) => {
+                        const isStage = event.type === 'status';
+                        const isRemark = event.type === 'remark';
+                        const isAssign = event.type === 'assignment';
+                        const isTask = event.type === 'task';
+                        const isCreation = event.type === 'creation';
 
-                          <div className="bg-slate-900/20 p-3 rounded-xl border border-slate-750 text-xs shadow-3xs">
-                            <div className="flex justify-between items-center mb-1">
-                              <span className="font-bold text-slate-100 block uppercase tracking-wider text-[10px]">
-                                {event.actor}
-                              </span>
-                              <span className="text-[9px] text-slate-400 font-mono">
-                                {new Date(event.timestamp).toLocaleDateString()} {new Date(event.timestamp).toLocaleTimeString(undefined, {hour: '2-digit', minute:'2-digit'})}
-                              </span>
+                        const formattedDate = event.timestamp
+                          ? `${new Date(event.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} at ${new Date(event.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
+                          : 'Recent';
+
+                        return (
+                          <div key={event.id} className="relative group text-left">
+                            {/* Marker Icon */}
+                            <div className={`absolute -left-7 top-1 h-5 w-5 rounded-full border-2 flex items-center justify-center text-[10px] shadow-sm ${
+                              isStage ? 'bg-purple-950 border-purple-500 text-purple-300' :
+                              isRemark ? 'bg-amber-950 border-amber-500 text-amber-300' :
+                              isAssign ? 'bg-emerald-950 border-emerald-500 text-emerald-300' :
+                              isTask ? 'bg-teal-950 border-teal-500 text-teal-300' :
+                              isCreation ? 'bg-blue-950 border-blue-500 text-blue-300' :
+                              'bg-slate-900 border-slate-700 text-slate-300'
+                            }`}>
+                              {isStage && '📈'}
+                              {isRemark && '📞'}
+                              {isAssign && '👤'}
+                              {isTask && '📝'}
+                              {isCreation && '✨'}
+                              {!isStage && !isRemark && !isAssign && !isTask && !isCreation && '⚙️'}
                             </div>
-                            <p className="text-slate-300 leading-relaxed font-medium font-mono whitespace-pre-wrap">{event.text}</p>
+
+                            {/* Card Content */}
+                            <div className="bg-slate-900/60 hover:bg-slate-900/80 p-3.5 rounded-xl border border-slate-750 hover:border-slate-700 transition-all text-xs shadow-3xs space-y-2">
+                              {/* Header Meta */}
+                              <div className="flex flex-wrap items-center justify-between gap-1.5 pb-1 border-b border-slate-800">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {/* Event Type Pill */}
+                                  <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded tracking-wider border ${
+                                    isStage ? 'bg-purple-950/80 text-purple-300 border-purple-800/60' :
+                                    isRemark ? 'bg-amber-950/80 text-amber-300 border-amber-800/60' :
+                                    isAssign ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60' :
+                                    isTask ? 'bg-teal-950/80 text-teal-300 border-teal-800/60' :
+                                    isCreation ? 'bg-blue-950/80 text-blue-300 border-blue-800/60' :
+                                    'bg-slate-800 text-slate-300 border-slate-700'
+                                  }`}>
+                                    {isStage && 'Stage Change'}
+                                    {isRemark && 'Call Remark'}
+                                    {isAssign && 'Coordinator Reassigned'}
+                                    {isTask && 'Action Item'}
+                                    {isCreation && 'Inbound Lead'}
+                                    {!isStage && !isRemark && !isAssign && !isTask && !isCreation && 'System Log'}
+                                  </span>
+
+                                  {/* Coordinator / Actor Pill */}
+                                  <span className="text-[10px] font-extrabold text-slate-100 bg-slate-800 border border-slate-700 px-2 py-0.5 rounded flex items-center gap-1">
+                                    <span className="text-slate-400">By:</span> {event.actor || 'System'}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[9.5px] text-slate-400 font-mono">
+                                    {formattedDate}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(`${event.actor}: ${event.text} (${formattedDate})`);
+                                      setCopiedLogId(event.id);
+                                      setTimeout(() => setCopiedLogId(null), 2000);
+                                    }}
+                                    className="text-slate-500 hover:text-slate-300 p-1 hover:bg-slate-800 rounded transition-colors"
+                                    title="Copy log entry"
+                                  >
+                                    {copiedLogId === event.id ? (
+                                      <Check className="h-3 w-3 text-emerald-400" />
+                                    ) : (
+                                      <Copy className="h-3 w-3" />
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Text Body */}
+                              <p className="text-slate-200 leading-relaxed font-semibold font-sans whitespace-pre-wrap text-xs pt-0.5">
+                                {event.text}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="text-center py-12 bg-slate-900/20 rounded-xl border border-slate-750 text-slate-400 space-y-1.5">
                       <History className="h-8 w-8 text-slate-500 mx-auto opacity-40" />
-                      <p className="text-xs font-semibold text-slate-400">Audit pipeline is empty.</p>
-                      <p className="text-[10px] text-slate-400">Timelines automatically log on Remarks commit, Stage transitions, or Task updates.</p>
+                      <p className="text-xs font-semibold text-slate-300">No activity events found.</p>
+                      <p className="text-[10px] text-slate-400">
+                        {timelineSearch || timelineFilter !== 'all' 
+                          ? 'Try clearing your search or category filters.'
+                          : 'Stage transitions, call remarks, and coordinator updates automatically log here in real-time.'}
+                      </p>
                     </div>
                   )}
                 </div>

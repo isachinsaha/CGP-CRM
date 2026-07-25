@@ -87,11 +87,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('cgp_crm_theme', theme);
     const root = document.documentElement;
+    root.classList.add('dark');
     if (theme === 'light') {
       root.classList.add('light');
-      root.classList.remove('dark');
     } else {
-      root.classList.add('dark');
       root.classList.remove('light');
     }
   }, [theme]);
@@ -220,6 +219,7 @@ export default function App() {
     country: '',
     position: 'Waiter',
     experience: '',
+    qualification: '',
     assignedTo: '',
     importance: '3',
     source: 'Ads',
@@ -405,6 +405,7 @@ export default function App() {
           country: '',
           position: 'Waiter',
           experience: '',
+          qualification: '',
           assignedTo: '',
           importance: '3',
           source: 'Ads',
@@ -988,9 +989,9 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Previous Experience criteria</label>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Previous Experience</label>
                   <input
                     type="text"
                     placeholder="e.g. 5 yrs Gulf Exp"
@@ -1000,11 +1001,21 @@ export default function App() {
                   />
                 </div>
                 <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Qualification</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 10th, 12th, Graduate, ITI"
+                    value={createFields.qualification}
+                    onChange={(e) => setCreateFields({...createFields, qualification: e.target.value})}
+                    className="w-full text-xs px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-100 focus:ring-1 focus:ring-emerald-500 focus:outline-none font-semibold placeholder-slate-500"
+                  />
+                </div>
+                <div>
                   <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Star Importance</label>
                   <select
                     value={createFields.importance}
                     onChange={(e) => setCreateFields({...createFields, importance: e.target.value})}
-                    className="w-full text-xs px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-slate-100 focus:ring-1 focus:ring-emerald-500 focus:outline-none font-semibold"
+                    className="w-full text-xs px-3 py-2 rounded-lg border border-slate-800 bg-slate-950 text-slate-100 focus:ring-1 focus:ring-emerald-500 focus:outline-none font-semibold"
                   >
                     <option value="1">⭐ Star Low (1)</option>
                     <option value="2">⭐⭐ Star Fair (2)</option>

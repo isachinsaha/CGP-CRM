@@ -163,13 +163,14 @@ export default function LeadList({
     const country = getValue(['country', 'destination', 'targetcountry', 'countryinterest']) || 'Kuwait';
     const position = getValue(['position', 'job', 'positionopening', 'jobposition']) || 'General openings';
     const experience = getValue(['experience', 'workexperience']) || 'Fresh criteria';
+    const qualification = getValue(['qualification', 'qualifications', 'education', 'degree']) || '';
     const assignedTo = getValue(['coordinator', 'assignedto', 'coordinatorassigned']) || '';
     const importance = Number(getValue(['importance', 'rating'])) || 3;
     const tags = getValue(['tags', 'skills', 'categories']);
     const source = getValue(['source', 'campaignsource']) || 'Bulk Import';
     const project = getValue(['project', 'hiringproject']) || 'General';
 
-    return { name, phone, gender, age, origin, country, position, experience, assignedTo, importance, tags, source, project };
+    return { name, phone, gender, age, origin, country, position, experience, qualification, assignedTo, importance, tags, source, project };
   };
 
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -340,19 +341,19 @@ export default function LeadList({
   const renderMarkdown = (text: string) => {
     return text.split('\n').map((line, idx) => {
       let content = line;
-      let className = "text-slate-700 text-xs my-1 leading-relaxed";
+      let className = "text-slate-200 text-xs my-1 leading-relaxed font-sans";
 
       if (content.startsWith('### ')) {
         content = content.replace('### ', '');
-        className = "text-sm font-black text-slate-800 mt-4 mb-2 uppercase tracking-wide flex items-center gap-1.5";
-        return <h4 key={idx} className={className}><TrendingUp className="h-4 w-4 text-indigo-500 shrink-0" /> {content}</h4>;
+        className = "text-sm font-black text-slate-100 mt-4 mb-2 uppercase tracking-wide flex items-center gap-1.5";
+        return <h4 key={idx} className={className}><TrendingUp className="h-4 w-4 text-indigo-400 shrink-0" /> {content}</h4>;
       } else if (content.startsWith('## ')) {
         content = content.replace('## ', '');
-        className = "text-base font-black text-slate-800 mt-5 mb-2.5 uppercase tracking-wide border-b pb-1 border-slate-100";
+        className = "text-base font-black text-slate-100 mt-5 mb-2.5 uppercase tracking-wide border-b pb-1 border-slate-700";
         return <h3 key={idx} className={className}>{content}</h3>;
       } else if (content.startsWith('# ')) {
         content = content.replace('# ', '');
-        className = "text-lg font-black text-slate-800 mt-6 mb-3 uppercase tracking-wider";
+        className = "text-lg font-black text-slate-100 mt-6 mb-3 uppercase tracking-wider";
         return <h2 key={idx} className={className}>{content}</h2>;
       }
 
@@ -1061,6 +1062,7 @@ export default function LeadList({
                           'Country': 'Germany',
                           'Position': 'Nurse',
                           'Experience': '3 years GNM',
+                          'Qualification': 'B.Sc Nursing',
                           'Coordinator': 'Joyce',
                           'Tags': 'B1 German, GNM'
                         },
@@ -1072,6 +1074,7 @@ export default function LeadList({
                           'Country': 'Qatar',
                           'Position': 'Waiter',
                           'Experience': '1 year in hotel',
+                          'Qualification': '12th Pass',
                           'Coordinator': 'Sarina',
                           'Tags': 'Fluent English'
                         }
@@ -1311,6 +1314,7 @@ export default function LeadList({
                   />
                 </th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider w-20 text-center whitespace-nowrap">Serial No</th>
+                <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[110px] text-center whitespace-nowrap">Entry Date</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[170px]">Applicant Candidate</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider min-w-[110px]">Pipeline Stage</th>
                 <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">Country</th>
@@ -1360,6 +1364,13 @@ export default function LeadList({
                       <td className="px-4 py-3 text-center whitespace-nowrap">
                         <span className="font-mono font-black text-[11px] text-slate-300 bg-slate-800 px-2.5 py-1.5 rounded-md border border-slate-750 shadow-3xs inline-block whitespace-nowrap min-w-[85px]">
                           {lead.serialNo || '—'}
+                        </span>
+                      </td>
+
+                      {/* Entry Date */}
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
+                        <span className="font-mono font-bold text-[11px] text-slate-300 bg-slate-900/90 px-2.5 py-1.5 rounded-md border border-slate-750 shadow-3xs inline-block whitespace-nowrap">
+                          📅 {lead.entryDate ? lead.entryDate : (lead.createdAt ? lead.createdAt.split('T')[0] : '—')}
                         </span>
                       </td>
 

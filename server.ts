@@ -10,6 +10,7 @@ dotenv.config();
 // Load local database helper
 import { getLeads, addLead, saveLeads, getStats, getLeadById, getCoordinators, saveCoordinators, initializeCoordinatorsDatabase, getJobs, saveJobs, getUpdates, saveUpdates, getMetadata, saveMetadata, getWallets, saveWallets, getWalletByUsername, addWalletTransaction, getIncentiveRules, saveIncentiveRules } from './src/server/db.ts';
 import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule } from './src/types.ts';
+import { isDefaultExperience, getEffectiveExperience } from './src/utils.ts';
 
 const app = express();
 const PORT = 3000;
@@ -369,7 +370,7 @@ app.post('/api/leads', async (req, res) => {
       return;
     }
 
-    const { name, phone, alternateNo, gender, age, origin, country, position, experience, assignedTo, importance, tags, source, project, adminRemarks } = req.body;
+    const { name, phone, alternateNo, gender, age, origin, country, position, experience, qualification, assignedTo, importance, tags, source, project, adminRemarks } = req.body;
     if (!phone) {
       res.status(400).json({ error: 'Phone number is required' });
       return;
@@ -399,6 +400,7 @@ app.post('/api/leads', async (req, res) => {
       country: (country === undefined || country === null) ? 'Kuwait' : String(country).trim(),
       position: position || 'General openings',
       experience: experience || 'Fresh criteria',
+      qualification: qualification !== undefined ? String(qualification).trim() : '',
       adminRemarks: adminRemarks || '',
       notes: '',
       assignedTo: assignedTo || '',
@@ -469,7 +471,7 @@ app.post('/api/leads/bulk', async (req, res) => {
     const newLeadsToAdd: any[] = [];
 
     batchLeads.forEach((leadItem, index) => {
-      const { name, phone, gender, age, origin, country, position, experience, assignedTo, importance, tags, source, project } = leadItem;
+      const { name, phone, gender, age, origin, country, position, experience, qualification, assignedTo, importance, tags, source, project } = leadItem;
       
       if (!name || !phone) {
         skipped.push(`Row ${index + 1}: Name and Phone are required.`);
@@ -514,6 +516,7 @@ app.post('/api/leads/bulk', async (req, res) => {
         country: (country === undefined || country === null) ? 'Kuwait' : String(country).trim(),
         position: position || 'General openings',
         experience: experience || 'Fresh criteria',
+        qualification: qualification !== undefined ? String(qualification).trim() : '',
         adminRemarks: '',
         notes: '',
         assignedTo: assignedTo || '',
@@ -902,7 +905,7 @@ app.put('/api/leads/:id', async (req, res) => {
     const { 
       stage, notes, name, phone, alternateNo, email, budget, fitScore, campaign,
       serialNo, entryDate, assignDate, gender, age, origin, country,
-      position, experience, adminRemarks, assignedTo, importance,
+      position, experience, qualification, adminRemarks, assignedTo, importance,
       remarks1, remarks2, remarks3, callConnected, tasks, timeline, tags, source, project,
       docPassportCopy, docResume, docOfficeVisited, docOthers, reminderEnabled
     } = req.body;
@@ -1074,8 +1077,11 @@ app.put('/api/leads/:id', async (req, res) => {
 
     // Actor context
     const actorRole = req.headers['x-user-role'] || 'user';
-    const actorId = req.headers['x-agent-id'] || lead.assignedTo || 'System';
-    const actor = actorRole === 'admin' ? 'Administrator' : `Agent (${actorId})`;
+    const rawAgentId = (req.headers['x-agent-id'] as string) || lead.assignedTo || 'System';
+    const cleanAgent = String(rawAgentId).trim().toUpperCase();
+    const actor = actorRole === 'admin'
+      ? (cleanAgent && cleanAgent !== 'UNASSIGNED' && !cleanAgent.includes('ADMIN') ? `Admin (${cleanAgent})` : 'Administrator')
+      : `Coordinator ${cleanAgent || 'UNASSIGNED'}`;
 
     // Log Stage transitions
     if (stage !== undefined && lead.stage !== stage) {
@@ -1084,7 +1090,7 @@ app.put('/api/leads/:id', async (req, res) => {
       lead.timeline.push({
         id: `tl_${Date.now()}_stage`,
         type: 'status',
-        text: `Pipeline stage updated from "${fromLabel}" to "${toLabel}"`,
+        text: `Pipeline stage changed from "${fromLabel}" to "${toLabel}"`,
         actor,
         timestamp: new Date().toISOString()
       });
@@ -1096,7 +1102,7 @@ app.put('/api/leads/:id', async (req, res) => {
       lead.timeline.push({
         id: `tl_${Date.now()}_assign`,
         type: 'assignment',
-        text: `Assigned coordinator updated from "${lead.assignedTo || 'Unassigned'}" to "${assignedTo || 'Unassigned'}"`,
+        text: `Assigned coordinator changed from "${lead.assignedTo || 'Unassigned'}" to "${assignedTo || 'Unassigned'}"`,
         actor,
         timestamp: new Date().toISOString()
       });
@@ -1115,7 +1121,7 @@ app.put('/api/leads/:id', async (req, res) => {
         lead.timeline.push({
           id: `tl_${Date.now()}_auto_stage`,
           type: 'status',
-          text: `Pipeline stage auto-updated to "In Discussion" due to first remark logged`,
+          text: `Pipeline stage auto-moved to "In Discussion" due to first call remark logged`,
           actor,
           timestamp: new Date().toISOString()
         });
@@ -1127,7 +1133,7 @@ app.put('/api/leads/:id', async (req, res) => {
       lead.timeline.push({
         id: `tl_${Date.now()}_rem1`,
         type: 'remark',
-        text: `Updated Call Remarks 1: "${remarks1 || 'cleared'}"`,
+        text: `Updated 1st Remarks: "${remarks1 || 'cleared'}"`,
         actor,
         timestamp: new Date().toISOString()
       });
@@ -1137,7 +1143,7 @@ app.put('/api/leads/:id', async (req, res) => {
       lead.timeline.push({
         id: `tl_${Date.now()}_rem2`,
         type: 'remark',
-        text: `Updated Call Remarks 2: "${remarks2 || 'cleared'}"`,
+        text: `Updated 2nd Remarks: "${remarks2 || 'cleared'}"`,
         actor,
         timestamp: new Date().toISOString()
       });
@@ -1147,11 +1153,34 @@ app.put('/api/leads/:id', async (req, res) => {
       lead.timeline.push({
         id: `tl_${Date.now()}_rem3`,
         type: 'remark',
-        text: `Updated Call Remarks 3: "${remarks3 || 'cleared'}"`,
+        text: `Updated 3rd Remarks: "${remarks3 || 'cleared'}"`,
         actor,
         timestamp: new Date().toISOString()
       });
       lead.remarks3 = remarks3;
+    }
+
+    if (adminRemarks !== undefined && lead.adminRemarks !== adminRemarks) {
+      lead.timeline.push({
+        id: `tl_${Date.now()}_adminrem`,
+        type: 'remark',
+        text: `Updated Admin Remarks: "${adminRemarks || 'cleared'}"`,
+        actor,
+        timestamp: new Date().toISOString()
+      });
+      lead.adminRemarks = adminRemarks;
+    }
+
+    if (callConnected !== undefined && lead.callConnected !== callConnected) {
+      const connLabel = callConnected === 'connected' ? 'Connected 💬' : 'Not Connected ❌';
+      lead.timeline.push({
+        id: `tl_${Date.now()}_call`,
+        type: 'remark',
+        text: `Call Status updated: "${connLabel}"`,
+        actor,
+        timestamp: new Date().toISOString()
+      });
+      lead.callConnected = callConnected;
     }
 
     // Standard fields
@@ -1174,6 +1203,7 @@ app.put('/api/leads/:id', async (req, res) => {
     if (country !== undefined) lead.country = country;
     if (position !== undefined) lead.position = position;
     if (experience !== undefined) lead.experience = experience;
+    if (qualification !== undefined) lead.qualification = qualification;
     if (adminRemarks !== undefined) lead.adminRemarks = adminRemarks;
     if (importance !== undefined) lead.importance = Number(importance);
     if (source !== undefined) lead.source = source;
@@ -1191,6 +1221,14 @@ app.put('/api/leads/:id', async (req, res) => {
     if (tasks !== undefined) lead.tasks = tasks;
     if (timeline !== undefined) lead.timeline = timeline;
     if (tags !== undefined) lead.tags = tags;
+
+    // Auto-update experience from telecaller remarks if experience was not filled or is default
+    if (isDefaultExperience(lead.experience)) {
+      const autoExp = getEffectiveExperience(lead);
+      if (!isDefaultExperience(autoExp)) {
+        lead.experience = autoExp;
+      }
+    }
 
     lead.updatedAt = new Date().toISOString();
     leads[idx] = lead;

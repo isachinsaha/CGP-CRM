@@ -23,6 +23,7 @@ export interface Lead {
   country: string; // e.g. "QATAR", "JAPAN", "DUBAI", "GERMANY"
   position: string; // e.g. "WITHSTAND", "Nurse", "COMMI I", "Bartender"
   experience: string; // e.g. "FRESHER", "2 years chef", etc.
+  qualification?: string; // e.g. "10th Pass", "Graduate", "B.Sc Nursing", "ITI", etc.
   adminRemarks: string; // admin level remark or "ORGANIC"
   assignedTo: string; // Name of Sub Agent / Coordinator: Joyce, Sarina, Shreya, Edenla, etc.
   importance: number; // 0 to 5 star ratings

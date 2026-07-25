@@ -273,3 +273,102 @@ export const formatCandidateName = (name: string): string => {
   return formatted.trim();
 };
 
+/**
+ * Checks whether an experience string is missing or contains default/placeholder values.
+ */
+export const isDefaultExperience = (exp?: string | null): boolean => {
+  if (!exp) return true;
+  const norm = exp.trim().toLowerCase();
+  return (
+    !norm ||
+    norm === 'fresh criteria' ||
+    norm === 'fresher' ||
+    norm === 'not specified' ||
+    norm === 'not specified / fresh' ||
+    norm === 'general' ||
+    norm === 'n/a' ||
+    norm === 'fresh' ||
+    norm === '—' ||
+    norm === 'none'
+  );
+};
+
+/**
+ * Automatically extracts candidate experience from telecaller remarks if present.
+ */
+export const extractExperienceFromRemarks = (text: string): string | null => {
+  if (!text) return null;
+  const clean = text.trim();
+  if (!clean) return null;
+
+  // Pattern 1: Number + YEARS/YRS/YR with optional surrounding role/details
+  // Examples: "5YEARS", "(5YEARS)", "5 YEARS", "2 YR TEACHING EXPERIENCE", "5+ YEARS"
+  const yrMatch = clean.match(/\(?(\d+(?:\.\d+)?\+?\s*(?:years?|yrs?|yr))\)?/i);
+  if (yrMatch) {
+    const yrNumStr = yrMatch[1].replace(/([0-9])([a-zA-Z])/, '$1 $2').trim(); // e.g. "5YEARS" -> "5 YEARS"
+    
+    // Check if there's a full role or experience phrase in the remark line, e.g. "2 YR TEACHING EXPERIENCE IN CBSE"
+    const expPhraseMatch = clean.match(/(\d+(?:\.\d+)?\+?\s*(?:years?|yrs?|yr)\s*(?:exp|experience)?(?:\s+(?:in|as|of)?\s+[A-Za-z0-9\s]{2,30})?)/i);
+    if (expPhraseMatch && expPhraseMatch[1] && expPhraseMatch[1].length <= 50) {
+      let ph = expPhraseMatch[1].trim();
+      ph = ph.replace(/([0-9])([a-zA-Z])/, '$1 $2');
+      return ph;
+    }
+
+    // Check if there's a job title before the years, e.g. "RECIPTIONIST (5YEARS)"
+    const roleBefore = clean.match(/([a-zA-Z\s]{2,20})\s*\(?\d+(?:\.\d+)?\+?\s*(?:years?|yrs?|yr)\)?/i);
+    if (roleBefore && roleBefore[1]) {
+      const roleStr = roleBefore[1].trim();
+      const lower = roleStr.toLowerCase();
+      if (!['remarks', 'call', 'talked', 'telecaller', 'candidate', 'said', 'has', 'have', 'with', 'status'].includes(lower)) {
+        return `${roleStr} (${yrNumStr})`;
+      }
+    }
+
+    return yrNumStr;
+  }
+
+  // Pattern 2: Explicit "fresher" phrase
+  if (/\bfresher\b/i.test(clean)) {
+    return 'Fresher';
+  }
+
+  return null;
+};
+
+/**
+ * Gets effective experience string for a lead, falling back to telecaller remarks if main experience field is blank/default.
+ */
+export const getEffectiveExperience = (lead: {
+  experience?: string | null;
+  remarks1?: string | null;
+  remarks2?: string | null;
+  remarks3?: string | null;
+  notes?: string | null;
+  adminRemarks?: string | null;
+}): string => {
+  if (!isDefaultExperience(lead.experience)) {
+    return lead.experience!.trim();
+  }
+
+  const remarksToTest = [
+    lead.remarks1,
+    lead.remarks2,
+    lead.remarks3,
+    lead.notes,
+    lead.adminRemarks
+  ];
+
+  for (const r of remarksToTest) {
+    if (r) {
+      const extracted = extractExperienceFromRemarks(r);
+      if (extracted) {
+        return extracted;
+      }
+    }
+  }
+
+  return lead.experience && lead.experience.trim() ? lead.experience.trim() : 'Fresh criteria';
+};
+
+
