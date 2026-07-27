@@ -562,7 +562,7 @@ export default function LeadModal({
                     <span className="text-slate-600 select-none">•</span>
                     <span className="flex items-center gap-1">
                       Coordinator:{' '}
-                      <span className="text-accent-purple font-extrabold bg-purple-950 px-1.5 py-0.5 rounded-sm border border-purple-400/50">
+                      <span className="text-purple-800 dark:text-purple-300 font-extrabold bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded-md border border-purple-300 dark:border-purple-500/60">
                         {lead.assignedTo}
                       </span>
                     </span>
@@ -573,7 +573,7 @@ export default function LeadModal({
                     <span className="text-slate-600 select-none">•</span>
                     <span className="flex items-center gap-1">
                       Source:{' '}
-                      <span className="text-slate-200 font-bold bg-slate-750 px-1.5 py-0.5 rounded-sm border border-slate-700 uppercase">
+                      <span className="text-purple-800 dark:text-purple-300 font-bold bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded-md border border-purple-300 dark:border-purple-500/60 uppercase">
                         {lead.source}
                       </span>
                     </span>
@@ -584,7 +584,7 @@ export default function LeadModal({
                     <span className="text-slate-600 select-none">•</span>
                     <span className="flex items-center gap-1">
                       Project:{' '}
-                      <span className="text-accent-purple font-bold bg-purple-950 px-1.5 py-0.5 rounded-sm border border-purple-400/50 uppercase">
+                      <span className="text-emerald-800 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-300 dark:border-emerald-600/60 uppercase">
                         {lead.project}
                       </span>
                     </span>
@@ -825,30 +825,30 @@ export default function LeadModal({
 
                     <div className="space-y-2.5 text-xs">
                       <div className="grid grid-cols-1 gap-2.5">
-                        <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-750 text-left focus-within:border-accent-purple transition-all">
-                          <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">Remarks 1 (First Contact Outcome)</span>
+                        <div className="p-2.5 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-300 dark:border-slate-750 text-left focus-within:border-accent-purple transition-all">
+                          <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 block uppercase tracking-wider">Remarks 1 (First Contact Outcome)</span>
                           <textarea
                             rows={2}
                             name="remarks1"
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks1 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-200 placeholder-slate-500 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-semibold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-200 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-semibold text-xs"
                           />
                         </div>
-                        <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-750 text-left focus-within:border-accent-purple transition-all">
-                          <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">Remarks 2 (Follow-up Call Comments)</span>
+                        <div className="p-2.5 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-300 dark:border-slate-750 text-left focus-within:border-accent-purple transition-all">
+                          <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 block uppercase tracking-wider">Remarks 2 (Follow-up Call Comments)</span>
                           <textarea
                             rows={2}
                             name="remarks2"
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks2 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-200 placeholder-slate-500 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-semibold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-200 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-semibold text-xs"
                           />
                         </div>
-                        <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-750 text-left focus-within:border-amber-500/80 transition-all">
-                          <span className="text-[9px] font-bold text-amber-400 block uppercase tracking-wider flex items-center gap-1">
+                        <div className="p-2.5 bg-amber-50/50 dark:bg-slate-900/40 rounded-lg border border-amber-300/80 dark:border-slate-750 text-left focus-within:border-amber-500/80 transition-all">
+                          <span className="text-[9px] font-bold text-amber-700 dark:text-amber-400 block uppercase tracking-wider flex items-center gap-1">
                             <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
                             Remarks 3 (Final Decision Remarks)
                           </span>
@@ -858,7 +858,7 @@ export default function LeadModal({
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks3 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-amber-400 placeholder-amber-400/50 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-black text-xs"
+                            className="w-full bg-transparent border-none p-0 text-amber-900 dark:text-amber-400 placeholder-amber-500/50 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-black text-xs"
                           />
                         </div>
                       </div>
@@ -874,9 +874,9 @@ export default function LeadModal({
                       </button>
 
                       {lead.adminRemarks && (
-                        <div className="mt-2 p-2.5 bg-rose-50 dark:bg-rose-950/20 border border-rose-300 dark:border-rose-900/30 rounded-lg text-left">
-                          <span className="text-[9px] font-bold text-[#991b1b] dark:text-rose-400 block uppercase">Admin Placement Instructions Directive</span>
-                          <p className="font-semibold text-[#991b1b] dark:text-rose-300 leading-relaxed mt-0.5">{lead.adminRemarks}</p>
+                        <div className="mt-2 p-2.5 bg-white dark:bg-red-950/90 border border-red-200 dark:border-red-800/80 rounded-lg text-left shadow-xs">
+                          <span className="text-[9px] font-bold text-red-600 dark:text-red-400 block uppercase">Admin Placement Instructions Directive</span>
+                          <p className="font-semibold text-red-900 dark:text-red-200 leading-relaxed mt-0.5">{lead.adminRemarks}</p>
                         </div>
                       )}
                     </div>

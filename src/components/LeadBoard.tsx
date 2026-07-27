@@ -329,43 +329,43 @@ export default function LeadBoard({
         </div>
 
         {/* Position Indicator */}
-        <span className="text-[11px] text-accent-emerald bg-emerald-950 border border-emerald-400/50 px-2.5 py-1 rounded font-bold uppercase truncate block mt-2 text-left w-full font-sans tracking-wide">
+        <span className="text-[11px] text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-600/60 px-2.5 py-1 rounded-md font-bold uppercase truncate block mt-2 text-left w-full font-sans tracking-wide">
           💼 {lead.position || 'General Applicant'}
         </span>
 
         {lead.project && (
-          <span className="text-[11px] text-accent-purple bg-purple-950 border border-purple-400/50 px-2.5 py-1 rounded font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
+          <span className="text-[11px] text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-600/60 px-2.5 py-1 rounded-md font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
             🎯 Project: {lead.project}
           </span>
         )}
 
         {lead.source && (
-          <span className="text-[11px] text-slate-200 bg-slate-750 border border-slate-700 px-2.5 py-1 rounded font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
+          <span className="text-[11px] text-purple-800 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/80 border border-purple-300 dark:border-purple-500/60 px-2.5 py-1 rounded-md font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
             📣 Source: {lead.source}
           </span>
         )}
 
         {/* Telecaller & Admin Remarks Log Indicators */}
         {hasRemarks ? (
-          <div className="bg-slate-800/20 dark:bg-slate-900/90 p-2.5 rounded-lg border border-slate-300 dark:border-slate-700/80 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-slate-800/30 dark:hover:bg-slate-900 group/remarks cursor-help shadow-inner">
-            <span className="text-[10px] uppercase font-black text-emerald-600 dark:text-emerald-400 block mb-0.5 tracking-wider flex justify-between items-center font-sans">
+          <div className="bg-emerald-50 dark:bg-slate-900/90 p-2.5 rounded-lg border border-emerald-200/90 dark:border-slate-800 text-[11px] text-left mt-2 shadow-2xs transition-all group/remarks cursor-help hover:bg-emerald-100/80 dark:hover:bg-slate-800">
+            <span className="text-[10px] uppercase font-black text-emerald-800 dark:text-emerald-400 block mb-1 tracking-wider flex justify-between items-center font-sans">
               <span>{latestRemarkLabel}</span>
-              <span className="text-[8px] text-slate-500 dark:text-slate-400 normal-case font-normal group-hover/remarks:hidden">Full</span>
+              <span className="text-[8px] text-emerald-700/80 dark:text-slate-500 normal-case font-normal group-hover/remarks:hidden">Hover for full</span>
             </span>
-            <p className="text-slate-900 dark:text-slate-100 font-bold truncate group-hover/remarks:whitespace-normal group-hover/remarks:break-all italic font-mono text-[11px] leading-snug transition-all duration-250">
+            <p className="text-slate-100 font-extrabold italic font-mono text-[11px] leading-snug truncate group-hover/remarks:whitespace-normal group-hover/remarks:break-words">
               "{latestRemarkValue}"
             </p>
           </div>
         ) : lead.adminRemarks && lead.adminRemarks.trim() !== '' ? (
-          <div className="bg-rose-50 dark:bg-rose-950/50 p-2.5 rounded-lg border border-rose-300 dark:border-rose-500/40 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-rose-100 dark:hover:bg-rose-950/70 group/adminRemarks cursor-help shadow-inner">
-            <span className="text-[10px] uppercase font-black text-[#991b1b] dark:text-rose-400 block mb-0.5 tracking-wider flex justify-between items-center font-sans">
+          <div className="bg-red-50 dark:bg-slate-900/90 p-2.5 rounded-lg border border-red-200 dark:border-red-900/60 text-[11px] text-left mt-2 shadow-2xs transition-all group/adminRemarks cursor-help hover:bg-red-100/80 dark:hover:bg-slate-800">
+            <span className="text-[10px] uppercase font-black text-red-700 dark:text-red-400 block mb-1 tracking-wider flex justify-between items-center font-sans">
               <span className="flex items-center gap-1">
-                <span className="inline-block w-1.5 h-1.5 bg-[#991b1b] dark:bg-rose-500 rounded-full animate-pulse" />
+                <span className="inline-block w-1.5 h-1.5 bg-red-600 dark:bg-red-500 rounded-full animate-pulse" />
                 👑 ADMIN REMARK
               </span>
-              <span className="text-[8px] text-[#991b1b] dark:text-rose-400 normal-case font-normal group-hover/adminRemarks:hidden">Full</span>
+              <span className="text-[8px] text-red-700/80 dark:text-slate-500 normal-case font-normal group-hover/adminRemarks:hidden">Hover for full</span>
             </span>
-            <p className="text-[#991b1b] dark:text-rose-300 font-extrabold truncate group-hover/adminRemarks:whitespace-normal group-hover/adminRemarks:break-all italic font-mono text-[11px] leading-snug transition-all duration-250">
+            <p className="text-red-950 dark:text-red-200 font-extrabold italic font-mono text-[11px] leading-snug truncate group-hover/adminRemarks:whitespace-normal group-hover/adminRemarks:break-words">
               "{lead.adminRemarks}"
             </p>
           </div>
@@ -376,14 +376,14 @@ export default function LeadBoard({
         )}
 
         {/* Coordinator Badge */}
-        <div className="text-[11px] mt-2 flex justify-between items-center border-t border-slate-700/50 pt-2 text-left">
-          <span className="text-slate-300 font-extrabold">Coordinator:</span>
+        <div className="text-[11px] mt-2 flex justify-between items-center border-t border-slate-200 dark:border-slate-800/80 pt-2 text-left">
+          <span className="text-slate-600 dark:text-slate-300 font-extrabold">Coordinator:</span>
           {lead.assignedTo && lead.assignedTo.trim() !== '' && lead.assignedTo.toLowerCase() !== 'unassigned' ? (
-            <span className="text-accent-purple font-black bg-purple-950 border border-purple-400/60 px-2.5 py-1 rounded text-[10px] uppercase tracking-wider font-sans shadow-2xs">
+            <span className="text-purple-800 dark:text-purple-300 font-black bg-purple-50 dark:bg-purple-950/80 border border-purple-300 dark:border-purple-500/60 px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider font-sans shadow-2xs">
               👤 {lead.assignedTo}
             </span>
           ) : (
-            <span className="text-rose-600 dark:text-rose-400 font-black bg-rose-500/10 dark:bg-rose-950 border border-rose-300 dark:border-rose-800 px-2.5 py-1 rounded text-[10px] uppercase tracking-wider font-sans shadow-2xs">
+            <span className="text-purple-800 dark:text-purple-300 font-black bg-purple-50 dark:bg-purple-950/80 border border-purple-300 dark:border-purple-500/60 px-2.5 py-1 rounded text-[10px] uppercase tracking-wider font-sans shadow-2xs">
               👤 UNASSIGNED
             </span>
           )}
@@ -463,7 +463,7 @@ export default function LeadBoard({
                 placeholder="Search candidate..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-1.5 text-xs rounded-xl border border-slate-750 focus:outline-none focus:ring-1 focus:ring-accent-purple bg-slate-900 text-slate-100 placeholder-slate-500 font-medium"
+                className="w-full pl-9 pr-4 py-1.5 text-xs rounded-xl border border-slate-750 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-900 text-slate-100 placeholder-slate-500 font-medium"
               />
             </div>
 
@@ -473,7 +473,7 @@ export default function LeadBoard({
                 value={coordinatorFilter}
                 onChange={setCoordinatorFilter}
                 options={coordinatorOptions}
-                className="text-xs px-2.5 py-1.5 rounded-xl border border-slate-750 bg-slate-900 text-accent-purple font-black focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase shadow-inner shrink-0"
+                className="text-xs px-2.5 py-1.5 rounded-xl border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 dark:text-emerald-300 font-black focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-inner shrink-0"
               />
             )}
 
@@ -482,7 +482,7 @@ export default function LeadBoard({
               value={remarksFilter}
               onChange={setRemarksFilter}
               options={remarksOptions}
-              className="text-xs px-2.5 py-1.5 rounded-xl border border-slate-750 bg-slate-900 text-slate-100 font-extrabold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer shadow-inner shrink-0"
+              className="text-xs px-2.5 py-1.5 rounded-xl border border-slate-750 bg-slate-900 text-slate-100 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-inner shrink-0"
             />
 
             {/* 3. Time filters: All, Today, Yesterday, Date */}
@@ -507,7 +507,7 @@ export default function LeadBoard({
                     }}
                     className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
                       isActive
-                        ? 'bg-accent-purple text-white shadow-sm'
+                        ? 'bg-emerald-800 text-white border border-emerald-600/60 shadow-sm'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -544,7 +544,7 @@ export default function LeadBoard({
                 onClick={() => setViewMode('hub')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
                   viewMode === 'hub'
-                    ? 'bg-accent-purple text-white shadow-sm'
+                    ? 'bg-emerald-800 text-white border border-emerald-600/60 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -556,7 +556,7 @@ export default function LeadBoard({
                 onClick={() => setViewMode('board')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
                   viewMode === 'board'
-                    ? 'bg-accent-purple text-white shadow-sm'
+                    ? 'bg-emerald-800 text-white border border-emerald-600/60 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
