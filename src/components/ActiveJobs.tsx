@@ -684,39 +684,41 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
           </div>
 
           {/* Country Cards Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
             {/* ALL COUNTRIES CARD */}
             <button
               type="button"
               onClick={() => setSelectedCountry('ALL')}
-              className={`group p-2.5 px-3.5 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-21 relative overflow-hidden ${
+              className={`group p-3 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-22 relative overflow-hidden ${
                 selectedCountry === 'ALL'
-                  ? 'bg-accent-purple border-accent-purple text-white shadow-lg shadow-accent-purple/20 scale-[1.02]'
-                  : 'bg-slate-850 border-slate-750 hover:border-slate-600 text-slate-200 hover:bg-slate-800/50 shadow-3xs'
+                  ? 'bg-gradient-to-br from-emerald-600 via-teal-600 to-emerald-700 text-white border-emerald-400 shadow-md shadow-emerald-950/40 ring-2 ring-emerald-400/30 scale-[1.02]'
+                  : 'bg-slate-900/90 border-slate-800 hover:border-emerald-500/50 hover:bg-slate-850 text-slate-200 shadow-2xs'
               }`}
             >
-              <span className="absolute -right-2 -bottom-3 text-5xl opacity-[0.08] select-none pointer-events-none transition-transform duration-300 group-hover:scale-115 group-hover:-rotate-3">
+              <span className="absolute -right-3 -bottom-3 text-5xl opacity-[0.08] select-none pointer-events-none transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
                 🌐
               </span>
 
               <div className="relative z-10 flex items-start justify-between w-full">
-                <div className={`text-sm font-bold flex items-center justify-center w-7 h-7 rounded-lg overflow-hidden border ${selectedCountry === 'ALL' ? 'bg-white/20 border-white/30' : 'bg-slate-800 border-slate-700'}`}>
+                <div className={`w-8 h-6 rounded-md overflow-hidden border flex items-center justify-center shadow-2xs ${
+                  selectedCountry === 'ALL' ? 'bg-white/20 border-white/30 text-white' : 'bg-slate-800 border-slate-700 text-emerald-400'
+                }`}>
                   <span className="text-xs">🌐</span>
                 </div>
-                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md font-mono ${
+                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full font-mono ${
                   selectedCountry === 'ALL'
-                    ? 'bg-white/25 text-white border border-white/30'
-                    : 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/30'
+                    ? 'bg-white/25 text-white border border-white/40 shadow-2xs'
+                    : 'bg-emerald-950/70 text-emerald-400 border border-emerald-800/60'
                 }`}>
                   {allJobsList.length} {allJobsList.length === 1 ? 'Job' : 'Jobs'}
                 </span>
               </div>
               <div className="relative z-10">
-                <h3 className="font-black text-xs tracking-wide uppercase leading-none truncate">
+                <h3 className="font-black text-xs tracking-wider uppercase leading-tight truncate">
                   ALL COUNTRIES
                 </h3>
-                <p className={`text-[8px] font-bold mt-1.5 ${selectedCountry === 'ALL' ? 'text-purple-100' : 'text-slate-500'}`}>
-                  {selectedCountry === 'ALL' ? '● Selected' : 'Show All Jobs'}
+                <p className={`text-[9px] font-bold mt-1 ${selectedCountry === 'ALL' ? 'text-emerald-100' : 'text-slate-400 group-hover:text-slate-300'}`}>
+                  {selectedCountry === 'ALL' ? '● Filter Active' : 'Show All Jobs'}
                 </p>
               </div>
             </button>
@@ -731,10 +733,10 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                   key={countryName}
                   type="button"
                   onClick={() => setSelectedCountry(countryName)}
-                  className={`group p-2.5 px-3.5 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-21 relative overflow-hidden ${
+                  className={`group p-3 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-22 relative overflow-hidden ${
                     isSelected
-                      ? 'bg-accent-purple border-accent-purple text-white shadow-lg shadow-accent-purple/20 scale-[1.02]'
-                      : 'bg-slate-850 border-slate-750 hover:border-slate-600 text-slate-200 hover:bg-slate-800/50 shadow-3xs'
+                      ? 'bg-gradient-to-br from-emerald-600 via-teal-600 to-emerald-700 text-white border-emerald-400 shadow-md shadow-emerald-950/40 ring-2 ring-emerald-400/30 scale-[1.02]'
+                      : 'bg-slate-900/90 border-slate-800 hover:border-emerald-500/50 hover:bg-slate-850 text-slate-200 shadow-2xs'
                   }`}
                 >
                   {/* Background Country Flag Watermark */}
@@ -742,17 +744,19 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                     <img 
                       src={flagUrl} 
                       alt="" 
-                      className="absolute -right-2 -bottom-3 w-16 h-12 object-cover opacity-[0.08] select-none pointer-events-none transition-all duration-300 group-hover:scale-115 group-hover:-rotate-3 rounded-md"
+                      className="absolute -right-3 -bottom-3 w-20 h-14 object-cover opacity-[0.09] filter blur-[0.5px] select-none pointer-events-none transition-all duration-300 group-hover:scale-110 group-hover:opacity-[0.14] rounded-lg"
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <span className="absolute -right-2 -bottom-3 text-5xl opacity-[0.08] select-none pointer-events-none transition-transform duration-300 group-hover:scale-115 group-hover:-rotate-3">
+                    <span className="absolute -right-3 -bottom-3 text-5xl opacity-[0.08] select-none pointer-events-none transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
                       🌐
                     </span>
                   )}
 
                   <div className="relative z-10 flex items-start justify-between w-full">
-                    <div className={`text-sm font-bold flex items-center justify-center w-7 h-7 rounded-lg overflow-hidden border ${isSelected ? 'bg-white/20 border-white/30' : 'bg-slate-800 border-slate-700'}`}>
+                    <div className={`w-8 h-6 rounded-md overflow-hidden border shadow-2xs shrink-0 group-hover:scale-105 transition-transform duration-200 ${
+                      isSelected ? 'bg-white/20 border-white/40' : 'bg-slate-800 border-slate-700/80'
+                    }`}>
                       {flagUrl ? (
                         <img 
                           src={flagUrl} 
@@ -761,23 +765,25 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                           referrerPolicy="no-referrer"
                         />
                       ) : (
-                        <span className="text-xs">🌐</span>
+                        <div className="w-full h-full flex items-center justify-center">
+                          <span className="text-xs">🌐</span>
+                        </div>
                       )}
                     </div>
-                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md font-mono ${
+                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full font-mono ${
                       isSelected
-                        ? 'bg-white/25 text-white border border-white/30'
-                        : 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/30'
+                        ? 'bg-white/25 text-white border border-white/40 shadow-2xs'
+                        : 'bg-emerald-950/70 text-emerald-400 border border-emerald-800/60'
                     }`}>
                       {countryJobs.length} {countryJobs.length === 1 ? 'Job' : 'Jobs'}
                     </span>
                   </div>
                   <div className="relative z-10">
-                    <h3 className="font-black text-xs tracking-wide uppercase leading-none truncate">
+                    <h3 className="font-black text-xs tracking-wider uppercase leading-tight truncate group-hover:text-emerald-300 transition-colors">
                       {countryName}
                     </h3>
-                    <p className={`text-[8px] font-bold mt-1.5 ${isSelected ? 'text-purple-100' : 'text-slate-500'}`}>
-                      {isSelected ? '● Selected' : 'Click to view'}
+                    <p className={`text-[9px] font-bold mt-1 ${isSelected ? 'text-emerald-100' : 'text-slate-400 group-hover:text-slate-300'}`}>
+                      {isSelected ? '● Filter Active' : 'Click to view'}
                     </p>
                   </div>
                 </button>
@@ -797,7 +803,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
               <div className="bg-slate-950/40 border border-slate-750/80 rounded-3xl p-6 shadow-3xs text-left space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-750/60 pb-4 gap-3">
                   <div>
-                    <h3 className="text-lg font-black text-slate-100 uppercase tracking-wide flex items-center gap-2">
+                    <h3 className="text-lg font-black text-slate-100 uppercase tracking-wide flex items-center gap-2.5">
                       {selectedCountry === 'ALL' ? (
                         <>
                           <span className="text-xl">🌐</span> ALL ACTIVE INTERNATIONAL VACANCIES
@@ -805,19 +811,21 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                       ) : (
                         <>
                           {getCountryFlagUrl(selectedCountry) ? (
-                            <img 
-                              src={getCountryFlagUrl(selectedCountry)} 
-                              alt="" 
-                              className="w-6 h-4.5 object-cover rounded-sm inline-block shadow-sm transform hover:scale-110 transition-transform"
-                              referrerPolicy="no-referrer"
-                            />
+                            <div className="p-1 bg-slate-900 border border-slate-750 rounded-lg shadow-2xs flex items-center justify-center shrink-0">
+                              <img 
+                                src={getCountryFlagUrl(selectedCountry)} 
+                                alt="" 
+                                className="w-6 h-4 object-cover rounded-xs shadow-3xs"
+                                referrerPolicy="no-referrer"
+                              />
+                            </div>
                           ) : (
                             <span className="text-xl">🌐</span>
                           )} {selectedCountry} Active Vacancies
                         </>
                       )}
                     </h3>
-                    <p className="text-xs text-slate-500 font-bold">
+                    <p className="text-xs text-slate-500 font-bold mt-1">
                       {selectedCountry === 'ALL'
                         ? `Showing ${displayedJobs.length} official career opportunities listed across ${uniqueCountriesWithJobs.length} destinations`
                         : `Showing ${displayedJobs.length} official career opportunities listed for ${selectedCountry}`}
@@ -851,9 +859,19 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                     {/* Header block with country/title */}
                     <div className="p-5 pb-4 border-b border-slate-750 bg-slate-900/30 flex items-start justify-between gap-4">
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 bg-slate-900 text-slate-100 text-[9px] font-bold tracking-wider uppercase rounded-sm">
-                            {(job.country || 'Other').toUpperCase()}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-900/90 border border-slate-750 text-slate-100 text-[10px] font-extrabold tracking-wider uppercase rounded-lg shadow-2xs">
+                            {getCountryFlagUrl(job.country) ? (
+                              <img 
+                                src={getCountryFlagUrl(job.country)} 
+                                alt="" 
+                                className="w-4.5 h-3 object-cover rounded-xs border border-slate-700/80 shadow-3xs"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <span className="text-xs">🌐</span>
+                            )}
+                            <span>{(job.country || 'Other').toUpperCase()}</span>
                           </span>
                           {job.isActive !== false ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-950/40 border border-emerald-900/30 text-emerald-400 text-[9px] font-bold tracking-wider uppercase rounded-full">
