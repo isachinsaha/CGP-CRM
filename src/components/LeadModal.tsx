@@ -833,7 +833,7 @@ export default function LeadModal({
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks1 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-200 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-semibold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-100 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-bold text-xs"
                           />
                         </div>
                         <div className="p-2.5 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-300 dark:border-slate-750 text-left focus-within:border-accent-purple transition-all">
@@ -844,11 +844,11 @@ export default function LeadModal({
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks2 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-200 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-semibold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-100 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-bold text-xs"
                           />
                         </div>
-                        <div className="p-2.5 bg-amber-50/50 dark:bg-slate-900/40 rounded-lg border border-amber-300/80 dark:border-slate-750 text-left focus-within:border-amber-500/80 transition-all">
-                          <span className="text-[9px] font-bold text-amber-700 dark:text-amber-400 block uppercase tracking-wider flex items-center gap-1">
+                        <div className="p-2.5 bg-amber-50 dark:bg-slate-900/40 rounded-lg border border-amber-300 dark:border-slate-750 text-left focus-within:border-amber-500/80 transition-all">
+                          <span className="text-[9px] font-black text-amber-800 dark:text-amber-400 block uppercase tracking-wider flex items-center gap-1">
                             <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
                             Remarks 3 (Final Decision Remarks)
                           </span>
@@ -858,7 +858,7 @@ export default function LeadModal({
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks3 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-amber-900 dark:text-amber-400 placeholder-amber-500/50 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-black text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-100 dark:text-amber-300 placeholder-amber-700/60 dark:placeholder-amber-500/50 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-black text-xs"
                           />
                         </div>
                       </div>
@@ -874,9 +874,9 @@ export default function LeadModal({
                       </button>
 
                       {lead.adminRemarks && (
-                        <div className="mt-2 p-2.5 bg-white dark:bg-red-950/90 border border-red-200 dark:border-red-800/80 rounded-lg text-left shadow-xs">
-                          <span className="text-[9px] font-bold text-red-600 dark:text-red-400 block uppercase">Admin Placement Instructions Directive</span>
-                          <p className="font-semibold text-red-900 dark:text-red-200 leading-relaxed mt-0.5">{lead.adminRemarks}</p>
+                        <div className="mt-2 p-2.5 bg-red-50 dark:bg-red-950/90 border border-red-200 dark:border-red-800/80 rounded-lg text-left shadow-xs">
+                          <span className="text-[9px] font-bold text-red-700 dark:text-red-400 block uppercase">Admin Placement Instructions Directive</span>
+                          <p className="font-bold text-red-950 dark:text-red-200 leading-relaxed mt-0.5">{lead.adminRemarks}</p>
                         </div>
                       )}
                     </div>
