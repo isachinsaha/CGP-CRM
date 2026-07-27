@@ -131,7 +131,7 @@ export default function LeadBoard({
   const [filterEndDate, setFilterEndDate] = useState<string>(() => new Date().toLocaleDateString('en-CA'));
 
   const COLUMNS: Column[] = [
-    { id: 'new', title: 'New Inbound', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-slate-300 bg-slate-800 font-medium' },
+    { id: 'new', title: 'New Inbound', color: 'border-sky-900/40 bg-sky-950/15', headerColor: 'text-sky-400 bg-sky-950/40 font-medium' },
     { id: 'negotiating', title: 'In Discussion', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-amber-400 bg-amber-950/40 font-medium' },
     { id: 'rotations', title: 'In Rotations', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-indigo-400 bg-indigo-950/40 font-medium animate-pulse' },
     { id: 'proposal', title: 'Office Visited/Interview Attended', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-purple-400 bg-purple-950/40 font-medium' },
@@ -473,7 +473,7 @@ export default function LeadBoard({
                 value={coordinatorFilter}
                 onChange={setCoordinatorFilter}
                 options={coordinatorOptions}
-                className="text-xs px-2.5 py-1.5 rounded-xl border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 dark:text-emerald-300 font-black focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-inner shrink-0"
+                className="text-xs px-3 py-1.5 rounded-xl border border-emerald-700 dark:border-emerald-600 bg-emerald-800 dark:bg-emerald-950 hover:bg-emerald-900 dark:hover:bg-emerald-900 text-white dark:text-emerald-100 font-black focus:outline-none focus:ring-1 focus:ring-emerald-400 cursor-pointer uppercase shadow-xs shrink-0"
               />
             )}
 
@@ -482,7 +482,7 @@ export default function LeadBoard({
               value={remarksFilter}
               onChange={setRemarksFilter}
               options={remarksOptions}
-              className="text-xs px-2.5 py-1.5 rounded-xl border border-slate-750 bg-slate-900 text-slate-100 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-inner shrink-0"
+              className="text-xs px-3 py-1.5 rounded-xl border border-emerald-700 dark:border-emerald-600 bg-emerald-800 dark:bg-emerald-950 hover:bg-emerald-900 dark:hover:bg-emerald-900 text-white dark:text-emerald-100 font-black focus:outline-none focus:ring-1 focus:ring-emerald-400 cursor-pointer uppercase shadow-xs shrink-0"
             />
 
             {/* 3. Time filters: All, Today, Yesterday, Date */}
@@ -604,9 +604,9 @@ export default function LeadBoard({
                 let iconColor = 'text-slate-400';
                 
                 if (col.id === 'new') {
-                  selectedClass = isSelected ? 'bg-slate-900 dark:bg-slate-800 border-2 border-slate-900 dark:border-slate-500 text-slate-100 shadow-md ring-2 ring-slate-500/20' : '';
-                  badgeColor = isSelected ? 'bg-slate-800/40 text-slate-100 border-slate-500/40' : 'bg-slate-800/50 text-slate-200 border-slate-750';
-                  if (isSelected) iconColor = 'text-slate-100';
+                  selectedClass = isSelected ? 'bg-sky-950/20 dark:bg-sky-950/80 border-2 border-sky-600 dark:border-sky-500 text-slate-100 shadow-md ring-2 ring-sky-500/20' : '';
+                  badgeColor = isSelected ? 'bg-sky-500/20 text-sky-700 dark:text-sky-400 border-sky-500/30' : 'bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20';
+                  if (isSelected) iconColor = 'text-sky-600 dark:text-sky-400';
                 } else if (col.id === 'negotiating') {
                   selectedClass = isSelected ? 'bg-amber-950/20 dark:bg-amber-950/80 border-2 border-amber-600 dark:border-amber-500 text-slate-100 shadow-md ring-2 ring-amber-500/20' : '';
                   badgeColor = isSelected ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20';
