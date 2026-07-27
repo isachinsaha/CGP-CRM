@@ -874,9 +874,9 @@ export default function LeadModal({
                       </button>
 
                       {lead.adminRemarks && (
-                        <div className="mt-2 p-2.5 bg-rose-950/20 border border-rose-900/30 text-rose-400 rounded-lg text-left">
-                          <span className="text-[9px] font-bold text-rose-400 block uppercase">Admin Placement Instructions Directive</span>
-                          <p className="font-semibold leading-relaxed mt-0.5">{lead.adminRemarks}</p>
+                        <div className="mt-2 p-2.5 bg-rose-50 dark:bg-rose-950/20 border border-rose-300 dark:border-rose-900/30 rounded-lg text-left">
+                          <span className="text-[9px] font-bold text-[#991b1b] dark:text-rose-400 block uppercase">Admin Placement Instructions Directive</span>
+                          <p className="font-semibold text-[#991b1b] dark:text-rose-300 leading-relaxed mt-0.5">{lead.adminRemarks}</p>
                         </div>
                       )}
                     </div>

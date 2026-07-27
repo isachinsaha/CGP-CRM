@@ -19,7 +19,6 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { getCountryFlagUrl, formatCandidateName } from '../utils';
-import ImportantUpdatesBar from './ImportantUpdatesBar.tsx';
 import { SearchableSelect } from './SearchableSelect.tsx';
 
 interface LeadBoardProps {
@@ -348,25 +347,25 @@ export default function LeadBoard({
 
         {/* Telecaller & Admin Remarks Log Indicators */}
         {hasRemarks ? (
-          <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-700/80 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-slate-900 group/remarks cursor-help shadow-inner">
-            <span className="text-[10px] uppercase font-black text-emerald-400 block mb-0.5 tracking-wider flex justify-between items-center font-sans">
+          <div className="bg-slate-800/20 dark:bg-slate-900/90 p-2.5 rounded-lg border border-slate-300 dark:border-slate-700/80 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-slate-800/30 dark:hover:bg-slate-900 group/remarks cursor-help shadow-inner">
+            <span className="text-[10px] uppercase font-black text-emerald-600 dark:text-emerald-400 block mb-0.5 tracking-wider flex justify-between items-center font-sans">
               <span>{latestRemarkLabel}</span>
-              <span className="text-[8px] text-slate-400 normal-case font-normal group-hover/remarks:hidden">Full</span>
+              <span className="text-[8px] text-slate-500 dark:text-slate-400 normal-case font-normal group-hover/remarks:hidden">Full</span>
             </span>
-            <p className="text-slate-100 font-bold truncate group-hover/remarks:whitespace-normal group-hover/remarks:break-all italic font-mono text-[11px] leading-snug transition-all duration-250">
+            <p className="text-slate-900 dark:text-slate-100 font-bold truncate group-hover/remarks:whitespace-normal group-hover/remarks:break-all italic font-mono text-[11px] leading-snug transition-all duration-250">
               "{latestRemarkValue}"
             </p>
           </div>
         ) : lead.adminRemarks && lead.adminRemarks.trim() !== '' ? (
-          <div className="bg-rose-950/50 p-2.5 rounded-lg border border-rose-500/40 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-rose-950/70 group/adminRemarks cursor-help shadow-inner">
-            <span className="text-[10px] uppercase font-black text-rose-400 block mb-0.5 tracking-wider flex justify-between items-center font-sans">
+          <div className="bg-rose-50 dark:bg-rose-950/50 p-2.5 rounded-lg border border-rose-300 dark:border-rose-500/40 text-[11px] text-left mt-2 transition-all duration-200 hover:bg-rose-100 dark:hover:bg-rose-950/70 group/adminRemarks cursor-help shadow-inner">
+            <span className="text-[10px] uppercase font-black text-[#991b1b] dark:text-rose-400 block mb-0.5 tracking-wider flex justify-between items-center font-sans">
               <span className="flex items-center gap-1">
-                <span className="inline-block w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse" />
-                👑 Admin Remark
+                <span className="inline-block w-1.5 h-1.5 bg-[#991b1b] dark:bg-rose-500 rounded-full animate-pulse" />
+                👑 ADMIN REMARK
               </span>
-              <span className="text-[8px] text-rose-400 normal-case font-normal group-hover/adminRemarks:hidden">Full</span>
+              <span className="text-[8px] text-[#991b1b] dark:text-rose-400 normal-case font-normal group-hover/adminRemarks:hidden">Full</span>
             </span>
-            <p className="text-rose-200 font-extrabold truncate group-hover/adminRemarks:whitespace-normal group-hover/adminRemarks:break-all italic font-mono text-[11px] leading-snug transition-all duration-250">
+            <p className="text-[#991b1b] dark:text-rose-300 font-extrabold truncate group-hover/adminRemarks:whitespace-normal group-hover/adminRemarks:break-all italic font-mono text-[11px] leading-snug transition-all duration-250">
               "{lead.adminRemarks}"
             </p>
           </div>
@@ -438,9 +437,6 @@ export default function LeadBoard({
 
   return (
     <div className="space-y-6" id="cgp-leads-pipeline">
-      
-      {/* Live Scrolling Important Updates Bar */}
-      <ImportantUpdatesBar />
       
       {/* Sub Agent Bucket Select Bar inside Kanban */}
       {userRole === 'agent' && (
@@ -608,29 +604,29 @@ export default function LeadBoard({
                 let iconColor = 'text-slate-400';
                 
                 if (col.id === 'new') {
-                  selectedClass = isSelected ? 'bg-slate-800 border-slate-500 text-slate-100 shadow-md ring-2 ring-slate-500/20' : '';
-                  badgeColor = isSelected ? 'bg-slate-900/30 text-slate-100 border-slate-500/30' : 'bg-slate-900 text-slate-300 border-slate-750';
+                  selectedClass = isSelected ? 'bg-slate-900 dark:bg-slate-800 border-2 border-slate-900 dark:border-slate-500 text-slate-100 shadow-md ring-2 ring-slate-500/20' : '';
+                  badgeColor = isSelected ? 'bg-slate-800/40 text-slate-100 border-slate-500/40' : 'bg-slate-800/50 text-slate-200 border-slate-750';
                   if (isSelected) iconColor = 'text-slate-100';
                 } else if (col.id === 'negotiating') {
-                  selectedClass = isSelected ? 'bg-amber-950/80 border-amber-500 text-slate-100 shadow-md ring-2 ring-amber-500/20' : '';
-                  badgeColor = isSelected ? 'bg-amber-400/20 text-amber-400 border-amber-400/30' : 'bg-amber-950/40 text-amber-400 border-amber-900/30';
-                  if (isSelected) iconColor = 'text-amber-400';
+                  selectedClass = isSelected ? 'bg-amber-950/20 dark:bg-amber-950/80 border-2 border-amber-600 dark:border-amber-500 text-slate-100 shadow-md ring-2 ring-amber-500/20' : '';
+                  badgeColor = isSelected ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20';
+                  if (isSelected) iconColor = 'text-amber-600 dark:text-amber-400';
                 } else if (col.id === 'rotations') {
-                  selectedClass = isSelected ? 'bg-indigo-950/80 border-indigo-500 text-slate-100 shadow-md ring-2 ring-indigo-500/20' : '';
-                  badgeColor = isSelected ? 'bg-indigo-400/20 text-indigo-400 border-indigo-400/30' : 'bg-indigo-950/40 text-indigo-400 border-indigo-900/30';
-                  if (isSelected) iconColor = 'text-indigo-400';
+                  selectedClass = isSelected ? 'bg-indigo-950/20 dark:bg-indigo-950/80 border-2 border-indigo-600 dark:border-indigo-500 text-slate-100 shadow-md ring-2 ring-indigo-500/20' : '';
+                  badgeColor = isSelected ? 'bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 border-indigo-500/30' : 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20';
+                  if (isSelected) iconColor = 'text-indigo-600 dark:text-indigo-400';
                 } else if (col.id === 'proposal') {
-                  selectedClass = isSelected ? 'bg-purple-950/80 border-purple-500 text-slate-100 shadow-md ring-2 ring-purple-500/20' : '';
-                  badgeColor = isSelected ? 'bg-purple-400/20 text-purple-400 border-purple-400/30' : 'bg-purple-950/40 text-purple-400 border-purple-900/30';
-                  if (isSelected) iconColor = 'text-purple-400';
+                  selectedClass = isSelected ? 'bg-purple-950/20 dark:bg-purple-950/80 border-2 border-purple-600 dark:border-purple-500 text-slate-100 shadow-md ring-2 ring-purple-500/20' : '';
+                  badgeColor = isSelected ? 'bg-purple-500/20 text-purple-700 dark:text-purple-400 border-purple-500/30' : 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/20';
+                  if (isSelected) iconColor = 'text-purple-600 dark:text-purple-400';
                 } else if (col.id === 'won') {
-                  selectedClass = isSelected ? 'bg-emerald-950/80 border-emerald-500 text-slate-100 shadow-md ring-2 ring-emerald-500/20' : '';
-                  badgeColor = isSelected ? 'bg-emerald-400/20 text-emerald-400 border-emerald-400/30' : 'bg-emerald-950/40 text-emerald-400 border-emerald-900/30';
-                  if (isSelected) iconColor = 'text-emerald-400';
+                  selectedClass = isSelected ? 'bg-emerald-950/20 dark:bg-emerald-950/80 border-2 border-emerald-600 dark:border-emerald-500 text-slate-100 shadow-md ring-2 ring-emerald-500/20' : '';
+                  badgeColor = isSelected ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border-emerald-500/30' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20';
+                  if (isSelected) iconColor = 'text-emerald-600 dark:text-emerald-400';
                 } else if (col.id === 'lost') {
-                  selectedClass = isSelected ? 'bg-rose-950/80 border-rose-500 text-slate-100 shadow-md ring-2 ring-rose-500/20' : '';
-                  badgeColor = isSelected ? 'bg-rose-400/20 text-rose-400 border-rose-400/30' : 'bg-rose-950/40 text-rose-400 border-rose-900/30';
-                  if (isSelected) iconColor = 'text-rose-400';
+                  selectedClass = isSelected ? 'bg-rose-950/20 dark:bg-rose-950/80 border-2 border-rose-600 dark:border-rose-500 text-slate-100 shadow-md ring-2 ring-rose-500/20' : '';
+                  badgeColor = isSelected ? 'bg-rose-500/20 text-rose-700 dark:text-rose-400 border-rose-500/30' : 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20';
+                  if (isSelected) iconColor = 'text-rose-600 dark:text-rose-400';
                 }
 
                 return (

@@ -1,52 +1,185 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
 @import "tailwindcss";
 
+@variant dark (.dark &);
+
 @theme {
   --font-sans: "Inter", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", "Plus Jakarta Sans", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
-  --color-slate-950: #000000;
-  --color-slate-900: #050508;
-  --color-slate-850: #0b0b10;
-  --color-slate-800: #121218;
-  --color-slate-750: #1b1b22;
-  --color-slate-700: #25252e;
-  --color-slate-600: #3a3a46;
-  --color-slate-500: #5c5c6b;
-  --color-slate-400: #888899;
-  --color-slate-300: #bebecc;
-  --color-slate-200: #dedee6;
-  --color-slate-100: #f1f1f5;
-  --color-slate-50: #fafafc;
-  
-  --color-accent-purple: #10b981;
+  --color-slate-950: var(--slate-950);
+  --color-slate-900: var(--slate-900);
+  --color-slate-850: var(--slate-850);
+  --color-slate-800: var(--slate-800);
+  --color-slate-750: var(--slate-750);
+  --color-slate-700: var(--slate-700);
+  --color-slate-600: var(--slate-600);
+  --color-slate-500: var(--slate-500);
+  --color-slate-400: var(--slate-400);
+  --color-slate-300: var(--slate-300);
+  --color-slate-200: var(--slate-200);
+  --color-slate-100: var(--slate-100);
+  --color-slate-50: var(--slate-50);
+
+  --color-accent-purple: var(--accent-purple);
   --color-accent-blue: #3b82f6;
   --color-accent-teal: #06b6d4;
-  --color-accent-emerald: #10b981;
+  --color-accent-emerald: var(--accent-emerald);
 
-  --color-purple-950: #022c22;
-  --color-indigo-950: #022c22;
-  --color-indigo-900: #064e3b;
-  --color-indigo-500: #10b981;
-  --color-emerald-950: #01241a;
-  --color-amber-950: #2e1201;
-  --color-rose-950: #30020d;
-  --color-teal-950: #083b38;
-  --color-sky-950: #031c2c;
+  --color-purple-950: var(--purple-950);
+  --color-purple-900: var(--purple-900);
+  --color-purple-600: var(--purple-600);
+  --color-purple-500: var(--purple-500);
+  --color-purple-400: var(--purple-400);
 
-  --color-purple-400: #34d399;
-  --color-indigo-400: #34d399;
-  --color-emerald-400: #34d399;
-  --color-amber-400: #fbbf24;
-  --color-rose-400: #f43f5e;
-  --color-teal-400: #2dd4bf;
-  --color-sky-400: #38bdf8;
-  --color-update-bar-text: #06050b;
+  --color-indigo-950: var(--indigo-950);
+  --color-indigo-900: var(--indigo-900);
+  --color-indigo-600: var(--indigo-600);
+  --color-indigo-500: var(--indigo-500);
+  --color-indigo-400: var(--indigo-400);
+
+  --color-emerald-950: var(--emerald-950);
+  --color-emerald-900: var(--emerald-900);
+  --color-emerald-600: var(--emerald-600);
+  --color-emerald-500: var(--emerald-500);
+  --color-emerald-400: var(--emerald-400);
+
+  --color-amber-950: var(--amber-950);
+  --color-amber-900: var(--amber-900);
+  --color-amber-400: var(--amber-400);
+
+  --color-rose-950: var(--rose-950);
+  --color-rose-900: var(--rose-900);
+  --color-rose-700: var(--rose-700);
+  --color-rose-600: var(--rose-600);
+  --color-rose-500: var(--rose-500);
+  --color-rose-400: var(--rose-400);
+
+  --color-teal-950: var(--teal-950);
+  --color-sky-950: var(--sky-950);
+  
+  --color-update-bar-text: var(--update-bar-text);
+}
+
+:root, html.dark, .dark {
+  /* Ultra-sleek Pure AMOLED Black Dark Mode */
+  --slate-950: #000000; /* Pure AMOLED Pitch Black background */
+  --slate-900: #030303; /* Near pure black surface */
+  --slate-850: #080808; /* Deep AMOLED card background */
+  --slate-800: #121212; /* Dark control/button fill */
+  --slate-750: #1e1e1e; /* Crisp dark border */
+  --slate-700: #282828; /* Divider border */
+  --slate-600: #404040; /* Muted text */
+  --slate-500: #666666; /* Secondary text */
+  --slate-400: #8e8e8e; /* Muted label */
+  --slate-300: #c4c4c4;
+  --slate-200: #e2e2e2;
+  --slate-100: #f5f5f5; /* High-contrast white text */
+  --slate-50: #ffffff;
+
+  --accent-purple: #10b981;
+  --accent-emerald: #10b981;
+
+  --purple-950: #022c22;
+  --purple-900: #064e3b;
+  --purple-600: #7c3aed;
+  --purple-500: #10b981;
+  --purple-400: #34d399;
+
+  --indigo-950: #022c22;
+  --indigo-900: #064e3b;
+  --indigo-600: #7c3aed;
+  --indigo-500: #10b981;
+  --indigo-400: #34d399;
+
+  --emerald-950: #01241a;
+  --emerald-900: #064e3b;
+  --emerald-600: #059669;
+  --emerald-500: #10b981;
+  --emerald-400: #34d399;
+
+  --amber-950: #2e1201;
+  --amber-900: #78350f;
+  --amber-400: #fbbf24;
+
+  --rose-950: #30020d;
+  --rose-900: #881337;
+  --rose-700: #be123c;
+  --rose-600: #e11d48;
+  --rose-500: #f43f5e;
+  --rose-400: #f43f5e;
+
+  --teal-950: #083b38;
+  --sky-950: #031c2c;
+
+  --update-bar-text: #06050b;
+
+  color-scheme: dark;
+  background-color: #000000;
+  color: #f5f5f5;
+}
+
+html.light, .light {
+  /* High-Contrast Crisp Light Mode */
+  --slate-950: #f0f4f8; /* Soft blue-gray canvas background */
+  --slate-900: #ffffff; /* Pure white card background */
+  --slate-850: #ffffff; /* Pure white card background */
+  --slate-800: #f1f5f9; /* Light gray pill/button background */
+  --slate-750: #e2e8f0; /* Crisp subtle gray border */
+  --slate-700: #cbd5e1; /* Gray border */
+  --slate-600: #94a3b8; /* Muted gray text */
+  --slate-500: #64748b; /* Secondary gray text */
+  --slate-400: #475569; /* Dark gray text */
+  --slate-300: #334155; /* Dark slate text */
+  --slate-200: #1e293b; /* Deep slate text */
+  --slate-100: #0f172a; /* Pure black / deep slate primary text */
+  --slate-50: #000000;
+
+  --accent-purple: #7c3aed;
+  --accent-emerald: #059669;
+
+  --purple-950: #f3e8ff; /* Soft violet badge background */
+  --purple-900: #e9d5ff; /* Light purple border */
+  --purple-600: #7c3aed; /* Vibrant violet fill button */
+  --purple-500: #8b5cf6;
+  --purple-400: #7c3aed; /* Vibrant purple text */
+
+  --indigo-950: #f3e8ff;
+  --indigo-900: #e0e7ff;
+  --indigo-600: #7c3aed; /* Vibrant violet button */
+  --indigo-500: #8b5cf6;
+  --indigo-400: #6d28d9;
+
+  --emerald-950: #ecfdf5; /* Light green badge background */
+  --emerald-900: #d1fae5;
+  --emerald-600: #059669; /* Vibrant emerald green button */
+  --emerald-500: #10b981;
+  --emerald-400: #047857; /* Deep green text */
+
+  --amber-950: #fffbeb; /* Light orange badge background */
+  --amber-900: #fef3c7;
+  --amber-400: #d97706; /* Dark amber text */
+
+  --rose-950: #fff1f2; /* Light red badge background */
+  --rose-900: #ffe4e6;
+  --rose-700: #9f1239; /* Deep sharp red text */
+  --rose-600: #dc2626; /* High-contrast vibrant red */
+  --rose-500: #ef4444;
+  --rose-400: #e11d48; /* Dark red text */
+
+  --teal-950: #f0fdfa;
+  --sky-950: #f0f9ff;
+
+  --update-bar-text: #ffffff;
+
+  color-scheme: light;
+  background-color: #f0f4f8; /* Soft light blue-gray canvas background */
+  color: #0f172a;
 }
 
 body {
-  background-color: var(--color-slate-900);
+  background-color: var(--color-slate-950);
   color: var(--color-slate-100);
   transition: background-color 0.2s ease, color 0.2s ease;
   -webkit-font-smoothing: antialiased;
@@ -55,57 +188,23 @@ body {
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
-html.light {
-  --color-slate-950: #f1f5f9;
-  --color-slate-900: #f8fafc;
-  --color-slate-850: #ffffff;
-  --color-slate-800: #ffffff;
-  --color-slate-750: #f1f5f9;
-  --color-slate-700: #cbd5e1;
-  --color-slate-650: #94a3b8;
-  --color-slate-600: #64748b;
-  --color-slate-550: #475569;
-  --color-slate-500: #475569;
-  --color-slate-450: #334155;
-  --color-slate-400: #334155;
-  --color-slate-350: #1e293b;
-  --color-slate-300: #1e293b;
-  --color-slate-200: #0f172a;
-  --color-slate-100: #0f172a;
-  --color-slate-50: #020617;
-
-  --color-accent-purple: #7c3aed;
-  --color-accent-blue: #2563eb;
-  --color-accent-teal: #0d9488;
-  --color-accent-emerald: #059669;
-
-  --color-purple-950: #eedffc;
-  --color-indigo-950: #e0e7ff;
-  --color-indigo-900: #c7d2fe;
-  --color-indigo-500: #4f46e5;
-  --color-emerald-950: #e6fcf5;
-  --color-amber-950: #fdf5e2;
-  --color-rose-950: #ffebeb;
-  --color-teal-950: #e6fcfc;
-  --color-sky-950: #e0f2fe;
-
-  --color-purple-400: #7c3aed;
-  --color-indigo-400: #4f46e5;
-  --color-emerald-400: #059669;
-  --color-amber-400: #d97706;
-  --color-rose-400: #e11d48;
-  --color-teal-400: #0d9488;
-  --color-sky-400: #0284c7;
-  --color-update-bar-text: #ffffff;
+html.light body, .light body {
+  background-color: #f0f4f8;
+  color: #0f172a;
 }
 
-/* Beautiful custom scrollbars for dark mode */
+html.dark body, .dark body {
+  background-color: #000000;
+  color: #f5f5f5;
+}
+
+/* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--color-slate-900);
+  background: var(--color-slate-950);
 }
 ::-webkit-scrollbar-thumb {
   background: var(--color-slate-750);
@@ -130,21 +229,13 @@ html.light {
   animation-play-state: paused;
 }
 
-/* Premium High-End CRM Gloss, Shadows, and Transition Utilities */
+/* CRM Card Gloss and Transition Utilities */
 .crm-card {
-  @apply transition-all duration-300 ease-out border border-slate-800/60 bg-slate-850 hover:border-accent-emerald/40 hover:shadow-2xl hover:shadow-accent-emerald/5 hover:-translate-y-0.5 rounded-2xl;
-}
-
-.light .crm-card {
-  @apply border-slate-200/60 bg-white hover:border-accent-emerald/30 hover:shadow-2xl hover:shadow-slate-200/50 hover:-translate-y-0.5;
+  @apply transition-all duration-300 ease-out border border-slate-750 bg-slate-900 hover:border-indigo-500/40 hover:shadow-xl rounded-2xl;
 }
 
 .crm-input {
-  @apply bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-hidden focus:border-accent-emerald focus:ring-1 focus:ring-accent-emerald/30 transition-all;
-}
-
-.light .crm-input {
-  @apply bg-slate-50 border-slate-200 text-slate-800 focus:border-accent-emerald focus:ring-accent-emerald/20;
+  @apply bg-slate-800 border border-slate-750 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-hidden focus:border-indigo-500 transition-all;
 }
 
 .crm-btn {
@@ -152,42 +243,9 @@ html.light {
 }
 
 .glass-header {
-  @apply bg-slate-900/80 backdrop-blur-md border-b border-slate-800/80 sticky top-0 z-40;
+  @apply bg-slate-900/90 backdrop-blur-md border-b border-slate-750 sticky top-0 z-40;
 }
 
-.light .glass-header {
-  @apply bg-white/85 backdrop-blur-md border-b border-slate-200/80;
-}
-
-/* Beautiful custom soft shadow classes */
 .shadow-premium {
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.15);
 }
-
-.light .shadow-premium {
-  box-shadow: 0 10px 35px -12px rgba(148, 163, 184, 0.35);
-}
-
-.shadow-glow-emerald {
-  box-shadow: 0 0 20px -2px rgba(16, 185, 129, 0.15);
-}
-
-/* Custom linear border animations and gradient shines */
-.gradient-border-emerald {
-  position: relative;
-}
-.gradient-border-emerald::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(to bottom right, rgba(16, 185, 129, 0.4), transparent 60%);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-}
-
-
-

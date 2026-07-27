@@ -8,7 +8,7 @@ import { Lead, LeadStage, StatSummary, Coordinator } from './types.ts';
 import { 
   LayoutGrid, Table, BarChart3, Briefcase, ShieldAlert, Sparkles, 
   RefreshCw, MessageSquare, Plus, HelpCircle, Layers, Lock, User, Check, X, Shield,
-  LogOut, Users, UserCheck, Sun, Moon, PiggyBank
+  LogOut, Users, UserCheck, Sun, Moon, PiggyBank, Menu, ChevronRight, Settings, ChevronDown
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -39,6 +39,8 @@ export default function App() {
   const [isCoordManagerOpen, setIsCoordManagerOpen] = useState(false);
   const [isMetadataManagerOpen, setIsMetadataManagerOpen] = useState(false);
   const [isIncentiveRulesOpen, setIsIncentiveRulesOpen] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isManageOpen, setIsManageOpen] = useState(true);
 
   // Authentication & session state
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string; displayName: string; role: 'admin' | 'agent' } | null>(() => {
@@ -74,7 +76,7 @@ export default function App() {
   // Environment metadata
   const [apiMode, setApiMode] = useState<'live' | 'simulation'>('simulation');
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [logoError, setLogoError] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -87,10 +89,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('cgp_crm_theme', theme);
     const root = document.documentElement;
-    root.classList.add('dark');
     if (theme === 'light') {
       root.classList.add('light');
+      root.classList.remove('dark');
     } else {
+      root.classList.add('dark');
       root.classList.remove('light');
     }
   }, [theme]);
@@ -435,14 +438,14 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col font-sans text-slate-100 antialiased selection:bg-accent-purple selection:text-white" id="cgp-root-viewport">
+    <div className="min-h-screen bg-slate-900 dark:bg-slate-950 flex flex-col font-sans text-slate-100 antialiased selection:bg-accent-purple selection:text-white" id="cgp-root-viewport">
       
       {/* Dynamic Slide-in Success Welcome Toast */}
       {toastMessage && (
         <motion.div
-          initial={{ opacity: 0, y: -40, x: '-50%' }}
-          animate={{ opacity: 1, y: 0, x: '-50%' }}
-          className="fixed top-6 left-1/2 z-50 bg-slate-900 border border-slate-800 text-slate-100 px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3.5 min-w-[320px] max-w-md select-none"
+          initial={{ opacity: 0, y: -20, x: 20 }}
+          animate={{ opacity: 1, y: 0, x: 0 }}
+          className="fixed top-4 right-4 z-50 bg-slate-900 border border-slate-800 text-slate-100 px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3.5 min-w-[300px] max-w-sm select-none"
         >
           <div className="h-10 w-10 rounded-xl bg-slate-800 flex items-center justify-center text-accent-purple border border-slate-750 shrink-0">
             <UserCheck className="h-5 w-5" />
@@ -459,209 +462,175 @@ export default function App() {
           </button>
         </motion.div>
       )}
-      
-      {/* Upper Navigation Bar */}
-      <header className="bg-slate-900/95 border-b border-slate-850/80 lg:sticky lg:top-0 static z-40 backdrop-blur-md shadow-lg">
-        <div className="max-w-[1550px] mx-auto px-6 py-4 lg:py-0 lg:h-18 flex flex-col lg:flex-row items-center justify-between gap-4">
-          
-          {/* Brand header */}
-          <div className="flex items-center gap-3 text-left w-full lg:w-auto justify-between lg:justify-start">
-            <div className="flex items-center gap-3">
-              <div className="h-12 w-12 select-none shrink-0" id="cgp-header-logo-container">
-                <CGPLogo size={48} rounded="rounded-xl" />
-              </div>
-              <div>
-                <h1 className="font-black text-slate-50 tracking-wide text-sm sm:text-base leading-none flex items-center uppercase font-display">
-                  <span className="mr-2 sm:mr-3.5">Career</span>
-                  <span className="mr-2 sm:mr-3.5">Growth</span>
-                  <span className="mr-2 sm:mr-3.5">Placement</span>
-                  {apiMode === 'live' ? (
-                    <span className="h-2.5 w-2.5 rounded-full bg-accent-emerald animate-pulse mt-0.5" title="Live Auto-Parser Active" />
-                  ) : (
-                    <span className="h-2.5 w-2.5 rounded-full bg-rose-500 mt-0.2" title="Simulation" />
-                  )}
-                </h1>
-                <p className="text-[10px] text-accent-emerald font-extrabold uppercase font-mono mt-1 tracking-wider">
-                  Abroad Recruiting Tele-calling Hub
-                </p>
-              </div>
+
+      {/* TOP HEADER BAR (Reference Layout) */}
+      <header className="bg-slate-900 dark:bg-slate-900 border-b border-slate-800 px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-40 shadow-lg">
+        {/* Left: Brand & Logo */}
+        <div className="flex items-center gap-3.5">
+          <div className="h-10 w-10 bg-white rounded-xl flex items-center justify-center p-1 shadow-md shrink-0 cursor-pointer" onClick={() => setActiveTab('board')}>
+            <CGPLogo size={36} rounded="rounded-lg" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="font-black text-slate-100 text-sm sm:text-base tracking-wider uppercase font-display leading-none">
+                CAREER GROWTH PLACEMENT
+              </h1>
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" title="System Operational" />
+            </div>
+            <p className="text-[10px] text-emerald-400 font-mono font-extrabold uppercase tracking-wider mt-1">
+              Abroad Recruiting Tele-Calling Hub
+            </p>
+          </div>
+        </div>
+
+        {/* Right Header Actions */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* AI Inbound Parser button */}
+          <button
+            onClick={() => setApiMode(prev => prev === 'live' ? 'simulation' : 'live')}
+            className="bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-bold px-3.5 py-1.5 rounded-full border border-slate-700 flex items-center gap-2 cursor-pointer transition-all shadow-xs"
+            title="Toggle Live Parser / Simulation"
+          >
+            <span className="text-sm">🤖</span>
+            <span className="uppercase text-[11px] font-mono tracking-wider font-extrabold">
+              AI INBOUND PARSER
+            </span>
+          </button>
+
+          {/* User Badge */}
+          <div className="flex items-center gap-2 bg-slate-800/80 border border-slate-700/80 px-3 py-1 rounded-full shadow-xs">
+            <div className="h-7 w-7 rounded-full bg-indigo-600 text-white font-black text-xs flex items-center justify-center uppercase shadow-xs">
+              {currentUser?.displayName?.charAt(0).toUpperCase() || 'M'}
+            </div>
+            <div className="text-left hidden sm:block">
+              <p className="text-[11px] font-bold text-slate-200 leading-tight">
+                Good afternoon, {currentUser?.displayName}
+              </p>
+              <p className="text-[9px] font-black text-indigo-400 uppercase tracking-wider font-mono">
+                {userRole === 'admin' ? '👑 MASTER ADMIN' : 'COORDINATOR'}
+              </p>
             </div>
           </div>
 
-          {/* STAFF USER PANEL (Authentication & Coordinator Manager) */}
-          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-center lg:justify-end">
-            
-            {/* Simulation Status bar */}
-            <div className="text-[10px] uppercase font-bold text-slate-400 font-mono px-2.5 py-1 bg-slate-850 rounded-lg border border-slate-800 text-center whitespace-nowrap">
-              {apiMode === 'live' ? '🤖 AI Inbound Parser' : '🧪 Manual Simulation'}
-            </div>
+          {/* Admin Header Action Pills */}
+          {userRole === 'admin' && (
+            <>
+              <button
+                onClick={() => setIsCoordManagerOpen(true)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold px-4 py-1.5 rounded-full shadow-md shadow-indigo-950/30 flex items-center gap-1.5 uppercase cursor-pointer transition-all"
+              >
+                <Users className="h-3.5 w-3.5" />
+                <span>MANAGE STAFF</span>
+              </button>
 
-            {/* Active user badge */}
-            <div className="flex items-center gap-2 bg-slate-850 p-1.5 rounded-xl border border-slate-800 shadow-inner">
-              <span className="h-6 w-6 rounded-full bg-accent-purple text-white flex items-center justify-center text-[10px] font-black uppercase shadow-sm">
-                {currentUser?.displayName.charAt(0).toUpperCase() || 'U'}
-              </span>
-              <div className="text-left leading-none pr-1">
-                <p className="text-[11px] font-black text-slate-200">
-                  {(() => {
-                    const hr = new Date().getHours();
-                    let greeting = 'Hello';
-                    if (hr >= 5 && hr < 12) greeting = 'Good morning';
-                    else if (hr >= 12 && hr < 17) greeting = 'Good afternoon';
-                    else greeting = 'Good evening';
-                    return `${greeting}, ${currentUser?.displayName}`;
-                  })()}
-                </p>
-                <span className="text-[9px] font-black uppercase text-accent-purple tracking-wider">
-                  {userRole === 'admin' ? '👑 Master Admin' : '📞 Coordinator'}
-                </span>
-              </div>
-            </div>
+              <button
+                onClick={() => setIsMetadataManagerOpen(true)}
+                className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold px-4 py-1.5 rounded-full shadow-xs flex items-center gap-1.5 uppercase cursor-pointer transition-all"
+              >
+                <Layers className="h-3.5 w-3.5 text-indigo-400" />
+                <span>MANAGE OPTIONS</span>
+              </button>
 
-            {/* Admin-only Coordinator Manager Toggle */}
-            {userRole === 'admin' && (
-              <>
-                <button
-                  onClick={() => setIsCoordManagerOpen(true)}
-                  className="text-xs font-black px-3.5 py-2 bg-accent-purple hover:bg-accent-purple/90 text-white rounded-xl transition-all flex items-center gap-1.5 shadow-md shadow-accent-purple/10 cursor-pointer uppercase tracking-wider"
-                  title="Manage Staff & Credentials"
-                >
-                  <Users className="h-3.5 w-3.5" />
-                  <span>Manage Staff</span>
-                </button>
+              <button
+                onClick={() => setIsIncentiveRulesOpen(true)}
+                className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold px-4 py-1.5 rounded-full shadow-xs flex items-center gap-1.5 uppercase cursor-pointer transition-all"
+              >
+                <PiggyBank className="h-3.5 w-3.5 text-emerald-400" />
+                <span>INCENTIVE RULES</span>
+              </button>
+            </>
+          )}
 
-                <button
-                  onClick={() => setIsMetadataManagerOpen(true)}
-                  className="text-xs font-black px-3.5 py-2 bg-slate-850 hover:bg-slate-800 border border-slate-750 hover:border-slate-600 text-slate-200 rounded-xl transition-all flex items-center gap-1.5 shadow-md cursor-pointer uppercase tracking-wider"
-                  title="Manage Tags, Hiring Projects, Countries & Positions"
-                >
-                  <Layers className="h-3.5 w-3.5 text-accent-purple" />
-                  <span>Manage Options</span>
-                </button>
-
-                <button
-                  onClick={() => setIsIncentiveRulesOpen(true)}
-                  className="text-xs font-black px-3.5 py-2 bg-slate-850 hover:bg-slate-800 border border-slate-750 hover:border-slate-600 text-slate-200 rounded-xl transition-all flex items-center gap-1.5 shadow-md cursor-pointer uppercase tracking-wider"
-                  title="Manage Coordinator Incentive & Compensation Rules"
-                >
-                  <PiggyBank className="h-3.5 w-3.5 text-accent-purple" />
-                  <span>Incentive Rules</span>
-                </button>
-              </>
-            )}
-
-            {/* Theme Toggle Button */}
+          {/* Theme, Refresh, Logout Buttons */}
+          <div className="flex items-center gap-1 pl-1 border-l border-slate-800">
             <button
               onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
-              className="p-2 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-slate-100 transition-all flex items-center justify-center bg-slate-850 cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
               title={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
             >
-              {theme === 'light' ? <Moon className="h-4.5 w-4.5" /> : <Sun className="h-4.5 w-4.5" />}
+              {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
             </button>
 
-            {/* Sync Refresh Button */}
             <button
               onClick={() => pullCrmData()}
               disabled={isRefreshing}
-              className="p-2 border border-slate-800 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-slate-100 transition-all flex items-center justify-center bg-slate-850 cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
               title="Pull Cloud Data"
             >
-              <RefreshCw className={`h-4.5 w-4.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
             </button>
 
-            {/* Sign Out Button */}
             <button
               onClick={() => {
                 localStorage.removeItem('cgp_crm_session');
                 setCurrentUser(null);
               }}
-              className="p-2 border border-red-950 hover:bg-red-950/40 rounded-xl text-red-400 hover:text-red-300 transition-all flex items-center justify-center bg-slate-850 cursor-pointer"
-              title="Log Out / Exit Session"
+              className="p-1.5 rounded-lg text-rose-400 hover:text-rose-200 hover:bg-rose-950/40 transition cursor-pointer"
+              title="Sign Out"
             >
-              <LogOut className="h-4.5 w-4.5" />
+              <LogOut className="h-4 w-4" />
             </button>
           </div>
-
         </div>
       </header>
 
-      {/* Main Core Content Container */}
-      <main className="flex-1 max-w-[1550px] w-full mx-auto px-6 pt-6 pb-2 space-y-6 flex flex-col">
-        
-        {/* Navigation Tabs Menu */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 p-3 rounded-2xl border border-slate-800/80 shadow-xl">
-          
-          <div className="flex space-x-1.5 w-full sm:w-auto overflow-x-auto max-w-full">
-            {[
-              { id: 'board', label: 'Your Pipeline', icon: LayoutGrid },
-              { id: 'list', label: 'Spreadsheet Explorer', icon: Table },
-              { id: 'analytics', label: 'Consultancy Reports', icon: BarChart3 },
-              { id: 'ai-matcher', label: 'AI Profile Matcher', icon: Sparkles },
-              { id: 'jobs', label: 'Active Jobs Hub', icon: Briefcase },
-              { id: 'wallet', label: 'Incentive Wallet', icon: PiggyBank }
-            ].map(tab => {
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex items-center gap-2 text-xs font-extrabold px-4 py-2.5 rounded-xl transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                    activeTab === tab.id
-                      ? 'bg-accent-purple text-white shadow-lg shadow-accent-purple/20'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
-                  }`}
-                >
-                  <Icon className="h-4.5 w-4.5" />
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end shrink-0">
-            {/* Quick Stats overview */}
-            <div className="text-xs text-slate-500 font-mono text-left select-none">
-              Synced: {new Date().toLocaleTimeString(undefined, {hour: '2-digit', minute:'2-digit'})} • <strong className="text-slate-350">{leads.length}</strong> candidates
-            </div>
-
-            {/* Admin Manual Enrollment Trigger */}
-            {userRole === 'admin' && (
+      {/* HORIZONTAL TABS NAVIGATION BAR (Reference Layout) */}
+      <div className="bg-slate-850 dark:bg-slate-900 border border-slate-800 rounded-2xl shadow-lg p-2 flex flex-wrap items-center justify-between gap-3 my-3 mx-4 sm:mx-6">
+        {/* Left Horizontal Tabs Pill Stack */}
+        <nav className="flex items-center gap-1.5 flex-wrap">
+          {[
+            { id: 'board', label: 'Your Pipeline', icon: LayoutGrid },
+            { id: 'list', label: 'Spreadsheet Explorer', icon: Table },
+            { id: 'analytics', label: 'Consultancy Reports', icon: BarChart3 },
+            { id: 'ai-matcher', label: 'AI Profile Matcher', icon: Sparkles },
+            { id: 'jobs', label: 'Active Jobs Hub', icon: Briefcase },
+            { id: 'wallet', label: 'Incentive Wallet', icon: PiggyBank },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isSelected = activeTab === tab.id;
+            return (
               <button
-                onClick={() => setIsCreateModalOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-black bg-accent-emerald hover:bg-accent-emerald/90 text-white rounded-xl transition-all shadow-md shadow-accent-emerald/10 cursor-pointer"
-                title="Enroll candidate directly"
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/40'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                }`}
               >
-                <Plus className="h-4 w-4" /> Enrol Candidate
+                <Icon className={`h-4 w-4 ${isSelected ? 'text-white' : 'text-slate-400'}`} />
+                <span>{tab.label}</span>
               </button>
-            )}
-          </div>
+            );
+          })}
+        </nav>
+
+        {/* Right Sync Status & Enrol Action */}
+        <div className="flex items-center gap-4 ml-auto">
+          <span className="text-xs font-mono text-slate-400 font-medium hidden md:inline-block">
+            Synced: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} • <strong className="text-slate-200">{totalLeadsCount || leads.length}</strong> candidates
+          </span>
+
+          {userRole === 'admin' && (
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold px-4 py-2 rounded-xl shadow-md shadow-emerald-950/30 flex items-center gap-1.5 uppercase cursor-pointer transition-all"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Enrol Candidate</span>
+            </button>
+          )}
         </div>
+      </div>
+
+      {/* Main Core Content Area */}
+      <main className="flex-1 min-w-0 px-4 sm:px-6 pb-6 space-y-4 flex flex-col">
+        {/* Important Live Broadcast Updates Ticker */}
+        <ImportantUpdatesBar />
 
         {/* Dynamic Display Stage Router */}
-        {loading ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 min-h-[400px]">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.3 }}
-              className="flex flex-col items-center max-w-sm text-center bg-slate-900 border border-slate-800 p-8 rounded-3xl shadow-2xl space-y-5"
-            >
-              <div className="relative h-24 w-24 select-none animate-pulse" id="cgp-sync-logo-container">
-                <CGPLogo size={96} rounded="rounded-3xl" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-sm font-black text-slate-100 tracking-wider uppercase font-display">CGP HR Solutions</h3>
-                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide">Abroad Recruiting Tele-calling Hub</p>
-              </div>
-              <div className="flex items-center gap-2 bg-slate-850 px-3.5 py-2 rounded-xl border border-slate-800 text-[11px] font-mono text-slate-400">
-                <RefreshCw className="h-3.5 w-3.5 text-slate-400 animate-spin" />
-                <span>Synchronizing pipeline records...</span>
-              </div>
-            </motion.div>
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col">
-            {activeTab === 'board' && (
+        <div className="flex-1 flex flex-col">
+          {activeTab === 'board' && (
               <motion.div
                 key="board-tab"
                 initial={{ opacity: 0, y: 15 }}
@@ -783,7 +752,6 @@ export default function App() {
               </motion.div>
             )}
           </div>
-        )}
 
       </main>
 
