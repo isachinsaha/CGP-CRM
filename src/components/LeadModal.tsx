@@ -818,33 +818,33 @@ export default function LeadModal({
                   </div>
 
                   {/* Live Telecaller Remarks (Primary) */}
-                  <div className="bg-slate-900/20 p-4.5 rounded-xl border border-slate-750 space-y-3">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-750 pb-1.5 flex items-center justify-between">
+                  <div className="bg-slate-50/80 dark:bg-slate-900/20 p-4.5 rounded-xl border border-slate-200 dark:border-slate-750 space-y-3">
+                    <h4 className="text-xs font-black text-slate-800 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1.5 flex items-center justify-between">
                       <span>Live Telecaller Remarks</span>
                     </h4>
 
                     <div className="space-y-2.5 text-xs">
                       <div className="grid grid-cols-1 gap-2.5">
-                        <div className="p-2.5 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-300 dark:border-slate-750 text-left focus-within:border-accent-purple transition-all">
-                          <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 block uppercase tracking-wider">Remarks 1 (First Contact Outcome)</span>
+                        <div className="p-2.5 bg-white dark:bg-slate-900/40 rounded-lg border border-slate-300 dark:border-slate-750 text-left focus-within:border-emerald-500 transition-all">
+                          <span className="text-[9px] font-bold text-slate-600 dark:text-slate-400 block uppercase tracking-wider">Remarks 1 (First Contact Outcome)</span>
                           <textarea
                             rows={2}
                             name="remarks1"
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks1 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-100 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-bold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-bold text-xs"
                           />
                         </div>
-                        <div className="p-2.5 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-300 dark:border-slate-750 text-left focus-within:border-accent-purple transition-all">
-                          <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 block uppercase tracking-wider">Remarks 2 (Follow-up Call Comments)</span>
+                        <div className="p-2.5 bg-white dark:bg-slate-900/40 rounded-lg border border-slate-300 dark:border-slate-750 text-left focus-within:border-emerald-500 transition-all">
+                          <span className="text-[9px] font-bold text-slate-600 dark:text-slate-400 block uppercase tracking-wider">Remarks 2 (Follow-up Call Comments)</span>
                           <textarea
                             rows={2}
                             name="remarks2"
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks2 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-100 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-bold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-bold text-xs"
                           />
                         </div>
                         <div className="p-2.5 bg-amber-50 dark:bg-slate-900/40 rounded-lg border border-amber-300 dark:border-slate-750 text-left focus-within:border-amber-500/80 transition-all">
@@ -858,7 +858,7 @@ export default function LeadModal({
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks3 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-100 dark:text-amber-300 placeholder-amber-700/60 dark:placeholder-amber-500/50 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-black text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-amber-300 placeholder-amber-700/60 dark:placeholder-amber-500/50 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-black text-xs"
                           />
                         </div>
                       </div>
@@ -867,7 +867,7 @@ export default function LeadModal({
                         type="button"
                         onClick={() => saveProfileEdits()}
                         disabled={savingForm}
-                        className="w-full py-2.5 bg-slate-900 hover:bg-black text-slate-100 hover:text-white font-extrabold rounded-xl text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md shrink-0 cursor-pointer border border-slate-700"
+                        className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 dark:bg-slate-900 dark:hover:bg-black text-white font-extrabold rounded-xl text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md shrink-0 cursor-pointer border border-emerald-700 dark:border-slate-700"
                       >
                         {savingForm ? 'Saving Updates to cloud DB...' : 'Commit Remarks & Profile Changes'}
                         {saveSuccess && <CheckCircle2 className="h-4 w-4 text-emerald-400 animate-bounce" />}
@@ -883,10 +883,10 @@ export default function LeadModal({
                   </div>
 
                   {/* Interactive Candidate Document Checklist - Verification Desk Clickable and Light-Mode Adaptive */}
-                  <div className="bg-slate-900/25 dark:bg-slate-900/10 p-4.5 rounded-xl border border-slate-300 dark:border-slate-750 text-left shadow-xs">
-                    <h4 className="text-xs font-black text-slate-455 dark:text-slate-400 uppercase tracking-wider border-b border-slate-300 dark:border-slate-750 pb-1.5 mb-3 flex items-center justify-between">
-                      <span className="text-slate-800 dark:text-slate-300">Candidate Document Checklist</span>
-                      <span className="text-[9px] font-extrabold text-indigo-550 dark:text-indigo-400 bg-indigo-950/20 dark:bg-slate-900 border border-indigo-900/20 dark:border-slate-750 px-2 py-0.5 rounded uppercase font-mono tracking-wider">
+                  <div className="bg-slate-50 dark:bg-slate-900/40 p-4.5 rounded-xl border border-slate-200 dark:border-slate-750 text-left shadow-xs">
+                    <h4 className="text-xs font-black text-slate-900 dark:text-slate-200 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-2 mb-3 flex items-center justify-between">
+                      <span className="text-slate-900 dark:text-slate-200 font-extrabold flex items-center gap-1.5">Candidate Document Checklist</span>
+                      <span className="text-[9px] font-extrabold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/80 px-2.5 py-0.5 rounded uppercase font-mono tracking-wider">
                         Verification Desk
                       </span>
                     </h4>
@@ -898,20 +898,20 @@ export default function LeadModal({
                         onClick={() => {
                           setFormFields(prev => ({ ...prev, docPassportCopy: !prev.docPassportCopy }));
                         }}
-                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-700/10 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
                         title="Toggle Passport Copy Received"
                       >
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docPassportCopy 
                             ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
-                            : 'bg-slate-200 dark:bg-slate-900 border-slate-400 dark:border-slate-700 text-transparent'
+                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-transparent'
                         }`}>
                           ✓
                         </span>
-                        <span className={`font-bold transition-all ${
+                        <span className={`transition-all ${
                           formFields.docPassportCopy 
-                            ? 'text-slate-800 dark:text-slate-200 font-extrabold' 
-                            : 'text-slate-450 dark:text-slate-500'
+                            ? 'text-slate-900 dark:text-slate-100 font-black' 
+                            : 'text-slate-700 dark:text-slate-400 font-bold'
                         }`}>
                           Passport Copy
                         </span>
@@ -923,20 +923,20 @@ export default function LeadModal({
                         onClick={() => {
                           setFormFields(prev => ({ ...prev, docResume: !prev.docResume }));
                         }}
-                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-700/10 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
                         title="Toggle Resume Received"
                       >
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docResume 
                             ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
-                            : 'bg-slate-200 dark:bg-slate-900 border-slate-400 dark:border-slate-700 text-transparent'
+                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-transparent'
                         }`}>
                           ✓
                         </span>
-                        <span className={`font-bold transition-all ${
+                        <span className={`transition-all ${
                           formFields.docResume 
-                            ? 'text-slate-800 dark:text-slate-200 font-extrabold' 
-                            : 'text-slate-450 dark:text-slate-500'
+                            ? 'text-slate-900 dark:text-slate-100 font-black' 
+                            : 'text-slate-700 dark:text-slate-400 font-bold'
                         }`}>
                           Resume / CV
                         </span>
@@ -948,20 +948,20 @@ export default function LeadModal({
                         onClick={() => {
                           setFormFields(prev => ({ ...prev, docOfficeVisited: !prev.docOfficeVisited }));
                         }}
-                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-700/10 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
                         title="Toggle Office Visited"
                       >
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docOfficeVisited 
                             ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
-                            : 'bg-slate-200 dark:bg-slate-900 border-slate-400 dark:border-slate-700 text-transparent'
+                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-transparent'
                         }`}>
                           ✓
                         </span>
-                        <span className={`font-bold transition-all ${
+                        <span className={`transition-all ${
                           formFields.docOfficeVisited 
-                            ? 'text-slate-800 dark:text-slate-200 font-extrabold' 
-                            : 'text-slate-450 dark:text-slate-500'
+                            ? 'text-slate-900 dark:text-slate-100 font-black' 
+                            : 'text-slate-700 dark:text-slate-400 font-bold'
                         }`}>
                           Office Visited
                         </span>
@@ -973,20 +973,20 @@ export default function LeadModal({
                         onClick={() => {
                           setFormFields(prev => ({ ...prev, docOthers: !prev.docOthers }));
                         }}
-                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-700/10 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
                         title="Toggle Other Documents Received"
                       >
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docOthers 
                             ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
-                            : 'bg-slate-200 dark:bg-slate-900 border-slate-400 dark:border-slate-700 text-transparent'
+                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-transparent'
                         }`}>
                           ✓
                         </span>
-                        <span className={`font-bold transition-all ${
+                        <span className={`transition-all ${
                           formFields.docOthers 
-                            ? 'text-slate-800 dark:text-slate-200 font-extrabold' 
-                            : 'text-slate-450 dark:text-slate-500'
+                            ? 'text-slate-900 dark:text-slate-100 font-black' 
+                            : 'text-slate-700 dark:text-slate-400 font-bold'
                         }`}>
                           Other Documents
                         </span>
@@ -1561,39 +1561,41 @@ export default function LeadModal({
               {/* TAB 1: ACTIONS & REMINDERS (Tasks list) */}
               {activeRightTab === 'tasks' && (
                 <div className="space-y-4 animate-in fade-in duration-200">
-                  <div className="bg-slate-900/20 p-4 rounded-xl border border-slate-750">
-                    <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                      <ListTodo className="h-4.5 w-4.5 text-emerald-500" /> Schedule Telecaller Action Item
+                  <div className="bg-slate-50 dark:bg-slate-900/20 p-4 rounded-xl border border-slate-200 dark:border-slate-750">
+                    <h4 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                      <ListTodo className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" /> Schedule Telecaller Action Item
                     </h4>
 
                     <form onSubmit={handleAddTask} className="space-y-3">
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase">Action Description</label>
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Action Description</label>
                         <input
                           type="text"
                           required
                           placeholder="e.g. Callback to request passport scan..."
                           value={newTaskTitle}
                           onChange={(e) => setNewTaskTitle(e.target.value)}
-                          className="w-full text-xs px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-accent-purple focus:bg-slate-900 transition-all text-slate-100 mt-1 font-semibold"
+                          className="w-full text-xs px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all mt-1 font-semibold"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase">Follow-up Due Date</label>
-                          <input
-                            type="date"
-                            required
-                            value={newTaskDueDate}
-                            onChange={(e) => setNewTaskDueDate(e.target.value)}
-                            className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-accent-purple focus:bg-slate-900 text-slate-100 mt-1 font-semibold [color-scheme:dark]"
-                            style={{ colorScheme: 'dark' }}
-                          />
+                          <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Follow-up Due Date</label>
+                          <div className="relative">
+                            <input
+                              type="date"
+                              required
+                              value={newTaskDueDate}
+                              onChange={(e) => setNewTaskDueDate(e.target.value)}
+                              className="w-full text-xs pl-8 pr-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 font-bold cursor-pointer dark:[color-scheme:dark] [color-scheme:light]"
+                            />
+                            <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-emerald-600 dark:text-emerald-400 pointer-events-none" />
+                          </div>
                         </div>
                         <div className="flex items-end">
                           <button
                             type="submit"
-                            className="w-full py-2 bg-slate-900 hover:bg-black text-slate-100 hover:text-white text-xs font-bold rounded-lg transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1 border border-slate-700"
+                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5 border border-emerald-600"
                           >
                             <ArrowRight className="h-3.5 w-3.5" />
                             Schedule Task

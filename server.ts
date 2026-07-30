@@ -116,6 +116,7 @@ app.get('/api/leads', async (req, res) => {
     const countriesMap = new Map<string, string>(); // lowercase -> original casing
     const projectsMap = new Map<string, string>();
     const tagsMap = new Map<string, string>();
+    const positionsMap = new Map<string, string>();
 
     rawLeads.forEach(l => {
       if (l.country && l.country.trim()) {
@@ -131,6 +132,13 @@ app.get('/api/leads', async (req, res) => {
         const lower = trimmed.toLowerCase();
         if (!projectsMap.has(lower) || (trimmed !== trimmed.toUpperCase() && projectsMap.get(lower) === projectsMap.get(lower)?.toUpperCase())) {
           projectsMap.set(lower, trimmed);
+        }
+      }
+      if (l.position && l.position.trim()) {
+        const trimmed = l.position.trim();
+        const lower = trimmed.toLowerCase();
+        if (!positionsMap.has(lower) || (trimmed !== trimmed.toUpperCase() && positionsMap.get(lower) === positionsMap.get(lower)?.toUpperCase())) {
+          positionsMap.set(lower, trimmed);
         }
       }
       if (l.tags && Array.isArray(l.tags)) {
@@ -149,6 +157,7 @@ app.get('/api/leads', async (req, res) => {
     const meta = {
       countries: Array.from(countriesMap.values()).sort((a, b) => a.localeCompare(b)),
       projects: Array.from(projectsMap.values()).sort((a, b) => a.localeCompare(b)),
+      positions: Array.from(positionsMap.values()).sort((a, b) => a.localeCompare(b)),
       tags: Array.from(tagsMap.values()).sort((a, b) => a.localeCompare(b))
     };
 
@@ -171,7 +180,8 @@ app.get('/api/leads', async (req, res) => {
       userRole = '',
       all = 'false',
       gender = 'All',
-      remarksFilter = 'All'
+      remarksFilter = 'All',
+      position = 'All'
     } = req.query as Record<string, string>;
 
     const pageNum = parseInt(page, 10) || 1;
@@ -217,6 +227,11 @@ app.get('/api/leads', async (req, res) => {
       // D. Project filter
       if (project && project !== 'All') {
         if (!lead.project || lead.project.trim().toLowerCase() !== project.trim().toLowerCase()) return false;
+      }
+
+      // D.5 Target Job Position filter
+      if (position && position !== 'All') {
+        if (!lead.position || lead.position.trim().toLowerCase() !== position.trim().toLowerCase()) return false;
       }
 
       // E. Fit score filter

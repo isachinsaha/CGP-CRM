@@ -57,6 +57,7 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const [metaCountries, setMetaCountries] = useState<string[]>([]);
   const [metaProjects, setMetaProjects] = useState<string[]>([]);
+  const [metaPositions, setMetaPositions] = useState<string[]>([]);
   const [metaTags, setMetaTags] = useState<string[]>([]);
   const [filters, setFilters] = useState<any>({
     search: '',
@@ -65,6 +66,7 @@ export default function App() {
     fitScore: 'All',
     tag: 'All',
     project: 'All',
+    position: 'All',
     dateFilter: 'All',
     customStartDate: '',
     customEndDate: '',
@@ -258,6 +260,7 @@ export default function App() {
         fitScore: filters.fitScore || 'All',
         tag: filters.tag || 'All',
         project: filters.project || 'All',
+        position: filters.position || 'All',
         dateFilter: filters.dateFilter || 'All',
         customStartDate: filters.customStartDate || '',
         customEndDate: filters.customEndDate || '',
@@ -281,6 +284,7 @@ export default function App() {
           if (leadsData.meta) {
             if (leadsData.meta.countries) setMetaCountries(leadsData.meta.countries);
             if (leadsData.meta.projects) setMetaProjects(leadsData.meta.projects);
+            if (leadsData.meta.positions) setMetaPositions(leadsData.meta.positions);
             if (leadsData.meta.tags) setMetaTags(leadsData.meta.tags);
           }
         } else {
@@ -575,7 +579,7 @@ export default function App() {
       </header>
 
       {/* HORIZONTAL TABS NAVIGATION BAR (Reference Layout) */}
-      <div className="bg-slate-850 dark:bg-slate-900 border border-slate-800 rounded-2xl shadow-lg p-2 flex flex-wrap items-center justify-between gap-3 my-3 mx-4 sm:mx-6">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-lg p-2 flex flex-wrap items-center justify-between gap-3 my-3 mx-4 sm:mx-6">
         {/* Left Horizontal Tabs Pill Stack */}
         <nav className="flex items-center gap-1.5 flex-wrap">
           {[
@@ -595,10 +599,10 @@ export default function App() {
                 className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
                   isSelected
                     ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/40'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
-                <Icon className={`h-4 w-4 ${isSelected ? 'text-white' : 'text-slate-400'}`} />
+                <Icon className={`h-4 w-4 ${isSelected ? 'text-white' : 'text-slate-500 dark:text-slate-400'}`} />
                 <span>{tab.label}</span>
               </button>
             );
@@ -607,8 +611,8 @@ export default function App() {
 
         {/* Right Sync Status & Enrol Action */}
         <div className="flex items-center gap-4 ml-auto">
-          <span className="text-xs font-mono text-slate-400 font-medium hidden md:inline-block">
-            Synced: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} • <strong className="text-slate-200">{totalLeadsCount || leads.length}</strong> candidates
+          <span className="text-xs font-mono text-slate-500 dark:text-slate-400 font-medium hidden md:inline-block">
+            Synced: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} • <strong className="text-slate-800 dark:text-slate-200">{totalLeadsCount || leads.length}</strong> candidates
           </span>
 
           {userRole === 'admin' && (
@@ -675,6 +679,7 @@ export default function App() {
                   onFiltersChange={setFilters}
                   metaCountries={metaCountries}
                   metaProjects={metaProjects}
+                  metaPositions={metaPositions}
                   metaTags={metaTags}
                 />
               </motion.div>

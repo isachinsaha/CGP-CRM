@@ -24,6 +24,7 @@ interface LeadListProps {
   onFiltersChange?: (newFilters: any) => void;
   metaCountries?: string[];
   metaProjects?: string[];
+  metaPositions?: string[];
   metaTags?: string[];
 }
 
@@ -48,6 +49,7 @@ export default function LeadList({
   onFiltersChange,
   metaCountries = [],
   metaProjects = [],
+  metaPositions = [],
   metaTags = []
 }: LeadListProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -56,6 +58,7 @@ export default function LeadList({
   const [fitScoreFilter, setFitScoreFilter] = useState('All');
   const [tagFilter, setTagFilter] = useState('All');
   const [projectFilter, setProjectFilter] = useState('All');
+  const [positionFilter, setPositionFilter] = useState('All');
   const [genderFilter, setGenderFilter] = useState('All');
   const [remarksFilter, setRemarksFilter] = useState('All');
   const [dateFilter, setDateFilter] = useState('All'); // 'All', 'Today', 'Yesterday', 'Last7Days', 'Last30Days', 'Custom'
@@ -106,7 +109,7 @@ export default function LeadList({
   // Reset pagination to first page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, countryFilter, projectFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter, remarksFilter]);
+  }, [searchQuery, countryFilter, projectFilter, positionFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter, remarksFilter]);
 
   // Synchronize filter updates back to parent if server-side filtering is enabled
   useEffect(() => {
@@ -118,6 +121,7 @@ export default function LeadList({
         fitScore: fitScoreFilter,
         tag: tagFilter,
         project: projectFilter,
+        position: positionFilter,
         dateFilter: dateFilter,
         customStartDate,
         customEndDate,
@@ -126,7 +130,7 @@ export default function LeadList({
         remarksFilter
       });
     }
-  }, [searchQuery, countryFilter, coordinatorFilter, fitScoreFilter, tagFilter, projectFilter, genderFilter, dateFilter, customStartDate, customEndDate, bucketToggle, remarksFilter]);
+  }, [searchQuery, countryFilter, coordinatorFilter, fitScoreFilter, tagFilter, projectFilter, positionFilter, genderFilter, dateFilter, customStartDate, customEndDate, bucketToggle, remarksFilter]);
 
   // Synchronize page index back to parent
   useEffect(() => {
@@ -430,6 +434,25 @@ export default function LeadList({
     return ['All', ...deduplicated.sort((a, b) => a.localeCompare(b))];
   }, [leads, metaProjects]);
 
+  // Extract unique target job positions dynamically for filtering options
+  const targetPositionsList = useMemo(() => {
+    const list = metaPositions && metaPositions.length > 0
+      ? metaPositions
+      : Array.from(new Set(leads.map(l => l.position).filter(Boolean)));
+    
+    // Case-insensitive deduplicate
+    const seen = new Set<string>();
+    const deduplicated: string[] = [];
+    list.forEach(p => {
+      const lower = p.trim().toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        deduplicated.push(p.trim());
+      }
+    });
+    return ['All', ...deduplicated.sort((a, b) => a.localeCompare(b))];
+  }, [leads, metaPositions]);
+
   // Extract unique candidate tags dynamically for filter options
   const availableTagsList = useMemo(() => {
     const list = metaTags && metaTags.length > 0
@@ -499,6 +522,14 @@ export default function LeadList({
       label: `🎯 ${proj.toUpperCase()}`
     }))
   ], [targetProjectsList]);
+
+  const positionOptions = useMemo(() => [
+    { value: 'All', label: 'All Target Positions' },
+    ...targetPositionsList.filter(p => p !== 'All').map(pos => ({
+      value: pos,
+      label: `💼 ${pos.toUpperCase()}`
+    }))
+  ], [targetPositionsList]);
 
   const tagOptions = useMemo(() => [
     { value: 'All', label: 'All Tags' },
@@ -605,6 +636,10 @@ export default function LeadList({
       const matchesProject = projectFilter === 'All' || 
         (lead.project && lead.project.trim().toLowerCase() === projectFilter.trim().toLowerCase());
 
+      // 3.6 Target Job Position filter
+      const matchesPosition = positionFilter === 'All' || 
+        (lead.position && lead.position.trim().toLowerCase() === positionFilter.trim().toLowerCase());
+
       // 4. Inbound Quality Fit score filter
       const matchesFit = fitScoreFilter === 'All' || 
         (lead.fitScore && lead.fitScore.trim().toLowerCase() === fitScoreFilter.trim().toLowerCase());
@@ -694,9 +729,9 @@ export default function LeadList({
         }
       }
 
-      return matchesSearch && matchesCountry && matchesProject && matchesFit && matchesTag && matchesDate && matchesCoordinator && matchesGender && matchesRemarks;
+      return matchesSearch && matchesCountry && matchesProject && matchesPosition && matchesFit && matchesTag && matchesDate && matchesCoordinator && matchesGender && matchesRemarks;
     });
-  }, [leads, searchQuery, countryFilter, projectFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter, remarksFilter, onFiltersChange]);
+  }, [leads, searchQuery, countryFilter, projectFilter, positionFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter, remarksFilter, onFiltersChange]);
 
   // Paginated leads for page-wise viewport listing
   const paginatedLeads = useMemo(() => {
@@ -853,6 +888,14 @@ export default function LeadList({
             value={projectFilter}
             onChange={setProjectFilter}
             options={projectOptions}
+            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
+          />
+
+          {/* Target Job Position Filter */}
+          <SearchableSelect
+            value={positionFilter}
+            onChange={setPositionFilter}
+            options={positionOptions}
             className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
           />
 
