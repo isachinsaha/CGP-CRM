@@ -847,13 +847,13 @@ export default function LeadList({
               placeholder="Search Name, Phone, Origin, Position..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-1.5 text-xs rounded-lg border border-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-purple bg-slate-950 text-slate-100 placeholder-slate-500 font-medium"
+              className="w-full pl-9 pr-4 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-purple bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium"
             />
           </div>
 
           {/* Sub Agent Bucket Selector Toggle */}
           {userRole === 'agent' && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-950 text-slate-300 border border-slate-800 rounded-xl text-[10px] font-black tracking-wider uppercase select-none shadow-sm">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-800 rounded-xl text-[10px] font-black tracking-wider uppercase select-none shadow-sm">
               <span>🔒 CO-ORDINATOR PRIVATE SEAT ({filteredLeads.length} Contacts)</span>
             </div>
           )}
@@ -861,8 +861,8 @@ export default function LeadList({
 
         {/* Right Section: Filters & Grid Quick-Edit mode toggle */}
         <div className="flex flex-wrap gap-2.5 items-center w-full xl:w-auto justify-start xl:justify-end">
-          <div className="flex items-center gap-1 text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mr-1 select-none">
-            <Filter className="h-3.5 w-3.5 text-slate-500" /> DIRECTORY FILTERS:
+          <div className="flex items-center gap-1 text-[10px] font-black text-black dark:text-slate-100 uppercase tracking-widest leading-none mr-1 select-none">
+            <Filter className="h-3.5 w-3.5 text-black dark:text-slate-100" /> DIRECTORY FILTERS:
           </div>
 
           {/* Country filter */}
@@ -870,7 +870,7 @@ export default function LeadList({
             value={countryFilter}
             onChange={setCountryFilter}
             options={countryOptions}
-            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
+            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
           />
 
           {/* Coordinator Filter - only in Admin View */}
@@ -879,7 +879,7 @@ export default function LeadList({
               value={coordinatorFilter}
               onChange={setCoordinatorFilter}
               options={coordinatorOptions}
-              className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-accent-purple font-black focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
+              className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/80 hover:bg-emerald-100/80 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/60 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
             />
           )}
 
@@ -888,7 +888,7 @@ export default function LeadList({
             value={projectFilter}
             onChange={setProjectFilter}
             options={projectOptions}
-            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
+            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
           />
 
           {/* Target Job Position Filter */}
@@ -896,7 +896,7 @@ export default function LeadList({
             value={positionFilter}
             onChange={setPositionFilter}
             options={positionOptions}
-            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
+            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
           />
 
           {/* Tags Filter Dropdown */}
@@ -904,7 +904,7 @@ export default function LeadList({
             value={tagFilter}
             onChange={setTagFilter}
             options={tagOptions}
-            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer"
+            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
           />
 
           {/* Fit score filter */}
@@ -912,7 +912,7 @@ export default function LeadList({
             value={fitScoreFilter}
             onChange={setFitScoreFilter}
             options={fitScoreOptions}
-            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer"
+            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
           />
 
           {/* Gender Filter */}
@@ -920,7 +920,7 @@ export default function LeadList({
             value={genderFilter}
             onChange={setGenderFilter}
             options={genderOptions}
-            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
+            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
           />
 
           {/* Remarks wise Filter */}
@@ -928,7 +928,7 @@ export default function LeadList({
             value={remarksFilter}
             onChange={setRemarksFilter}
             options={remarksOptions}
-            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer"
+            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
           />
 
           {/* Date Wise Filter */}
@@ -936,7 +936,7 @@ export default function LeadList({
             value={dateFilter}
             onChange={setDateFilter}
             options={dateOptions}
-            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-750 bg-slate-950 text-slate-300 font-bold focus:outline-none focus:ring-1 focus:ring-accent-purple cursor-pointer uppercase"
+            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
           />
 
           {dateFilter === 'Custom' && (

@@ -144,34 +144,34 @@ html.light, .light {
   --accent-purple: #7c3aed;
   --accent-emerald: #059669;
 
-  --purple-950: #f3e8ff; /* Soft violet badge background */
-  --purple-900: #e9d5ff; /* Light purple border */
-  --purple-600: #7c3aed; /* Vibrant violet fill button */
+  --purple-950: #f3e8ff;
+  --purple-900: #e9d5ff;
+  --purple-600: #7c3aed;
   --purple-500: #8b5cf6;
-  --purple-400: #7c3aed; /* Vibrant purple text */
+  --purple-400: #7c3aed;
 
   --indigo-950: #f3e8ff;
   --indigo-900: #e0e7ff;
-  --indigo-600: #7c3aed; /* Vibrant violet button */
+  --indigo-600: #7c3aed;
   --indigo-500: #8b5cf6;
   --indigo-400: #6d28d9;
 
-  --emerald-950: #ecfdf5; /* Light green badge background */
+  --emerald-950: #ecfdf5;
   --emerald-900: #d1fae5;
-  --emerald-600: #059669; /* Vibrant emerald green button */
+  --emerald-600: #059669;
   --emerald-500: #10b981;
-  --emerald-400: #047857; /* Deep green text */
+  --emerald-400: #047857;
 
-  --amber-950: #fffbeb; /* Light orange badge background */
+  --amber-950: #fffbeb;
   --amber-900: #fef3c7;
-  --amber-400: #d97706; /* Dark amber text */
+  --amber-400: #d97706;
 
-  --rose-950: #fff1f2; /* Light red badge background */
+  --rose-950: #fff1f2;
   --rose-900: #ffe4e6;
-  --rose-700: #9f1239; /* Deep sharp red text */
-  --rose-600: #dc2626; /* High-contrast vibrant red */
+  --rose-700: #9f1239;
+  --rose-600: #dc2626;
   --rose-500: #ef4444;
-  --rose-400: #e11d48; /* Dark red text */
+  --rose-400: #e11d48;
 
   --teal-950: #f0fdfa;
   --sky-950: #f0f9ff;
@@ -179,7 +179,7 @@ html.light, .light {
   --update-bar-text: #ffffff;
 
   color-scheme: light;
-  background-color: #f0f4f8; /* Soft light blue-gray canvas background */
+  background-color: #f0f4f8;
   color: #0f172a;
 }
 
@@ -191,6 +191,68 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Scoped high-contrast black text for Lead Modal in Light Mode (when .dark is not present) */
+html:not(.dark) #cgp-leads-modal,
+html.light #cgp-leads-modal,
+.light #cgp-leads-modal {
+  color: #000000 !important;
+}
+
+html:not(.dark) #cgp-leads-modal label,
+html.light #cgp-leads-modal label,
+.light #cgp-leads-modal label {
+  color: #000000 !important;
+  font-weight: 800 !important;
+}
+
+html:not(.dark) #cgp-leads-modal h3,
+html:not(.dark) #cgp-leads-modal h4,
+html:not(.dark) #cgp-leads-modal h5,
+html.light #cgp-leads-modal h3,
+html.light #cgp-leads-modal h4,
+html.light #cgp-leads-modal h5 {
+  color: #000000 !important;
+  font-weight: 900 !important;
+}
+
+html:not(.dark) #cgp-leads-modal span:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]),
+html:not(.dark) #cgp-leads-modal p:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]),
+html:not(.dark) #cgp-leads-modal strong:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]),
+html.light #cgp-leads-modal span:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]),
+html.light #cgp-leads-modal p:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]),
+html.light #cgp-leads-modal strong:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]) {
+  color: #000000;
+}
+
+html:not(.dark) #cgp-leads-modal input,
+html:not(.dark) #cgp-leads-modal select,
+html:not(.dark) #cgp-leads-modal textarea,
+html.light #cgp-leads-modal input,
+html.light #cgp-leads-modal select,
+html.light #cgp-leads-modal textarea,
+.light #cgp-leads-modal input,
+.light #cgp-leads-modal select,
+.light #cgp-leads-modal textarea {
+  color: #000000 !important;
+  font-weight: 700 !important;
+}
+
+html:not(.dark) #cgp-leads-modal ::placeholder,
+html.light #cgp-leads-modal ::placeholder,
+.light #cgp-leads-modal ::placeholder {
+  color: #334155 !important;
+  opacity: 1 !important;
+}
+
+html:not(.dark) #cgp-leads-modal .text-white,
+html:not(.dark) #cgp-leads-modal button.text-white,
+html:not(.dark) #cgp-leads-modal span.text-white,
+html.light #cgp-leads-modal .text-white,
+html.light #cgp-leads-modal button.text-white,
+html.light #cgp-leads-modal span.text-white {
+  color: #ffffff !important;
 }
 
 html.light body, .light body {

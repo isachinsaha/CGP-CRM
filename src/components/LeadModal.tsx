@@ -165,10 +165,10 @@ export default function LeadModal({
     callConnected: initialLead.callConnected || 'connected',
     source: initialLead.source || '',
     project: initialLead.project || '',
-    docPassportCopy: !!initialLead.docPassportCopy,
-    docResume: !!initialLead.docResume,
-    docOfficeVisited: !!initialLead.docOfficeVisited,
-    docOthers: !!initialLead.docOthers,
+    docPassportCopy: initialLead.docPassportCopy === true,
+    docResume: initialLead.docResume === true,
+    docOfficeVisited: initialLead.docOfficeVisited === true,
+    docOthers: initialLead.docOthers === true,
     reminderEnabled: !!initialLead.reminderEnabled
   });
 
@@ -211,10 +211,10 @@ export default function LeadModal({
       callConnected: initialLead.callConnected || 'connected',
       source: initialLead.source || '',
       project: initialLead.project || '',
-      docPassportCopy: !!initialLead.docPassportCopy,
-      docResume: !!initialLead.docResume,
-      docOfficeVisited: !!initialLead.docOfficeVisited,
-      docOthers: !!initialLead.docOthers,
+      docPassportCopy: initialLead.docPassportCopy === true,
+      docResume: initialLead.docResume === true,
+      docOfficeVisited: initialLead.docOfficeVisited === true,
+      docOthers: initialLead.docOthers === true,
       reminderEnabled: !!initialLead.reminderEnabled
     });
     isFirstMountOrChangeRef.current = true;
@@ -510,59 +510,59 @@ export default function LeadModal({
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 380, damping: 26 }}
-        className="bg-slate-850 rounded-3xl shadow-2xl border border-slate-750 w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden"
+        className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-6xl h-[92vh] flex flex-col overflow-hidden text-slate-900 dark:text-slate-100"
       >
         
         {/* Header ribbon */}
-        <div className="bg-slate-900/30 px-6 py-4 border-b border-slate-750 flex flex-col sm:flex-row gap-4 justify-between sm:items-center">
+        <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row gap-4 justify-between lg:items-center shrink-0 shadow-2xs">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-slate-900 text-slate-100 rounded-xl">
-              <Info className="h-5.5 w-5.5" />
+            <div className="p-1.5 border border-slate-300 dark:border-slate-700 rounded-full text-slate-700 dark:text-slate-300 shrink-0">
+              <Info className="h-4 w-4" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-extrabold text-slate-100 text-lg">{formatCandidateName(lead.name)}</h3>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase border ${getFitStyle(lead.fitScore)}`}>
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight uppercase">{formatCandidateName(lead.name)}</h3>
+                <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase border ${getFitStyle(lead.fitScore)}`}>
                   {lead.fitScore} Fit
                 </span>
                 {lead.country && (
-                  <span className="text-[10px] bg-emerald-950 text-accent-emerald border border-emerald-400/50 rounded-md px-1.5 py-0.5 font-bold uppercase flex items-center gap-1 shadow-2xs">
+                  <span className="text-[10px] bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 rounded-full px-2.5 py-0.5 font-extrabold uppercase flex items-center gap-1">
                     {getCountryFlagUrl(lead.country) ? (
                       <img 
                         src={getCountryFlagUrl(lead.country)} 
                         alt="" 
-                        className="w-3.5 h-2.5 object-cover rounded-2xs shadow-3xs"
+                        className="w-3.5 h-2.5 object-cover rounded-2xs"
                         referrerPolicy="no-referrer"
                       />
                     ) : (
-                      <span>🌐</span>
+                      <span className="text-[10px]">🟢</span>
                     )}
                     Target: {lead.country}
                   </span>
                 )}
               </div>
-              <div className="flex items-center flex-wrap gap-x-2.5 gap-y-2 text-xs text-slate-400 font-mono mt-1.5">
-                <span className="flex items-center gap-1">
-                  Serial No: <span className="text-slate-200 font-bold">{lead.serialNo || 'Pending'}</span> 
+              <div className="flex items-center flex-wrap gap-x-2 gap-y-1 text-xs text-slate-600 dark:text-slate-300 font-mono mt-1">
+                <span className="flex items-center gap-1 text-[11px]">
+                  Serial No: <strong className="text-slate-900 dark:text-white font-bold">{lead.serialNo || 'Pending'}</strong> 
                 </span>
-                <span className="text-slate-600 select-none">•</span>
-                <span className="flex items-center gap-1">
-                  Phone: <span className="text-slate-200 font-bold">{lead.phone}</span> 
+                <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
+                <span className="flex items-center gap-1 text-[11px]">
+                  Phone: <strong className="text-slate-900 dark:text-white font-bold">{lead.phone}</strong> 
                 </span>
                 {lead.alternateNo && (
                   <>
-                    <span className="text-slate-600 select-none">•</span>
-                    <span className="flex items-center gap-1">
-                      Alt: <span className="text-slate-200 font-bold">{lead.alternateNo}</span>
+                    <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
+                    <span className="flex items-center gap-1 text-[11px]">
+                      Alt: <strong className="text-slate-900 dark:text-white font-bold">{lead.alternateNo}</strong>
                     </span>
                   </>
                 )}
                 {lead.assignedTo && (
                   <>
-                    <span className="text-slate-600 select-none">•</span>
-                    <span className="flex items-center gap-1">
+                    <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
+                    <span className="flex items-center gap-1 text-[11px]">
                       Coordinator:{' '}
-                      <span className="text-purple-800 dark:text-purple-300 font-extrabold bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded-md border border-purple-300 dark:border-purple-500/60">
+                      <span className="text-purple-700 dark:text-purple-300 font-extrabold bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800">
                         {lead.assignedTo}
                       </span>
                     </span>
@@ -570,10 +570,10 @@ export default function LeadModal({
                 )}
                 {lead.source && (
                   <>
-                    <span className="text-slate-600 select-none">•</span>
-                    <span className="flex items-center gap-1">
+                    <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
+                    <span className="flex items-center gap-1 text-[11px]">
                       Source:{' '}
-                      <span className="text-purple-800 dark:text-purple-300 font-bold bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded-md border border-purple-300 dark:border-purple-500/60 uppercase">
+                      <span className="text-purple-700 dark:text-purple-300 font-bold bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800 uppercase">
                         {lead.source}
                       </span>
                     </span>
@@ -581,10 +581,10 @@ export default function LeadModal({
                 )}
                 {lead.project && (
                   <>
-                    <span className="text-slate-600 select-none">•</span>
-                    <span className="flex items-center gap-1">
+                    <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
+                    <span className="flex items-center gap-1 text-[11px]">
                       Project:{' '}
-                      <span className="text-emerald-800 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-300 dark:border-emerald-600/60 uppercase">
+                      <span className="text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 uppercase">
                         {lead.project}
                       </span>
                     </span>
@@ -594,30 +594,30 @@ export default function LeadModal({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
             {/* Shorter, Thicker, Bolder and More Attractive Stage selection */}
-            <div className="flex items-center gap-1.5 bg-slate-900 py-1 px-2.5 rounded-xl border border-slate-600 shadow-xs">
-              <span className="text-[10px] uppercase font-black text-slate-300 font-mono tracking-wider">Stage:</span>
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1 px-2.5 rounded-lg border border-slate-300 dark:border-slate-700 shadow-2xs">
+              <span className="text-[10px] uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider">STAGE:</span>
               <select
                 value={formFields.stage}
                 name="stage"
                 onChange={handleFieldChange}
-                className="text-[12px] font-black rounded-lg bg-slate-950 text-slate-100 px-2 py-1.5 focus:outline-none cursor-pointer max-w-[125px] border-none outline-none font-sans"
+                className="text-[12px] font-extrabold bg-transparent text-slate-900 dark:text-slate-100 px-1 py-0.5 focus:outline-none cursor-pointer max-w-[140px] font-sans"
               >
-                <option value="new" className="font-extrabold bg-slate-900 text-slate-100">New Inbound</option>
-                <option value="negotiating" className="font-extrabold bg-slate-900 text-amber-400">In Discussion</option>
-                <option value="rotations" className="font-extrabold bg-slate-900 text-indigo-400">In Rotations</option>
-                <option value="proposal" className="font-extrabold bg-slate-900 text-purple-400">Office Visited</option>
-                <option value="won" className="font-extrabold bg-slate-900 text-emerald-400">Closed Won ✅</option>
-                <option value="lost" className="font-extrabold bg-slate-900 text-rose-400">Closed Lost ❌</option>
+                <option value="new" className="font-extrabold bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">New Inbound</option>
+                <option value="negotiating" className="font-extrabold bg-white dark:bg-slate-900 text-amber-600">In Discussion</option>
+                <option value="rotations" className="font-extrabold bg-white dark:bg-slate-900 text-indigo-600">In Rotations</option>
+                <option value="proposal" className="font-extrabold bg-white dark:bg-slate-900 text-purple-600">Office Visited</option>
+                <option value="won" className="font-extrabold bg-white dark:bg-slate-900 text-emerald-600">Closed Won ✅</option>
+                <option value="lost" className="font-extrabold bg-white dark:bg-slate-900 text-rose-600">Closed Lost ❌</option>
               </select>
             </div>
 
             {/* Smaller Reminder Button matching Stage selection style but smaller */}
-            <div className="flex items-center gap-1.5 bg-slate-900 py-1 px-2.5 rounded-xl border border-slate-600 shadow-xs shrink-0">
-              <span className="text-[10px] uppercase font-black text-slate-300 font-mono tracking-wider flex items-center gap-1">
-                <Bell className={`h-3 w-3 ${formFields.reminderEnabled ? 'text-indigo-400 fill-indigo-400' : 'text-slate-450'}`} />
-                <span>Reminder:</span>
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1 px-2.5 rounded-lg border border-slate-300 dark:border-slate-700 shadow-2xs shrink-0">
+              <span className="text-[10px] uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider flex items-center gap-1">
+                <Bell className={`h-3 w-3 ${formFields.reminderEnabled ? 'text-indigo-600 dark:text-indigo-400 fill-indigo-600' : 'text-slate-400'}`} />
+                <span>REMINDER:</span>
               </span>
               <button
                 type="button"
@@ -645,8 +645,8 @@ export default function LeadModal({
                     console.error(err);
                   }
                 }}
-                className={`text-[12px] font-black rounded-lg bg-slate-950 px-2 py-1.5 focus:outline-none cursor-pointer border-none outline-none font-sans transition-all whitespace-nowrap ${
-                  formFields.reminderEnabled ? 'text-indigo-400 font-extrabold' : 'text-slate-400'
+                className={`text-[12px] font-black focus:outline-none cursor-pointer font-sans transition-all whitespace-nowrap ${
+                  formFields.reminderEnabled ? 'text-indigo-600 dark:text-indigo-400 font-extrabold' : 'text-slate-500'
                 }`}
               >
                 {formFields.reminderEnabled ? 'ON' : 'OFF'}
@@ -658,33 +658,33 @@ export default function LeadModal({
               type="button"
               onClick={() => saveProfileEdits()}
               disabled={savingForm}
-              className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl shadow-xs font-black text-[12px] uppercase tracking-wider border transition-all duration-200 cursor-pointer disabled:opacity-50 select-none shrink-0 ${
+              className={`flex items-center justify-center gap-1.5 py-1.5 px-4 rounded-lg shadow-xs font-black text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer disabled:opacity-50 select-none shrink-0 text-white ${
                 saveSuccess 
-                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm shadow-emerald-600/15' 
-                  : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700 hover:shadow-md hover:shadow-emerald-600/15 active:scale-95'
+                  ? 'bg-emerald-600' 
+                  : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95'
               }`}
             >
               {savingForm ? (
                 <>
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                  <span>Saving</span>
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-white" />
+                  <span className="text-white font-black">Saving</span>
                 </>
               ) : saveSuccess ? (
                 <>
                   <Check className="h-3.5 w-3.5 text-white stroke-[3.5px]" />
-                  <span>Saved</span>
+                  <span className="text-white font-black">Saved</span>
                 </>
               ) : (
                 <>
-                  <Check className="h-3.5 w-3.5" />
-                  <span>Save</span>
+                  <Check className="h-3.5 w-3.5 text-white stroke-[3.5px]" />
+                  <span className="text-white font-black">SAVE</span>
                 </>
               )}
             </button>
 
             <button
               onClick={onClose}
-              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-slate-100 rounded-xl transition-all"
+              className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg transition-all cursor-pointer"
             >
               <X className="h-5 w-5" />
             </button>
@@ -695,61 +695,64 @@ export default function LeadModal({
         <div className="flex-1 flex overflow-hidden">
           
           {/* Left Column: Form Details / Smart Metadata */}
-          <div className="w-1/2 border-r border-slate-750 flex flex-col bg-slate-900/10 overflow-y-auto">
+          <div className="w-1/2 border-r border-slate-200 dark:border-slate-750 flex flex-col bg-slate-50/50 dark:bg-slate-900/10 overflow-y-auto">
             
             {/* Left Tabs */}
-            <div className="flex p-2 bg-slate-900/50 border-b border-slate-750 shrink-0 sticky top-0 z-20 gap-2">
+            <div className="flex p-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 sticky top-0 z-20 gap-2">
               <button
                 type="button"
                 onClick={() => setActiveLeftTab('ai')}
-                className={`flex-1 py-2.5 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-2 shadow-3xs ${
+                className={`flex-1 py-2.5 px-4 text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-full flex items-center justify-center gap-2 cursor-pointer border text-white ${
                   activeLeftTab === 'ai'
-                    ? 'bg-emerald-600 text-white border border-emerald-700'
-                    : 'bg-transparent text-slate-400 hover:text-slate-100 font-bold'
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                    : 'bg-[#111827] text-white border-slate-800 hover:bg-[#1f293d] dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700'
                 }`}
               >
-                <Sparkles className={`h-3.5 w-3.5 ${activeLeftTab === 'ai' ? 'text-white' : 'text-emerald-600'}`} /> AI Classification
+                <Sparkles className="h-3.5 w-3.5 text-white" />
+                <span className="font-black text-white">AI Classification</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveLeftTab('profile')}
-                className={`flex-1 py-2.5 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-2 shadow-3xs ${
+                className={`flex-1 py-2.5 px-4 text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-full flex items-center justify-center gap-2 cursor-pointer border text-white ${
                   activeLeftTab === 'profile'
-                    ? 'bg-emerald-600 text-white border border-emerald-700'
-                    : 'bg-transparent text-slate-400 hover:text-slate-100 font-bold'
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                    : 'bg-[#111827] text-white border-slate-800 hover:bg-[#1f293d] dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700'
                 }`}
               >
-                <Clipboard className={`h-3.5 w-3.5 ${activeLeftTab === 'profile' ? 'text-white' : 'text-slate-400'}`} /> Office Form Sheet
+                <Clipboard className="h-3.5 w-3.5 text-white" />
+                <span className="font-black text-white">Office Form Sheet</span>
               </button>
             </div>
 
-            <div className="p-5.5 space-y-6 flex-1 text-left">
+            <div className="p-5 space-y-5 flex-1 text-left">
               {activeLeftTab === 'ai' ? (
                 <div className="space-y-5 animate-in fade-in duration-200">
                   
                   {/* AI Profiling Highlights block */}
-                  <div className="bg-emerald-950/20 p-4 rounded-xl border border-emerald-900/30 relative">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 tracking-wider">
-                        <Sparkles className="h-4 w-4 text-emerald-500" /> AI PLACEMENT INTERPRETER
+                  <div className="bg-emerald-500/5 dark:bg-emerald-950/20 p-4 rounded-2xl border border-emerald-500/20 dark:border-emerald-900/40 relative space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-black text-emerald-800 dark:text-emerald-400 tracking-wider">
+                        <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                        <span className="text-emerald-800 dark:text-emerald-400 font-black">AI PLACEMENT INTERPRETER</span>
                       </div>
                       <button
                         type="button"
                         onClick={triggerRequalification}
                         disabled={isRequalifying}
-                        className="px-2.5 py-1 bg-slate-800 hover:bg-emerald-600 hover:text-zinc-950 border border-slate-700 text-emerald-400 font-bold text-[9px] rounded transition-all flex items-center gap-1 cursor-pointer"
+                        className="px-2.5 py-1 bg-white dark:bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-200 dark:border-slate-700 text-emerald-800 dark:text-emerald-400 font-bold text-[10px] rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
                       >
                         <RefreshCw className={`h-2.5 w-2.5 ${isRequalifying ? 'animate-spin' : ''}`} />
                         {isRequalifying ? 'Analyzing...' : 'Re-Analyze Profile'}
                       </button>
                     </div>
 
-                    <div className="space-y-2 text-xs">
+                    <div className="space-y-3 text-xs">
                       {/* Extracted Target Details */}
-                      <div className="grid grid-cols-2 gap-2 bg-slate-900/60 p-2 rounded-lg border border-slate-700/80">
+                      <div className="grid grid-cols-2 gap-3 bg-white dark:bg-slate-900/80 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-3xs">
                         <div>
-                          <span className="text-slate-400 font-semibold block text-[11px]">Extracted Target Country:</span>
-                          <span className="text-slate-100 font-bold flex items-center gap-1.5 mt-0.5 text-xs">
+                          <span className="text-slate-700 dark:text-slate-400 font-bold block text-[11px]">Extracted Target Country:</span>
+                          <span className="text-slate-900 dark:text-slate-100 font-extrabold flex items-center gap-1.5 mt-0.5 text-xs">
                             {lead.country && getCountryFlagUrl(lead.country) ? (
                               <img 
                                 src={getCountryFlagUrl(lead.country)} 
@@ -764,51 +767,51 @@ export default function LeadModal({
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-400 font-semibold block text-[11px]">Placement Target Position:</span>
-                          <span className="text-slate-100 font-semibold block mt-0.5 text-xs">
+                          <span className="text-slate-700 dark:text-slate-400 font-bold block text-[11px]">Placement Target Position:</span>
+                          <span className="text-slate-900 dark:text-slate-100 font-extrabold block mt-0.5 text-xs">
                             💼 {lead.position || 'General Openings'}
                           </span>
                         </div>
                       </div>
 
                       {/* CANDIDATE KEY DETAILS LIST-WISE CONTAINER */}
-                      <div className="pt-1.5 border-t border-emerald-900/30 space-y-1.5">
-                        <span className="text-[10.5px] font-bold text-emerald-400 uppercase tracking-wider block">
+                      <div className="space-y-2">
+                        <span className="text-[10.5px] font-black text-emerald-800 dark:text-emerald-400 uppercase tracking-wider block">
                           Candidate Key Profile Details:
                         </span>
-                        <div className="bg-slate-900/90 rounded-xl border border-slate-700/80 divide-y divide-slate-700/80 overflow-hidden">
-                          <div className="flex items-center justify-between px-3 py-2 gap-3">
-                            <span className="text-slate-400 font-bold text-[11px] shrink-0 flex items-center gap-1.5">
+                        <div className="bg-white dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden shadow-xs">
+                          <div className="flex items-center justify-between px-3.5 py-2.5 gap-3">
+                            <span className="text-slate-800 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
                               <span>⏱️</span> Experience
                             </span>
-                            <span className="text-slate-100 font-semibold text-xs text-right break-words">
+                            <span className="text-slate-900 dark:text-slate-100 font-extrabold text-xs text-right break-words">
                               {getEffectiveExperience(lead)}
                             </span>
                           </div>
 
-                          <div className="flex items-center justify-between px-3 py-2 gap-3">
-                            <span className="text-slate-400 font-bold text-[11px] shrink-0 flex items-center gap-1.5">
+                          <div className="flex items-center justify-between px-3.5 py-2.5 gap-3">
+                            <span className="text-slate-800 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
                               <span>🎓</span> Qualification
                             </span>
-                            <span className="text-slate-100 font-semibold text-xs text-right break-words">
+                            <span className="text-slate-900 dark:text-slate-100 font-extrabold text-xs text-right break-words">
                               {lead.qualification || 'Not Specified'}
                             </span>
                           </div>
 
-                          <div className="flex items-center justify-between px-3 py-2 gap-3">
-                            <span className="text-slate-400 font-bold text-[11px] shrink-0 flex items-center gap-1.5">
+                          <div className="flex items-center justify-between px-3.5 py-2.5 gap-3">
+                            <span className="text-slate-800 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
                               <span>🎂</span> Age
                             </span>
-                            <span className="text-slate-100 font-semibold text-xs text-right break-words">
+                            <span className="text-slate-900 dark:text-slate-100 font-extrabold text-xs text-right break-words">
                               {lead.age ? `${lead.age} Yrs` : 'Not Specified'}
                             </span>
                           </div>
 
-                          <div className="flex items-center justify-between px-3 py-2 gap-3">
-                            <span className="text-slate-400 font-bold text-[11px] shrink-0 flex items-center gap-1.5">
+                          <div className="flex items-center justify-between px-3.5 py-2.5 gap-3">
+                            <span className="text-slate-800 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
                               <span>📍</span> Origin / State
                             </span>
-                            <span className="text-slate-100 font-semibold text-xs text-right break-words">
+                            <span className="text-slate-900 dark:text-slate-100 font-extrabold text-xs text-right break-words">
                               {lead.origin || 'Not Specified'}
                             </span>
                           </div>
@@ -818,38 +821,38 @@ export default function LeadModal({
                   </div>
 
                   {/* Live Telecaller Remarks (Primary) */}
-                  <div className="bg-slate-50/80 dark:bg-slate-900/20 p-4.5 rounded-xl border border-slate-200 dark:border-slate-750 space-y-3">
-                    <h4 className="text-xs font-black text-slate-800 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1.5 flex items-center justify-between">
+                  <div className="bg-white dark:bg-slate-900/60 p-4.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-xs">
+                    <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-2 flex items-center justify-between">
                       <span>Live Telecaller Remarks</span>
                     </h4>
 
-                    <div className="space-y-2.5 text-xs">
-                      <div className="grid grid-cols-1 gap-2.5">
-                        <div className="p-2.5 bg-white dark:bg-slate-900/40 rounded-lg border border-slate-300 dark:border-slate-750 text-left focus-within:border-emerald-500 transition-all">
-                          <span className="text-[9px] font-bold text-slate-600 dark:text-slate-400 block uppercase tracking-wider">Remarks 1 (First Contact Outcome)</span>
+                    <div className="space-y-3 text-xs">
+                      <div className="grid grid-cols-1 gap-3">
+                        <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 text-left focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/10 transition-all">
+                          <span className="text-[10px] font-black text-slate-900 dark:text-slate-200 block uppercase tracking-wider">Remarks 1 (First Contact Outcome)</span>
                           <textarea
                             rows={2}
                             name="remarks1"
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks1 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-bold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-600 dark:placeholder-slate-400 font-sans mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-extrabold text-xs"
                           />
                         </div>
-                        <div className="p-2.5 bg-white dark:bg-slate-900/40 rounded-lg border border-slate-300 dark:border-slate-750 text-left focus-within:border-emerald-500 transition-all">
-                          <span className="text-[9px] font-bold text-slate-600 dark:text-slate-400 block uppercase tracking-wider">Remarks 2 (Follow-up Call Comments)</span>
+                        <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 text-left focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/10 transition-all">
+                          <span className="text-[10px] font-black text-slate-900 dark:text-slate-200 block uppercase tracking-wider">Remarks 2 (Follow-up Call Comments)</span>
                           <textarea
                             rows={2}
                             name="remarks2"
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks2 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-400 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-bold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-600 dark:placeholder-slate-400 font-sans mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-extrabold text-xs"
                           />
                         </div>
-                        <div className="p-2.5 bg-amber-50 dark:bg-slate-900/40 rounded-lg border border-amber-300 dark:border-slate-750 text-left focus-within:border-amber-500/80 transition-all">
-                          <span className="text-[9px] font-black text-amber-800 dark:text-amber-400 block uppercase tracking-wider flex items-center gap-1">
-                            <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                        <div className="p-3.5 bg-amber-100/90 dark:bg-amber-950/40 rounded-xl border-2 border-amber-400 dark:border-amber-700 text-left focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/20 transition-all shadow-2xs">
+                          <span className="text-[11px] font-black text-black dark:text-amber-200 block uppercase tracking-wider flex items-center gap-1.5 mb-1">
+                            <span className="inline-block w-2 h-2 bg-amber-600 dark:bg-amber-400 rounded-full animate-pulse" />
                             Remarks 3 (Final Decision Remarks)
                           </span>
                           <textarea
@@ -858,7 +861,7 @@ export default function LeadModal({
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks3 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-amber-300 placeholder-amber-700/60 dark:placeholder-amber-500/50 italic font-mono mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-black text-xs"
+                            className="w-full bg-transparent border-none p-0 text-black dark:text-amber-100 placeholder-slate-600 dark:placeholder-amber-400/60 font-sans leading-relaxed focus:outline-none focus:ring-0 resize-none font-black text-xs"
                           />
                         </div>
                       </div>
@@ -867,10 +870,10 @@ export default function LeadModal({
                         type="button"
                         onClick={() => saveProfileEdits()}
                         disabled={savingForm}
-                        className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 dark:bg-slate-900 dark:hover:bg-black text-white font-extrabold rounded-xl text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md shrink-0 cursor-pointer border border-emerald-700 dark:border-slate-700"
+                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-sm shrink-0 cursor-pointer border border-emerald-600"
                       >
                         {savingForm ? 'Saving Updates to cloud DB...' : 'Commit Remarks & Profile Changes'}
-                        {saveSuccess && <CheckCircle2 className="h-4 w-4 text-emerald-400 animate-bounce" />}
+                        {saveSuccess && <CheckCircle2 className="h-4 w-4 text-white animate-bounce" />}
                       </button>
 
                       {lead.adminRemarks && (
@@ -883,10 +886,10 @@ export default function LeadModal({
                   </div>
 
                   {/* Interactive Candidate Document Checklist - Verification Desk Clickable and Light-Mode Adaptive */}
-                  <div className="bg-slate-50 dark:bg-slate-900/40 p-4.5 rounded-xl border border-slate-200 dark:border-slate-750 text-left shadow-xs">
+                  <div className="bg-white dark:bg-slate-900/40 p-4.5 rounded-xl border border-slate-200 dark:border-slate-750 text-left shadow-xs">
                     <h4 className="text-xs font-black text-slate-900 dark:text-slate-200 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-2 mb-3 flex items-center justify-between">
                       <span className="text-slate-900 dark:text-slate-200 font-extrabold flex items-center gap-1.5">Candidate Document Checklist</span>
-                      <span className="text-[9px] font-extrabold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/80 px-2.5 py-0.5 rounded uppercase font-mono tracking-wider">
+                      <span className="text-[10px] font-black text-white bg-indigo-600 dark:bg-indigo-700 px-3 py-1 rounded-lg uppercase font-mono tracking-wider shadow-2xs">
                         Verification Desk
                       </span>
                     </h4>
@@ -898,20 +901,24 @@ export default function LeadModal({
                         onClick={() => {
                           setFormFields(prev => ({ ...prev, docPassportCopy: !prev.docPassportCopy }));
                         }}
-                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
+                          formFields.docPassportCopy
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                        }`}
                         title="Toggle Passport Copy Received"
                       >
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docPassportCopy 
-                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
-                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-transparent'
+                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs' 
+                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
                         }`}>
-                          ✓
+                          {formFields.docPassportCopy && '✓'}
                         </span>
-                        <span className={`transition-all ${
+                        <span className={`text-xs transition-all ${
                           formFields.docPassportCopy 
-                            ? 'text-slate-900 dark:text-slate-100 font-black' 
-                            : 'text-slate-700 dark:text-slate-400 font-bold'
+                            ? 'text-emerald-800 dark:text-emerald-300 font-extrabold' 
+                            : 'text-slate-800 dark:text-slate-300 font-bold'
                         }`}>
                           Passport Copy
                         </span>
@@ -923,20 +930,24 @@ export default function LeadModal({
                         onClick={() => {
                           setFormFields(prev => ({ ...prev, docResume: !prev.docResume }));
                         }}
-                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
+                          formFields.docResume
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                        }`}
                         title="Toggle Resume Received"
                       >
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docResume 
-                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
-                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-transparent'
+                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs' 
+                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
                         }`}>
-                          ✓
+                          {formFields.docResume && '✓'}
                         </span>
-                        <span className={`transition-all ${
+                        <span className={`text-xs transition-all ${
                           formFields.docResume 
-                            ? 'text-slate-900 dark:text-slate-100 font-black' 
-                            : 'text-slate-700 dark:text-slate-400 font-bold'
+                            ? 'text-emerald-800 dark:text-emerald-300 font-extrabold' 
+                            : 'text-slate-800 dark:text-slate-300 font-bold'
                         }`}>
                           Resume / CV
                         </span>
@@ -948,20 +959,24 @@ export default function LeadModal({
                         onClick={() => {
                           setFormFields(prev => ({ ...prev, docOfficeVisited: !prev.docOfficeVisited }));
                         }}
-                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
+                          formFields.docOfficeVisited
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                        }`}
                         title="Toggle Office Visited"
                       >
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docOfficeVisited 
-                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
-                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-transparent'
+                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs' 
+                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
                         }`}>
-                          ✓
+                          {formFields.docOfficeVisited && '✓'}
                         </span>
-                        <span className={`transition-all ${
+                        <span className={`text-xs transition-all ${
                           formFields.docOfficeVisited 
-                            ? 'text-slate-900 dark:text-slate-100 font-black' 
-                            : 'text-slate-700 dark:text-slate-400 font-bold'
+                            ? 'text-emerald-800 dark:text-emerald-300 font-extrabold' 
+                            : 'text-slate-800 dark:text-slate-300 font-bold'
                         }`}>
                           Office Visited
                         </span>
@@ -973,20 +988,24 @@ export default function LeadModal({
                         onClick={() => {
                           setFormFields(prev => ({ ...prev, docOthers: !prev.docOthers }));
                         }}
-                        className="flex items-center gap-2.5 p-1 px-1.5 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-100/5 transition-all text-left cursor-pointer select-none"
+                        className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
+                          formFields.docOthers
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                        }`}
                         title="Toggle Other Documents Received"
                       >
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docOthers 
-                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' 
-                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-transparent'
+                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs' 
+                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
                         }`}>
-                          ✓
+                          {formFields.docOthers && '✓'}
                         </span>
-                        <span className={`transition-all ${
+                        <span className={`text-xs transition-all ${
                           formFields.docOthers 
-                            ? 'text-slate-900 dark:text-slate-100 font-black' 
-                            : 'text-slate-700 dark:text-slate-400 font-bold'
+                            ? 'text-emerald-800 dark:text-emerald-300 font-extrabold' 
+                            : 'text-slate-800 dark:text-slate-300 font-bold'
                         }`}>
                           Other Documents
                         </span>
@@ -995,10 +1014,10 @@ export default function LeadModal({
                   </div>
 
                   {/* Manual Observations (Editable Notes) */}
-                  <div className="bg-slate-900/20 p-4.5 rounded-xl border border-slate-750 text-left">
+                  <div className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200 dark:border-slate-800 text-left shadow-2xs">
                     <div className="flex justify-between items-center mb-2">
-                      <h4 className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Manual General Notes</h4>
-                      <span className="text-[10px] text-slate-400 font-medium">Quick-save notes directly</span>
+                      <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 block uppercase tracking-wider">Manual General Notes</h4>
+                      <span className="text-[10px] text-slate-700 dark:text-slate-400 font-bold">Quick-save notes directly</span>
                     </div>
                     <textarea
                       placeholder="Type custom notes, documentation status, candidate preferences here..."
@@ -1007,7 +1026,7 @@ export default function LeadModal({
                         const val = e.target.value;
                         setFormFields(prev => ({ ...prev, notes: val }));
                       }}
-                      className="w-full text-xs p-3 rounded-lg bg-slate-900 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-accent-purple focus:bg-slate-900 transition-all font-semibold font-sans min-h-[100px] text-slate-100"
+                      className="w-full text-xs p-3 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all font-bold font-sans min-h-[100px] text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-500"
                     />
                     <div className="flex justify-end mt-2">
                       <button
@@ -1043,7 +1062,7 @@ export default function LeadModal({
                           }
                         }}
                         id="quick-save-notes-btn"
-                        className="px-3 py-1 bg-slate-900 hover:bg-black text-white rounded text-[10px] font-extrabold transition-all"
+                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-extrabold transition-all cursor-pointer shadow-2xs uppercase tracking-wider"
                       >
                         Save Notes
                       </button>
@@ -1055,45 +1074,45 @@ export default function LeadModal({
                 // CGP Comprehensive spreadsheet-like form
                 <form onSubmit={saveProfileEdits} className="space-y-4 animate-in fade-in duration-200 text-left">
                   {isSubAgent && (
-                    <div className="p-3 bg-amber-950/20 border border-amber-900/30 text-amber-400 text-[11px] rounded-lg flex items-center gap-1.5 leading-relaxed font-semibold">
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                    <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-900/30 text-amber-800 dark:text-amber-400 text-[11px] rounded-lg flex items-center gap-1.5 leading-relaxed font-semibold">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
                       <span>Seat Restriction: Sensitive fields (Name, Phone, Target country, Serial) are locked. Telecaller comments below are fully editable!</span>
                     </div>
                   )}
 
                   {/* 1. SPREADSHEET INDICES */}
-                  <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider border-b border-slate-750 pb-1">1. Spreadsheet Ingestion Identifiers</h4>
+                  <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1">1. Spreadsheet Ingestion Identifiers</h4>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Serial No</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Serial No</label>
                       <input
                         type="text"
                         name="serialNo"
                         disabled={isSubAgent}
                         value={formFields.serialNo}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-950 disabled:text-slate-400 font-bold"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-bold"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Entry Date</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Entry Date</label>
                       <input
                         type="text"
                         name="entryDate"
                         disabled={isSubAgent}
                         value={formFields.entryDate}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-950 disabled:text-slate-400"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-bold"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Star Importance</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Star Importance</label>
                       <select
                         name="importance"
                         disabled={isSubAgent}
                         value={formFields.importance}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 cursor-pointer"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 cursor-pointer font-bold"
                       >
                         <option value="1">⭐ Star Low (1)</option>
                         <option value="2">⭐⭐ Star Fair (2)</option>
@@ -1105,44 +1124,44 @@ export default function LeadModal({
                   </div>
 
                   {/* 2. DEMOGRAPHICS */}
-                  <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider border-b border-slate-750 pb-1 pt-2">2. Candidate Information</h4>
+                  <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1 pt-2">2. Candidate Information</h4>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Candidate Name</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Candidate Name</label>
                       <input
                         type="text"
                         name="name"
                         value={formFields.name}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-extrabold uppercase"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-extrabold uppercase"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Candidate Mobile No</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Candidate Mobile No</label>
                       <input
                         type="text"
                         name="phone"
                         disabled={isSubAgent}
                         value={formFields.phone}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-mono font-bold"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-bold"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Alternative No (Optional)</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Alternative No (Optional)</label>
                       <input
                         type="text"
                         name="alternateNo"
                         value={formFields.alternateNo}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-mono"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-bold"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Gender</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Gender</label>
                       <SearchableSelect
                         value={formFields.gender}
                         onChange={(val) => setFormFields(prev => ({ ...prev, gender: val }))}
@@ -1153,38 +1172,38 @@ export default function LeadModal({
                           { value: 'F', label: '👩 F' },
                           { value: 'Not defined', label: '❓ NOT DEFINED' }
                         ]}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 font-bold uppercase cursor-pointer"
-                        dropdownClassName="w-48 bg-slate-900 border border-slate-700"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 font-extrabold uppercase cursor-pointer"
+                        dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Age</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Age</label>
                       <input
                         type="number"
                         name="age"
                         value={formFields.age}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-mono font-bold"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-extrabold"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Origin / State</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Origin / State</label>
                       <input
                         type="text"
                         name="origin"
                         placeholder="e.g. DARJEELING"
                         value={formFields.origin}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-semibold uppercase"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-extrabold uppercase"
                       />
                     </div>
                   </div>
 
                   {/* 3. JOB SECTOR */}
-                  <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider border-b border-slate-750 pb-1 pt-2">3. Job Applied Profile</h4>
+                  <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1 pt-2">3. Job Applied Profile</h4>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Target Country</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Target Country</label>
                       <SearchableSelect
                         value={formFields.country}
                         onChange={(val) => setFormFields(prev => ({ ...prev, country: val }))}
@@ -1195,12 +1214,12 @@ export default function LeadModal({
                             label: `✈️ ${c.toUpperCase()}`
                           }))
                         ]}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 text-slate-100 font-bold uppercase cursor-pointer"
-                        dropdownClassName="w-48 bg-slate-900 border border-slate-700"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-slate-900 dark:text-slate-100 font-extrabold uppercase cursor-pointer"
+                        dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-400 mb-0.5">Coordinator</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Coordinator</label>
                       <SearchableSelect
                         value={formFields.assignedTo}
                         onChange={(val) => setFormFields(prev => ({ ...prev, assignedTo: val }))}
@@ -1218,12 +1237,12 @@ export default function LeadModal({
                             }))
                           ))
                         ]}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 text-emerald-400 font-bold cursor-pointer"
-                        dropdownClassName="w-64 bg-slate-900 border border-slate-700"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-emerald-800 dark:text-emerald-400 font-extrabold cursor-pointer"
+                        dropdownClassName="w-64 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Assign Date</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Assign Date</label>
                       <input
                         type="text"
                         name="assignDate"
@@ -1231,14 +1250,14 @@ export default function LeadModal({
                         placeholder="yyyy-mm-dd"
                         value={formFields.assignDate}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-950 disabled:text-slate-400"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-bold"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Target Position / Line</label>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-400 mb-0.5">Target Position / Line</label>
                       <SearchableSelect
                         value={formFields.position}
                         onChange={(val) => setFormFields(prev => ({ ...prev, position: val }))}
@@ -1249,38 +1268,38 @@ export default function LeadModal({
                             label: `💼 ${p.toUpperCase()}`
                           }))
                         ]}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-medium uppercase cursor-pointer"
-                        dropdownClassName="w-60 bg-slate-900 border border-slate-700"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-500 dark:disabled:text-slate-400 font-medium uppercase cursor-pointer"
+                        dropdownClassName="w-60 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Experience Criteria</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Experience Criteria</label>
                       <input
                         type="text"
                         name="experience"
                         placeholder="e.g. FRESHER"
                         value={formFields.experience}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Qualification</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Qualification</label>
                       <input
                         type="text"
                         name="qualification"
                         placeholder="e.g. 10th Pass, 12th, Graduate, ITI"
                         value={formFields.qualification || ''}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">Lead Source</label>
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Lead Source</label>
                       <SearchableSelect
                         value={formFields.source}
                         onChange={(val) => setFormFields(prev => ({ ...prev, source: val }))}
@@ -1293,18 +1312,18 @@ export default function LeadModal({
                           { value: 'Referral', label: '🤝 REFERRAL' },
                           { value: 'Other', label: '❓ OTHER' }
                         ]}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-medium uppercase cursor-pointer"
-                        dropdownClassName="w-48 bg-slate-900 border border-slate-700"
+                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-bold uppercase cursor-pointer"
+                        dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                       />
                     </div>
 
                     <div>
                       <div className="flex justify-between items-center mb-0.5">
-                        <label className="block text-[11px] font-semibold text-slate-400">Hiring Project</label>
+                        <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400">Hiring Project</label>
                         <button
                           type="button"
                           onClick={() => setIsAddingProject(!isAddingProject)}
-                          className="text-[10px] font-extrabold text-emerald-500 hover:text-emerald-400 cursor-pointer"
+                          className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-400 cursor-pointer"
                         >
                           {isAddingProject ? 'Cancel' : '+ Add Project'}
                         </button>
@@ -1316,7 +1335,7 @@ export default function LeadModal({
                             value={newProjectName}
                             onChange={(e) => setNewProjectName(e.target.value)}
                             placeholder="Project..."
-                            className="flex-1 text-xs px-2 py-1 rounded border border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-900 text-slate-100 font-bold"
+                            className="flex-1 text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-bold"
                           />
                           <button
                             type="button"
@@ -1331,7 +1350,7 @@ export default function LeadModal({
                                 setIsAddingProject(false);
                               }
                             }}
-                            className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold shrink-0"
+                            className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold shrink-0 cursor-pointer"
                           >
                             Add
                           </button>
@@ -1347,21 +1366,19 @@ export default function LeadModal({
                               label: `📁 ${proj.toUpperCase()}`
                             }))
                           ]}
-                          className="w-full text-xs px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-950 disabled:text-slate-400 font-semibold uppercase cursor-pointer"
-                          dropdownClassName="w-56 bg-slate-900 border border-slate-700"
+                          className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
+                          dropdownClassName="w-56 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                         />
                       )}
                     </div>
                   </div>
 
-                  {/* 3.5 DOCUMENTS RECEIVED STATUS has been relocated to the main profile page under the fully clickable Verification Desk */}
-
                   {/* 4. ADMIN PLACEMENT & NOTES */}
-                  <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest border-b border-slate-750 pb-1 pt-2">4. Admin Placement & Notes</h4>
+                  <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-widest border-b border-slate-200 dark:border-slate-750 pb-1 pt-2">4. Admin Placement & Notes</h4>
                   <div className="space-y-3">
 
                     <div>
-                      <label className="block text-[11px] font-semibold text-rose-400 mb-0.5">Admin Placement instructions (Admins Only)</label>
+                      <label className="block text-[11px] font-extrabold text-rose-800 dark:text-rose-400 mb-0.5">Admin Placement instructions (Admins Only)</label>
                       <textarea
                         name="adminRemarks"
                         placeholder="Admin instructions only..."
@@ -1369,32 +1386,32 @@ export default function LeadModal({
                         value={formFields.adminRemarks}
                         onChange={handleFieldChange}
                         rows={2}
-                        className="w-full text-xs p-3 rounded-lg bg-rose-950/20 border border-rose-900/30 text-rose-400 focus:ring-1 focus:ring-rose-500 focus:outline-none disabled:bg-slate-950 disabled:text-slate-400"
+                        className="w-full text-xs p-3 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-900 dark:text-rose-400 focus:ring-1 focus:ring-rose-500 focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-bold"
                       />
                     </div>
 
                     {/* Interactive tags creator section */}
-                    <div className="pt-2 border-t border-slate-750">
-                      <label className="block text-[11px] font-bold text-slate-400 mb-1 flex items-center gap-1.5 uppercase tracking-wider">
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-750">
+                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-1 flex items-center gap-1.5 uppercase tracking-wider">
                         <span>🏷️ Candidate Category Tags</span>
-                        <span className="text-[9px] font-normal text-slate-400 capitalize">(Enter or click Add to save)</span>
+                        <span className="text-[9px] font-semibold text-slate-600 dark:text-slate-400 capitalize">(Enter or click Add to save)</span>
                       </label>
-                      <div className="flex flex-wrap gap-1.5 mb-2 p-2 bg-slate-900/40 rounded-xl border border-slate-750 min-h-[44px]">
+                      <div className="flex flex-wrap gap-1.5 mb-2 p-2 bg-white dark:bg-slate-900/40 rounded-xl border border-slate-200 dark:border-slate-750 min-h-[44px]">
                         {tags.length > 0 ? (
                           tags.map((tag, idx) => (
-                            <span key={idx} className="bg-slate-800 text-slate-200 text-[10px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 border border-slate-700">
+                            <span key={idx} className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-[10px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 border border-slate-300 dark:border-slate-700">
                               {tag}
                               <button
                                 type="button"
                                 onClick={() => setTags(tags.filter(t => t !== tag))}
-                                className="text-slate-400 hover:text-rose-400 transition-colors cursor-pointer text-[12px] font-bold leading-none inline-block ml-1"
+                                className="text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer text-[12px] font-bold leading-none inline-block ml-1"
                               >
                                 ×
                               </button>
                             </span>
                           ))
                         ) : (
-                          <span className="text-[10px] text-slate-400 italic self-center pl-1">No tags assigned. (e.g. Waiter, Waitress, Chef, Nurse)</span>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 italic self-center pl-1">No tags assigned. (e.g. Waiter, Waitress, Chef, Nurse)</span>
                         )}
                       </div>
                       <div className="flex gap-2">
@@ -1404,7 +1421,7 @@ export default function LeadModal({
                           value={tagInputVal}
                           onChange={(e) => setTagInputVal(e.target.value)}
                           placeholder="Add tag (e.g. Chef, Nurse, Waiter)..."
-                          className="flex-1 text-xs px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-bold animate-all"
+                          className="flex-1 text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-bold animate-all"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
@@ -1429,7 +1446,7 @@ export default function LeadModal({
                               setTagInputVal('');
                             }
                           }}
-                          className="px-3.5 py-2 bg-slate-900 hover:bg-black text-slate-100 rounded-xl text-xs font-black transition-all cursor-pointer border border-slate-700"
+                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-2xs"
                         >
                           Add Tag
                         </button>
@@ -1437,8 +1454,8 @@ export default function LeadModal({
 
                       {/* Auto-suggest dropdown matches */}
                       {suggestedTags.length > 0 && (
-                        <div className="mt-2 p-2 bg-purple-950/20 border border-purple-900/30 rounded-xl animate-in fade-in slide-in-from-top-1 text-left">
-                          <p className="text-[9px] uppercase font-bold text-indigo-400 mb-1 tracking-wider">
+                        <div className="mt-2 p-2 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/30 rounded-xl animate-in fade-in slide-in-from-top-1 text-left">
+                          <p className="text-[9px] uppercase font-bold text-indigo-700 dark:text-indigo-400 mb-1 tracking-wider">
                             💡 Matches from earlier candidate records (Click to add):
                           </p>
                           <div className="flex flex-wrap gap-1.5">
@@ -1450,9 +1467,9 @@ export default function LeadModal({
                                   setTags([...tags, sTag]);
                                   setTagInputVal('');
                                 }}
-                                className="bg-slate-900 hover:bg-indigo-600 text-slate-300 hover:text-white text-[10px] font-extrabold px-2 py-1 rounded-lg border border-slate-700 hover:border-indigo-600 transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
+                                className="bg-white dark:bg-slate-900 hover:bg-indigo-600 text-slate-700 dark:text-slate-300 hover:text-white text-[10px] font-extrabold px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:border-indigo-600 transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
                               >
-                                <Plus className="h-2.5 w-2.5 text-indigo-400 hover:text-white" />
+                                <Plus className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-400 hover:text-white" />
                                 <span>{sTag}</span>
                               </button>
                             ))}
@@ -1465,10 +1482,10 @@ export default function LeadModal({
                   <button
                     type="submit"
                     disabled={savingForm}
-                    className="w-full py-3 bg-slate-900 hover:bg-black text-slate-100 hover:text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-md shrink-0 cursor-pointer border border-slate-700"
+                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-xs shrink-0 cursor-pointer uppercase tracking-wider"
                   >
                     {savingForm ? 'Saving Updates to cloud DB...' : 'Commit Remarks & Profile Changes'}
-                    {saveSuccess && <CheckCircle2 className="h-4 w-4 text-emerald-400 animate-bounce" />}
+                    {saveSuccess && <CheckCircle2 className="h-4 w-4 text-white animate-bounce" />}
                   </button>
                 </form>
               )}
@@ -1476,33 +1493,34 @@ export default function LeadModal({
           </div>
 
           {/* Right Column: Dynamic Action Hub (Timeline, Task Center, AISensy Templates) */}
-          <div className="w-1/2 flex flex-col h-full bg-slate-900/10 relative justify-between border-l border-slate-750">
+          <div className="w-1/2 flex flex-col h-full bg-slate-50/50 dark:bg-slate-950/40 relative justify-between border-l border-slate-200 dark:border-slate-800">
             
             {/* Live Telecaller Call Status */}
-            <div className="p-4 bg-slate-950/40 border-b border-slate-750 space-y-3 shrink-0 text-left shadow-inner">
+            <div className="p-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 space-y-3 shrink-0 text-left shadow-2xs">
               <div className="flex justify-between items-center">
-                <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2 font-display">
-                  <PhoneCall className="h-4 w-4 text-accent-purple" /> Live Telecaller Call Status
+                <h4 className="text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider flex items-center gap-2">
+                  <PhoneCall className="h-4 w-4 text-purple-600 dark:text-purple-400" /> Live Telecaller Call Status
                 </h4>
-                <span className="text-[9px] font-bold text-slate-400 bg-slate-900 border border-slate-750 px-2 py-0.5 rounded font-mono uppercase">
+                <span className="text-[9px] font-extrabold text-white bg-emerald-600 dark:bg-emerald-700 px-2.5 py-0.5 rounded font-mono uppercase shadow-2xs">
                   Connected status
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3.5 pt-1">
+              <div className="grid grid-cols-2 gap-3 pt-1">
                 <button
                   type="button"
                   onClick={() => {
                     setFormFields(prev => ({ ...prev, callConnected: 'connected' }));
                   }}
-                  className={`py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all border cursor-pointer ${
+                  className={`py-2.5 px-4 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
                     formFields.callConnected === 'connected'
-                      ? 'bg-emerald-950/40 border-emerald-500/60 text-emerald-400 shadow-md shadow-emerald-950/20'
-                      : 'bg-slate-900 border-slate-750 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                      ? 'bg-emerald-600 dark:bg-emerald-600 text-white shadow-xs'
+                      : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750'
                   }`}
                 >
-                  <span className={`w-2.5 h-2.5 rounded-full ${formFields.callConnected === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
-                  Connected ✅
+                  <span className="text-white text-xs">🟢</span>
+                  <span className="text-white">CONNECTED</span>
+                  <Check className="h-3.5 w-3.5 text-white stroke-[3px]" />
                 </button>
 
                 <button
@@ -1510,48 +1528,55 @@ export default function LeadModal({
                   onClick={() => {
                     setFormFields(prev => ({ ...prev, callConnected: 'not_connected' }));
                   }}
-                  className={`py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all border cursor-pointer ${
+                  className={`py-2.5 px-4 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
                     formFields.callConnected === 'not_connected'
-                      ? 'bg-rose-950/40 border-rose-500/60 text-rose-400 shadow-md shadow-rose-950/20'
-                      : 'bg-slate-900 border-slate-750 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                      ? 'bg-rose-600 dark:bg-rose-600 text-white shadow-xs'
+                      : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750'
                   }`}
                 >
-                  <span className={`w-2.5 h-2.5 rounded-full ${formFields.callConnected === 'not_connected' ? 'bg-rose-400 animate-pulse' : 'bg-slate-600'}`} />
-                  Not Connected ❌
+                  <span className="text-white text-xs">🔴</span>
+                  <span>NOT CONNECTED</span>
+                  <X className="h-3.5 w-3.5 text-white stroke-[3px]" />
                 </button>
               </div>
 
               {formFields.callConnected === 'not_connected' && (
-                <div className="p-2.5 bg-rose-950/25 border border-rose-900/30 text-rose-300 rounded-lg text-[10px] font-bold flex items-center gap-1.5 animate-pulse mt-1">
+                <div className="p-2.5 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 rounded-xl text-[10.5px] font-bold flex items-center gap-1.5 animate-pulse mt-1">
                   <span>⚠️ Please schedule a callback task under "Actions & Reminders" below before committing.</span>
                 </div>
               )}
             </div>
 
             {/* Header / Tabs switcher */}
-            <div className="flex p-2 bg-slate-900/50 border-b border-slate-750 sticky top-0 z-20 shrink-0 gap-2">
+            <div className="flex p-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-20 shrink-0 gap-2">
               <button
                 type="button"
                 onClick={() => setActiveRightTab('tasks')}
-                className={`flex-1 py-2.5 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-2 shadow-3xs cursor-pointer ${
+                className={`flex-1 py-2.5 px-3 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border text-white ${
                   activeRightTab === 'tasks'
-                    ? 'bg-slate-850 text-slate-100 border border-slate-700'
-                    : 'bg-transparent text-slate-400 hover:text-slate-100 font-bold'
+                    ? 'bg-violet-700 text-white border-violet-700 shadow-2xs'
+                    : 'bg-[#111827] text-white border-slate-800 hover:bg-[#1f293d] dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700'
                 }`}
               >
-                <ListTodo className="h-3.5 w-3.5 text-emerald-500" /> Actions & Reminders ({ (lead.tasks || []).filter(t => !t.completed).length })
+                <ListTodo className="h-3.5 w-3.5 text-white" />
+                <span className="font-black text-white">
+                  Actions & Reminders ({ (lead.tasks || []).filter(t => !t.completed).length })
+                </span>
               </button>
               
               <button
                 type="button"
                 onClick={() => setActiveRightTab('timeline')}
-                className={`flex-1 py-2.5 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-2 shadow-3xs cursor-pointer ${
+                className={`flex-1 py-2.5 px-3 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border text-white ${
                   activeRightTab === 'timeline'
-                    ? 'bg-slate-850 text-slate-100 border border-slate-700'
-                    : 'bg-transparent text-slate-400 hover:text-slate-100 font-bold'
+                    ? 'bg-violet-700 text-white border-violet-700 shadow-2xs'
+                    : 'bg-[#111827] text-white border-slate-800 hover:bg-[#1f293d] dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700'
                 }`}
               >
-                <History className="h-3.5 w-3.5 text-blue-500" /> Activity Timeline ({ timelineCounts.total })
+                <History className="h-3.5 w-3.5 text-white" />
+                <span className="font-black text-white">
+                  Activity Timeline ({ lead.timeline?.length || 0 })
+                </span>
               </button>
             </div>
 
@@ -1561,33 +1586,33 @@ export default function LeadModal({
               {/* TAB 1: ACTIONS & REMINDERS (Tasks list) */}
               {activeRightTab === 'tasks' && (
                 <div className="space-y-4 animate-in fade-in duration-200">
-                  <div className="bg-slate-50 dark:bg-slate-900/20 p-4 rounded-xl border border-slate-200 dark:border-slate-750">
-                    <h4 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                      <ListTodo className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" /> Schedule Telecaller Action Item
+                  <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+                    <h4 className="text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider mb-3 flex items-center gap-2">
+                      <ListTodo className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> Schedule Telecaller Action Item
                     </h4>
 
                     <form onSubmit={handleAddTask} className="space-y-3">
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Action Description</label>
+                        <label className="block text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider">Action Description</label>
                         <input
                           type="text"
                           required
                           placeholder="e.g. Callback to request passport scan..."
                           value={newTaskTitle}
                           onChange={(e) => setNewTaskTitle(e.target.value)}
-                          className="w-full text-xs px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all mt-1 font-semibold"
+                          className="w-full text-xs px-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all mt-1 font-semibold"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Follow-up Due Date</label>
+                          <label className="block text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Follow-up Due Date</label>
                           <div className="relative">
                             <input
                               type="date"
                               required
                               value={newTaskDueDate}
                               onChange={(e) => setNewTaskDueDate(e.target.value)}
-                              className="w-full text-xs pl-8 pr-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 font-bold cursor-pointer dark:[color-scheme:dark] [color-scheme:light]"
+                              className="w-full text-xs pl-8 pr-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 font-bold cursor-pointer dark:[color-scheme:dark] [color-scheme:light]"
                             />
                             <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-emerald-600 dark:text-emerald-400 pointer-events-none" />
                           </div>
@@ -1595,7 +1620,7 @@ export default function LeadModal({
                         <div className="flex items-end">
                           <button
                             type="submit"
-                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5 border border-emerald-600"
+                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold rounded-lg transition-all shadow-2xs cursor-pointer flex items-center justify-center gap-1.5 uppercase tracking-wider"
                           >
                             <ArrowRight className="h-3.5 w-3.5" />
                             Schedule Task
@@ -1606,42 +1631,42 @@ export default function LeadModal({
                   </div>
 
                   <div className="space-y-2">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Scheduled Tasks list</h4>
+                    <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider">Scheduled Tasks list</h4>
                     
                     {lead.tasks && lead.tasks.length > 0 ? (
                       <div className="space-y-2">
                         {lead.tasks.map((task) => (
                           <div 
                             key={task.id}
-                            className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                            className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${
                               task.completed 
-                                ? 'bg-slate-900/10 text-slate-500 border-slate-800 line-through' 
-                                : 'bg-slate-900/45 text-slate-300 border-slate-750 hover:border-slate-700 shadow-3xs'
+                                ? 'bg-slate-100 dark:bg-slate-950/40 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-800 line-through' 
+                                : 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 shadow-2xs'
                             }`}
                           >
                             <div className="flex items-start gap-2.5 flex-1 pr-4">
                               <button
                                 type="button"
                                 onClick={() => handleToggleTask(task.id)}
-                                className="p-0.5 hover:text-slate-100 transition-colors shrink-0 mt-0.5"
+                                className="p-0.5 hover:text-slate-900 dark:hover:text-slate-100 transition-colors shrink-0 mt-0.5 cursor-pointer"
                               >
                                 {task.completed ? (
-                                  <CheckSquare className="h-4.5 w-4.5 text-emerald-500" />
+                                  <CheckSquare className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" />
                                 ) : (
-                                  <Square className="h-4.5 w-4.5 text-slate-500" />
+                                  <Square className="h-4.5 w-4.5 text-slate-400 dark:text-slate-500" />
                                 )}
                               </button>
                               <div className="text-xs text-left">
-                                <p className={`font-semibold ${task.completed ? 'text-slate-500' : 'text-slate-100 font-bold'}`}>{task.title}</p>
-                                <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
-                                  <Calendar className="h-3 w-3" /> Due: <strong className={task.completed ? 'text-slate-500' : 'text-rose-400 font-extrabold'}>{task.dueDate}</strong>
+                                <p className={`font-semibold ${task.completed ? 'text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100 font-bold'}`}>{task.title}</p>
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                                  <Calendar className="h-3 w-3" /> Due: <strong className={task.completed ? 'text-slate-400 dark:text-slate-500' : 'text-rose-600 dark:text-rose-400 font-extrabold'}>{task.dueDate}</strong>
                                 </span>
                               </div>
                             </div>
                             <button
                               type="button"
                               onClick={() => handleDeleteTask(task.id)}
-                              className="p-1 hover:bg-rose-950/20 text-slate-400 hover:text-rose-400 rounded transition-colors shrink-0"
+                              className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg transition-colors shrink-0 cursor-pointer"
                               title="Delete task item"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -1650,10 +1675,10 @@ export default function LeadModal({
                         ))}
                       </div>
                     ) : (
-                      <div className="text-center py-10 bg-slate-900/20 rounded-xl border border-slate-750 text-slate-400 space-y-1">
-                        <ListTodo className="h-8 w-8 text-slate-500 mx-auto opacity-40" />
-                        <p className="text-xs font-semibold text-slate-400">No active follow-up reminders scheduled.</p>
-                        <p className="text-[10px] text-slate-400">Add tasks above to remind your telecaller of client updates.</p>
+                      <div className="text-center py-10 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 space-y-1.5 shadow-2xs">
+                        <ListTodo className="h-8 w-8 text-slate-300 dark:text-slate-600 mx-auto stroke-[1.5]" />
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-300">No active follow-up reminders scheduled.</p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">Add tasks above to remind your telecaller of client updates.</p>
                       </div>
                     )}
                   </div>
@@ -1664,28 +1689,28 @@ export default function LeadModal({
               {activeRightTab === 'timeline' && (
                 <div className="space-y-4 animate-in fade-in duration-200">
                   {/* Timeline Header & Count */}
-                  <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-750 space-y-3">
+                  <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-xs">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <History className="h-4.5 w-4.5 text-blue-400" />
-                        <h4 className="text-xs font-black text-slate-100 uppercase tracking-wider">
+                        <History className="h-4.5 w-4.5 text-indigo-600 dark:text-indigo-400" />
+                        <h4 className="text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider">
                           Activity Timeline & Audit Trail
                         </h4>
                       </div>
-                      <span className="text-[10px] font-extrabold text-blue-400 font-mono bg-blue-950/60 border border-blue-800/40 px-2.5 py-0.5 rounded-full">
+                      <span className="text-[10px] font-extrabold text-indigo-700 dark:text-indigo-400 font-mono bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/40 px-2.5 py-0.5 rounded-full">
                         {timelineCounts.total} Events Recorded
                       </span>
                     </div>
 
                     {/* Filter Pills */}
-                    <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-800">
+                    <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-100 dark:border-slate-800">
                       <button
                         type="button"
                         onClick={() => setTimelineFilter('all')}
-                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                        className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'all'
-                            ? 'bg-blue-600 text-white border-blue-500 shadow-xs'
-                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                            ? 'bg-violet-700 text-white border-violet-700 shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         All ({timelineCounts.total})
@@ -1693,10 +1718,10 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => setTimelineFilter('status')}
-                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                        className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'status'
-                            ? 'bg-purple-600 text-white border-purple-500 shadow-xs'
-                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                            ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         📈 Stage ({timelineCounts.status})
@@ -1704,10 +1729,10 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => setTimelineFilter('remark')}
-                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                        className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'remark'
-                            ? 'bg-amber-600 text-white border-amber-500 shadow-xs'
-                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         📞 Remarks ({timelineCounts.remark})
@@ -1715,10 +1740,10 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => setTimelineFilter('assignment')}
-                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                        className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'assignment'
-                            ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
-                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         👤 Coordinator ({timelineCounts.assignment})
@@ -1726,10 +1751,10 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => setTimelineFilter('task')}
-                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                        className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'task'
-                            ? 'bg-teal-600 text-white border-teal-500 shadow-xs'
-                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                            ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         📝 Tasks ({timelineCounts.task})
@@ -1738,19 +1763,19 @@ export default function LeadModal({
 
                     {/* Search Input Box */}
                     <div className="relative mt-1">
-                      <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                      <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
                       <input
                         type="text"
                         placeholder="Search timeline by coordinator or remark keywords..."
                         value={timelineSearch}
                         onChange={(e) => setTimelineSearch(e.target.value)}
-                        className="w-full text-xs pl-8 pr-7 py-1.5 rounded-lg bg-slate-950 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-100 placeholder-slate-500"
+                        className="w-full text-xs pl-8.5 pr-7 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium"
                       />
                       {timelineSearch && (
                         <button
                           type="button"
                           onClick={() => setTimelineSearch('')}
-                          className="absolute right-2 top-2 text-slate-400 hover:text-slate-200 text-xs font-bold"
+                          className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xs font-bold"
                         >
                           ✕
                         </button>
@@ -1760,7 +1785,7 @@ export default function LeadModal({
 
                   {/* Activity List */}
                   {filteredTimeline && filteredTimeline.length > 0 ? (
-                    <div className="relative pl-5 border-l-2 border-slate-750 ml-2 space-y-4">
+                    <div className="relative pl-5 border-l-2 border-slate-200 dark:border-slate-800 ml-2 space-y-4">
                       {filteredTimeline.map((event) => {
                         const isStage = event.type === 'status';
                         const isRemark = event.type === 'remark';
@@ -1775,13 +1800,13 @@ export default function LeadModal({
                         return (
                           <div key={event.id} className="relative group text-left">
                             {/* Marker Icon */}
-                            <div className={`absolute -left-7 top-1 h-5 w-5 rounded-full border-2 flex items-center justify-center text-[10px] shadow-sm ${
-                              isStage ? 'bg-purple-950 border-purple-500 text-purple-300' :
-                              isRemark ? 'bg-amber-950 border-amber-500 text-amber-300' :
-                              isAssign ? 'bg-emerald-950 border-emerald-500 text-emerald-300' :
-                              isTask ? 'bg-teal-950 border-teal-500 text-teal-300' :
-                              isCreation ? 'bg-blue-950 border-blue-500 text-blue-300' :
-                              'bg-slate-900 border-slate-700 text-slate-300'
+                            <div className={`absolute -left-7 top-1 h-5 w-5 rounded-full border-2 flex items-center justify-center text-[10px] shadow-xs ${
+                              isStage ? 'bg-purple-100 dark:bg-purple-950 border-purple-500 text-purple-700 dark:text-purple-300' :
+                              isRemark ? 'bg-amber-100 dark:bg-amber-950 border-amber-500 text-amber-700 dark:text-amber-300' :
+                              isAssign ? 'bg-emerald-100 dark:bg-emerald-950 border-emerald-500 text-emerald-700 dark:text-emerald-300' :
+                              isTask ? 'bg-teal-100 dark:bg-teal-950 border-teal-500 text-teal-700 dark:text-teal-300' :
+                              isCreation ? 'bg-indigo-100 dark:bg-indigo-950 border-indigo-500 text-indigo-700 dark:text-indigo-300' :
+                              'bg-slate-100 dark:bg-slate-900 border-slate-400 dark:border-slate-700 text-slate-700 dark:text-slate-300'
                             }`}>
                               {isStage && '📈'}
                               {isRemark && '📞'}
@@ -1792,18 +1817,18 @@ export default function LeadModal({
                             </div>
 
                             {/* Card Content */}
-                            <div className="bg-slate-900/60 hover:bg-slate-900/80 p-3.5 rounded-xl border border-slate-750 hover:border-slate-700 transition-all text-xs shadow-3xs space-y-2">
+                            <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 transition-all text-xs shadow-xs space-y-2">
                               {/* Header Meta */}
-                              <div className="flex flex-wrap items-center justify-between gap-1.5 pb-1 border-b border-slate-800">
+                              <div className="flex flex-wrap items-center justify-between gap-1.5 pb-1.5 border-b border-slate-100 dark:border-slate-800">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   {/* Event Type Pill */}
-                                  <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded tracking-wider border ${
-                                    isStage ? 'bg-purple-950/80 text-purple-300 border-purple-800/60' :
-                                    isRemark ? 'bg-amber-950/80 text-amber-300 border-amber-800/60' :
-                                    isAssign ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60' :
-                                    isTask ? 'bg-teal-950/80 text-teal-300 border-teal-800/60' :
-                                    isCreation ? 'bg-blue-950/80 text-blue-300 border-blue-800/60' :
-                                    'bg-slate-800 text-slate-300 border-slate-700'
+                                  <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider border ${
+                                    isStage ? 'bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60' :
+                                    isRemark ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60' :
+                                    isAssign ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60' :
+                                    isTask ? 'bg-teal-50 dark:bg-teal-950/80 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800/60' :
+                                    isCreation ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/60' :
+                                    'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                                   }`}>
                                     {isStage && 'Stage Change'}
                                     {isRemark && 'Call Remark'}
@@ -1814,13 +1839,16 @@ export default function LeadModal({
                                   </span>
 
                                   {/* Coordinator / Actor Pill */}
-                                  <span className="text-[10px] font-extrabold text-slate-100 bg-slate-800 border border-slate-700 px-2 py-0.5 rounded flex items-center gap-1">
-                                    <span className="text-slate-400">By:</span> {event.actor || 'System'}
+                                  <span className="text-[10px] font-black bg-purple-100 dark:bg-purple-950/80 border border-purple-300 dark:border-purple-800 px-2.5 py-0.5 rounded-md inline-flex items-center gap-1 shadow-2xs">
+                                    <span className="text-purple-900 dark:text-purple-300 font-black">By:</span>
+                                    <span className="text-black dark:text-slate-100 font-black">
+                                      {event.actor || 'System Administrator'}
+                                    </span>
                                   </span>
                                 </div>
 
                                 <div className="flex items-center gap-2">
-                                  <span className="text-[9.5px] text-slate-400 font-mono">
+                                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
                                     {formattedDate}
                                   </span>
                                   <button
@@ -1830,11 +1858,11 @@ export default function LeadModal({
                                       setCopiedLogId(event.id);
                                       setTimeout(() => setCopiedLogId(null), 2000);
                                     }}
-                                    className="text-slate-500 hover:text-slate-300 p-1 hover:bg-slate-800 rounded transition-colors"
+                                    className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors cursor-pointer"
                                     title="Copy log entry"
                                   >
                                     {copiedLogId === event.id ? (
-                                      <Check className="h-3 w-3 text-emerald-400" />
+                                      <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
                                     ) : (
                                       <Copy className="h-3 w-3" />
                                     )}
@@ -1843,7 +1871,7 @@ export default function LeadModal({
                               </div>
 
                               {/* Text Body */}
-                              <p className="text-slate-200 leading-relaxed font-semibold font-sans whitespace-pre-wrap text-xs pt-0.5">
+                              <p className="text-slate-800 dark:text-slate-200 leading-relaxed font-semibold font-sans whitespace-pre-wrap text-xs pt-0.5">
                                 {event.text}
                               </p>
                             </div>
@@ -1852,10 +1880,10 @@ export default function LeadModal({
                       })}
                     </div>
                   ) : (
-                    <div className="text-center py-12 bg-slate-900/20 rounded-xl border border-slate-750 text-slate-400 space-y-1.5">
-                      <History className="h-8 w-8 text-slate-500 mx-auto opacity-40" />
-                      <p className="text-xs font-semibold text-slate-300">No activity events found.</p>
-                      <p className="text-[10px] text-slate-400">
+                    <div className="text-center py-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 space-y-1.5 shadow-xs">
+                      <History className="h-8 w-8 text-slate-400 dark:text-slate-500 mx-auto opacity-40" />
+                      <p className="text-xs font-bold text-slate-700 dark:text-slate-300">No activity events found.</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
                         {timelineSearch || timelineFilter !== 'all' 
                           ? 'Try clearing your search or category filters.'
                           : 'Stage transitions, call remarks, and coordinator updates automatically log here in real-time.'}
@@ -1868,7 +1896,7 @@ export default function LeadModal({
             </div>
 
             {/* Footer quick instructions banner */}
-            <div className="bg-slate-900/80 border-t border-slate-750 p-3 text-[10px] text-slate-400 font-mono text-center shrink-0">
+            <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-3 text-[10px] text-slate-500 dark:text-slate-400 font-mono text-center shrink-0">
               ⚡ Career Growth Placement • Candidate Pipeline & Follow-ups live in Cloud Storage.
             </div>
 

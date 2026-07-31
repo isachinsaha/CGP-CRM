@@ -73,25 +73,25 @@ export function SearchableSelect({
       >
         <span className="flex items-center gap-1.5 min-w-0 truncate">
           {selectedOption?.icon && <span className="shrink-0">{selectedOption.icon}</span>}
-          <span className="truncate text-left">{selectedOption ? selectedOption.label : placeholder}</span>
+          <span className="truncate text-left font-extrabold">{selectedOption ? selectedOption.label : placeholder}</span>
         </span>
-        <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0" />
+        <ChevronDown className="h-3.5 w-3.5 opacity-70 shrink-0" />
       </button>
 
       {isOpen && (
         <div
-          className={`absolute left-0 mt-1 w-64 rounded-xl border border-slate-750 bg-slate-900 p-2 shadow-2xl z-50 focus:outline-none ${dropdownClassName}`}
+          className={`absolute left-0 mt-1 w-64 rounded-xl border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 p-2 shadow-2xl z-50 focus:outline-none ${dropdownClassName}`}
         >
           {/* Search Input */}
           <div className="relative mb-2">
-            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
             <input
               ref={inputRef}
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search..."
-              className="w-full rounded-lg bg-slate-800 border border-slate-750 py-1.5 pl-8 pr-3 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
+              className="w-full rounded-xl bg-[#eef8f3] dark:bg-slate-800 border border-[#a8e0c9] dark:border-slate-700 py-1.5 pl-8 pr-3 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-bold"
             />
           </div>
 
@@ -108,17 +108,17 @@ export function SearchableSelect({
                       onChange(opt.value);
                       setIsOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors ${
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs text-left transition-colors ${
                       isSelected
-                        ? 'bg-emerald-950 text-emerald-400 dark:text-emerald-400 font-black border border-emerald-900'
-                        : 'text-slate-200 hover:bg-slate-800 hover:text-emerald-400 font-bold'
+                        ? 'bg-[#e1f5eb] dark:bg-emerald-950 text-[#0d7d4d] dark:text-emerald-400 font-black border border-[#a8e0c9]/60 dark:border-emerald-900'
+                        : 'text-[#0d7d4d] dark:text-slate-100 font-bold dark:hover:bg-slate-800 dark:hover:text-emerald-300'
                     }`}
                   >
                     <span className="flex items-center gap-2 truncate">
                       {opt.icon && <span className="shrink-0">{opt.icon}</span>}
                       <span className="truncate">{opt.label}</span>
                     </span>
-                    {isSelected && <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0" />}
+                    {isSelected && <Check className="h-3.5 w-3.5 text-[#0d7d4d] dark:text-emerald-400 shrink-0" />}
                   </button>
                 );
               })
