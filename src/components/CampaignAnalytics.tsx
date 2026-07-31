@@ -907,16 +907,16 @@ export default function CampaignAnalytics({
       </div>
 
       {/* CALLER FOLLOW-UPS & DAILY TO-DO LIST REMINDERS */}
-      <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 text-left">
-        <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4 select-none">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 text-left shadow-2xs">
+        <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800 pb-3 mb-4 select-none">
           <div>
-            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <ListTodo className="h-4.5 w-4.5 text-accent-purple" />
+            <h3 className="text-sm font-black text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <ListTodo className="h-4.5 w-4.5 text-purple-600 dark:text-accent-purple" />
               Real-time Follow-up To-Do List & Reminders
             </h3>
-            <p className="text-xs text-slate-400 font-medium">Daily interactive action items scheduled for candidates by callers.</p>
+            <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">Daily interactive action items scheduled for candidates by callers.</p>
           </div>
-          <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2.5 py-1 rounded-full font-black uppercase">
+          <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400 border border-slate-300 dark:border-slate-700 px-2.5 py-1 rounded-full font-black uppercase">
             ⏳ {pendingTasks.length} Pending
           </span>
         </div>
@@ -930,36 +930,36 @@ export default function CampaignAnalytics({
               const isOverdue = taskDate < today;
               const isToday = taskDate.toDateString() === new Date().toDateString();
 
-              let dateBadgeColor = "bg-slate-950 text-slate-400 border-slate-800";
+              let dateBadgeColor = "bg-slate-100 dark:bg-slate-950 text-slate-700 dark:text-slate-400 border-slate-200 dark:border-slate-800";
               let dateBadgeText = task.dueDate;
 
               if (isOverdue) {
-                dateBadgeColor = "bg-rose-950/30 text-rose-400 border-rose-900/30 animate-pulse";
+                dateBadgeColor = "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-900/30 animate-pulse";
                 dateBadgeText = `⚠️ Overdue (${task.dueDate})`;
               } else if (isToday) {
-                dateBadgeColor = "bg-amber-950/30 text-amber-400 border-amber-900/30";
+                dateBadgeColor = "bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-400 border-amber-200 dark:border-amber-900/30";
                 dateBadgeText = `🔥 Due Today (${task.dueDate})`;
               } else {
-                dateBadgeColor = "bg-purple-950/30 text-accent-purple border-purple-900/30";
+                dateBadgeColor = "bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-accent-purple border-purple-200 dark:border-purple-900/30";
                 dateBadgeText = `📅 Upcoming (${task.dueDate})`;
               }
 
               return (
-                <div key={task.id} className="p-2.5 bg-slate-850 border border-slate-755 flex gap-2 items-start group hover:bg-slate-900/50 transition-all rounded-xl shadow-xs">
+                <div key={task.id} className="p-2.5 bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-755 flex gap-2 items-start group hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-all rounded-xl shadow-2xs">
                   <button
                     type="button"
                     onClick={() => handleCompleteTask(task.leadId, task.id)}
-                    className="mt-0.5 text-slate-500 hover:text-accent-emerald transition-colors shrink-0 cursor-pointer"
+                    className="mt-0.5 text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-accent-emerald transition-colors shrink-0 cursor-pointer"
                     title="Mark follow-up completed"
                   >
-                    <Square className="h-4.5 w-4.5 text-slate-700 hover:text-accent-emerald group-hover:scale-110 transition-transform" />
+                    <Square className="h-4.5 w-4.5 text-slate-400 dark:text-slate-700 hover:text-emerald-600 dark:hover:text-accent-emerald group-hover:scale-110 transition-transform" />
                   </button>
                   <div className="space-y-2 flex-1 min-w-0">
-                    <p className="text-xs font-bold text-slate-100 leading-tight group-hover:text-accent-purple transition-colors break-words">
+                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight group-hover:text-purple-600 dark:group-hover:text-accent-purple transition-colors break-words">
                       {task.title}
                     </p>
                     <div className="space-y-1">
-                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-600 dark:text-slate-400 font-semibold">
                         <User className="h-3 w-3 text-slate-500 font-bold" />
                         <span 
                           onClick={() => {
@@ -968,17 +968,17 @@ export default function CampaignAnalytics({
                               onSelectLead?.(foundLead);
                             }
                           }}
-                          className="truncate uppercase font-black text-slate-300 hover:text-accent-purple hover:underline cursor-pointer transition-colors"
+                          className="truncate uppercase font-black text-slate-900 dark:text-slate-300 hover:text-purple-600 dark:hover:text-accent-purple hover:underline cursor-pointer transition-colors"
                           title="View Candidate Profile"
                         >
                           {task.leadName}
                         </span>
-                        <span className="text-[9px] bg-slate-900 border border-slate-800 px-1 py-0.2 rounded text-slate-300 font-mono font-bold shrink-0">
+                        <span className="text-[9px] bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-1 py-0.2 rounded text-slate-800 dark:text-slate-300 font-mono font-bold shrink-0">
                           ✈️ {task.leadCountry}
                         </span>
                       </div>
-                      <div className="text-[9px] text-slate-400">
-                        Caller: <span className="font-extrabold text-accent-emerald">{task.leadAssignedTo}</span>
+                      <div className="text-[9px] text-slate-600 dark:text-slate-400">
+                        Caller: <span className="font-extrabold text-emerald-700 dark:text-accent-emerald">{task.leadAssignedTo}</span>
                       </div>
                     </div>
                     <span className={`inline-block text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md border ${dateBadgeColor}`}>
@@ -990,9 +990,9 @@ export default function CampaignAnalytics({
             })}
           </div>
         ) : (
-          <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-750 rounded-xl bg-slate-850/20 space-y-1.5">
-            <p className="font-semibold">🎉 All follow-up tasks completed!</p>
-            <p className="text-[10px]">When agents log action items on any candidate profile, they will appear here as daily checklist reminders.</p>
+          <div className="py-12 text-center text-xs text-slate-600 dark:text-slate-400 border border-dashed border-slate-300 dark:border-slate-750 rounded-xl bg-slate-50 dark:bg-slate-850/20 space-y-1.5">
+            <p className="font-semibold text-slate-900 dark:text-slate-300">🎉 All follow-up tasks completed!</p>
+            <p className="text-[10px] text-slate-600 dark:text-slate-400">When agents log action items on any candidate profile, they will appear here as daily checklist reminders.</p>
           </div>
         )}
       </div>

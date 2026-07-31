@@ -611,8 +611,8 @@ export default function App() {
 
         {/* Right Sync Status & Enrol Action */}
         <div className="flex items-center gap-4 ml-auto">
-          <span className="text-xs font-mono text-slate-500 dark:text-slate-400 font-medium hidden md:inline-block">
-            Synced: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} • <strong className="text-slate-800 dark:text-slate-200">{totalLeadsCount || leads.length}</strong> candidates
+          <span className="text-xs font-mono text-emerald-800 dark:text-emerald-400 font-semibold hidden md:inline-block">
+            Synced: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} • <strong className="text-emerald-800 dark:text-emerald-400 font-black">{totalLeadsCount || leads.length}</strong> <span className="text-emerald-800 dark:text-emerald-300 font-bold">candidates</span>
           </span>
 
           {userRole === 'admin' && (
