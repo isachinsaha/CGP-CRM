@@ -596,14 +596,14 @@ export default function App() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border ${
+                className={`group px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border ${
                   isSelected
                     ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-950/40'
-                    : 'bg-transparent border-transparent text-black dark:text-slate-200 hover:bg-slate-100/70 dark:hover:bg-slate-800/60'
+                    : 'bg-transparent border-transparent text-black dark:text-slate-200 hover:bg-violet-600 hover:text-white dark:hover:bg-slate-800/60 dark:hover:text-slate-200'
                 }`}
               >
-                <Icon className={`h-4 w-4 ${isSelected ? 'text-white' : 'text-black dark:text-slate-300'}`} />
-                <span className={isSelected ? 'text-white font-black' : 'text-black dark:text-slate-200 font-black'}>{tab.label}</span>
+                <Icon className={`h-4 w-4 transition-colors ${isSelected ? 'text-white' : 'text-black dark:text-slate-300 group-hover:text-white dark:group-hover:text-slate-200'}`} />
+                <span className={`transition-colors ${isSelected ? 'text-white font-black' : 'text-black dark:text-slate-200 font-black group-hover:text-white dark:group-hover:text-slate-200'}`}>{tab.label}</span>
               </button>
             );
           })}

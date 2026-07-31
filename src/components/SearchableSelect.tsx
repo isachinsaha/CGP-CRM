@@ -111,7 +111,7 @@ export function SearchableSelect({
                     className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs text-left transition-colors ${
                       isSelected
                         ? 'bg-[#e1f5eb] dark:bg-emerald-950 text-[#0d7d4d] dark:text-emerald-400 font-black border border-[#a8e0c9]/60 dark:border-emerald-900'
-                        : 'text-[#0d7d4d] dark:text-slate-100 font-bold dark:hover:bg-slate-800 dark:hover:text-emerald-300'
+                        : 'text-[#0d7d4d] dark:text-slate-100 font-bold hover:bg-violet-600 hover:text-white dark:hover:bg-slate-800 dark:hover:text-emerald-300'
                     }`}
                   >
                     <span className="flex items-center gap-2 truncate">

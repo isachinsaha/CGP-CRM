@@ -45,6 +45,44 @@ export default function LeadModal({
   const [timelineSearch, setTimelineSearch] = useState('');
   const [copiedLogId, setCopiedLogId] = useState<string | null>(null);
 
+  // Skeleton loading state for fetching historical remarks & timeline data
+  const [isTimelineLoading, setIsTimelineLoading] = useState(false);
+
+  // Fetch fresh activity timeline and historical remarks from server
+  const fetchTimelineData = async (showSkeleton = true) => {
+    if (!lead || !lead.id) return;
+    if (showSkeleton) setIsTimelineLoading(true);
+    const start = Date.now();
+    try {
+      const res = await fetch(`/api/leads/${encodeURIComponent(lead.id)}`);
+      if (res.ok) {
+        const freshLead = await res.json();
+        if (freshLead) {
+          setLead(prev => ({
+            ...prev,
+            ...freshLead,
+            timeline: freshLead.timeline || prev.timeline || []
+          }));
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching timeline data:', err);
+    } finally {
+      if (showSkeleton) {
+        const elapsed = Date.now() - start;
+        const remaining = Math.max(0, 350 - elapsed);
+        setTimeout(() => setIsTimelineLoading(false), remaining);
+      }
+    }
+  };
+
+  // Trigger fetch when switching to the timeline tab or when lead changes
+  useEffect(() => {
+    if (activeRightTab === 'timeline') {
+      fetchTimelineData(true);
+    }
+  }, [activeRightTab, initialLead.id]);
+
   // Computed timeline items filtered by category and search query
   const timelineCounts = useMemo(() => {
     const list = lead.timeline || [];
@@ -510,49 +548,49 @@ export default function LeadModal({
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 380, damping: 26 }}
-        className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-6xl h-[92vh] flex flex-col overflow-hidden text-slate-900 dark:text-slate-100"
+        className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-[1310px] h-[92vh] flex flex-col overflow-hidden text-slate-900 dark:text-slate-100 text-sm"
       >
         
         {/* Header ribbon */}
-        <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row gap-4 justify-between lg:items-center shrink-0 shadow-2xs">
+        <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row gap-4 justify-between lg:items-center shrink-0 shadow-2xs">
           <div className="flex items-center gap-3">
-            <div className="p-1.5 border border-slate-300 dark:border-slate-700 rounded-full text-slate-700 dark:text-slate-300 shrink-0">
-              <Info className="h-4 w-4" />
+            <div className="p-2 border border-slate-300 dark:border-slate-700 rounded-full text-slate-700 dark:text-slate-300 shrink-0">
+              <Info className="h-5 w-5" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight uppercase">{formatCandidateName(lead.name)}</h3>
-                <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase border ${getFitStyle(lead.fitScore)}`}>
+                <h3 className="font-black text-slate-900 dark:text-white text-xl tracking-tight uppercase">{formatCandidateName(lead.name)}</h3>
+                <span className={`text-xs font-black px-3 py-0.5 rounded-full uppercase border ${getFitStyle(lead.fitScore)}`}>
                   {lead.fitScore} Fit
                 </span>
                 {lead.country && (
-                  <span className="text-[10px] bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 rounded-full px-2.5 py-0.5 font-extrabold uppercase flex items-center gap-1">
+                  <span className="text-xs bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 rounded-full px-3 py-0.5 font-extrabold uppercase flex items-center gap-1.5">
                     {getCountryFlagUrl(lead.country) ? (
                       <img 
                         src={getCountryFlagUrl(lead.country)} 
                         alt="" 
-                        className="w-3.5 h-2.5 object-cover rounded-2xs"
+                        className="w-4 h-3 object-cover rounded-2xs"
                         referrerPolicy="no-referrer"
                       />
                     ) : (
-                      <span className="text-[10px]">🟢</span>
+                      <span className="text-xs">🟢</span>
                     )}
                     Target: {lead.country}
                   </span>
                 )}
               </div>
-              <div className="flex items-center flex-wrap gap-x-2 gap-y-1 text-xs text-slate-600 dark:text-slate-300 font-mono mt-1">
-                <span className="flex items-center gap-1 text-[11px]">
+              <div className="flex items-center flex-wrap gap-x-2.5 gap-y-1 text-xs sm:text-[13px] text-slate-600 dark:text-slate-300 font-mono mt-1">
+                <span className="flex items-center gap-1">
                   Serial No: <strong className="text-slate-900 dark:text-white font-bold">{lead.serialNo || 'Pending'}</strong> 
                 </span>
                 <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
-                <span className="flex items-center gap-1 text-[11px]">
+                <span className="flex items-center gap-1">
                   Phone: <strong className="text-slate-900 dark:text-white font-bold">{lead.phone}</strong> 
                 </span>
                 {lead.alternateNo && (
                   <>
                     <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
-                    <span className="flex items-center gap-1 text-[11px]">
+                    <span className="flex items-center gap-1">
                       Alt: <strong className="text-slate-900 dark:text-white font-bold">{lead.alternateNo}</strong>
                     </span>
                   </>
@@ -560,7 +598,7 @@ export default function LeadModal({
                 {lead.assignedTo && (
                   <>
                     <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
-                    <span className="flex items-center gap-1 text-[11px]">
+                    <span className="flex items-center gap-1">
                       Coordinator:{' '}
                       <span className="text-purple-700 dark:text-purple-300 font-extrabold bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800">
                         {lead.assignedTo}
@@ -571,7 +609,7 @@ export default function LeadModal({
                 {lead.source && (
                   <>
                     <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
-                    <span className="flex items-center gap-1 text-[11px]">
+                    <span className="flex items-center gap-1">
                       Source:{' '}
                       <span className="text-purple-700 dark:text-purple-300 font-bold bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800 uppercase">
                         {lead.source}
@@ -582,7 +620,7 @@ export default function LeadModal({
                 {lead.project && (
                   <>
                     <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
-                    <span className="flex items-center gap-1 text-[11px]">
+                    <span className="flex items-center gap-1">
                       Project:{' '}
                       <span className="text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 uppercase">
                         {lead.project}
@@ -594,15 +632,15 @@ export default function LeadModal({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
             {/* Shorter, Thicker, Bolder and More Attractive Stage selection */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1 px-2.5 rounded-lg border border-slate-300 dark:border-slate-700 shadow-2xs">
-              <span className="text-[10px] uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider">STAGE:</span>
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1.5 px-3 rounded-lg border border-slate-300 dark:border-slate-700 shadow-2xs">
+              <span className="text-xs uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider">STAGE:</span>
               <select
                 value={formFields.stage}
                 name="stage"
                 onChange={handleFieldChange}
-                className="text-[12px] font-extrabold bg-transparent text-slate-900 dark:text-slate-100 px-1 py-0.5 focus:outline-none cursor-pointer max-w-[140px] font-sans"
+                className="text-xs sm:text-[13px] font-extrabold bg-transparent text-slate-900 dark:text-slate-100 px-1 py-0.5 focus:outline-none cursor-pointer max-w-[150px] font-sans"
               >
                 <option value="new" className="font-extrabold bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">New Inbound</option>
                 <option value="negotiating" className="font-extrabold bg-white dark:bg-slate-900 text-amber-600">In Discussion</option>
@@ -614,9 +652,9 @@ export default function LeadModal({
             </div>
 
             {/* Smaller Reminder Button matching Stage selection style but smaller */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1 px-2.5 rounded-lg border border-slate-300 dark:border-slate-700 shadow-2xs shrink-0">
-              <span className="text-[10px] uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider flex items-center gap-1">
-                <Bell className={`h-3 w-3 ${formFields.reminderEnabled ? 'text-indigo-600 dark:text-indigo-400 fill-indigo-600' : 'text-slate-400'}`} />
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1.5 px-3 rounded-lg border border-slate-300 dark:border-slate-700 shadow-2xs shrink-0">
+              <span className="text-xs uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider flex items-center gap-1">
+                <Bell className={`h-3.5 w-3.5 ${formFields.reminderEnabled ? 'text-indigo-600 dark:text-indigo-400 fill-indigo-600' : 'text-slate-400'}`} />
                 <span>REMINDER:</span>
               </span>
               <button
@@ -645,7 +683,7 @@ export default function LeadModal({
                     console.error(err);
                   }
                 }}
-                className={`text-[12px] font-black focus:outline-none cursor-pointer font-sans transition-all whitespace-nowrap ${
+                className={`text-xs sm:text-[13px] font-black focus:outline-none cursor-pointer font-sans transition-all whitespace-nowrap ${
                   formFields.reminderEnabled ? 'text-indigo-600 dark:text-indigo-400 font-extrabold' : 'text-slate-500'
                 }`}
               >
@@ -653,12 +691,12 @@ export default function LeadModal({
               </button>
             </div>
 
-            {/* Top-Right Save Changes Button matching Reminder button height and width */}
+            {/* Top-Right Save Changes Button */}
             <button
               type="button"
               onClick={() => saveProfileEdits()}
               disabled={savingForm}
-              className={`flex items-center justify-center gap-1.5 py-1.5 px-4 rounded-lg shadow-xs font-black text-[12px] uppercase tracking-wider transition-all duration-200 cursor-pointer disabled:opacity-50 select-none shrink-0 text-white ${
+              className={`flex items-center justify-center gap-2 py-2.5 px-6 rounded-xl shadow-xs font-black text-xs sm:text-sm uppercase tracking-wider transition-all duration-200 cursor-pointer disabled:opacity-50 select-none shrink-0 text-white ${
                 saveSuccess 
                   ? 'bg-emerald-600' 
                   : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95'
@@ -666,17 +704,17 @@ export default function LeadModal({
             >
               {savingForm ? (
                 <>
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-white" />
+                  <RefreshCw className="h-4.5 w-4.5 animate-spin text-white" />
                   <span className="text-white font-black">Saving</span>
                 </>
               ) : saveSuccess ? (
                 <>
-                  <Check className="h-3.5 w-3.5 text-white stroke-[3.5px]" />
+                  <Check className="h-4.5 w-4.5 text-white stroke-[3.5px]" />
                   <span className="text-white font-black">Saved</span>
                 </>
               ) : (
                 <>
-                  <Check className="h-3.5 w-3.5 text-white stroke-[3.5px]" />
+                  <Check className="h-4.5 w-4.5 text-white stroke-[3.5px]" />
                   <span className="text-white font-black">SAVE</span>
                 </>
               )}
@@ -684,9 +722,9 @@ export default function LeadModal({
 
             <button
               onClick={onClose}
-              className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg transition-all cursor-pointer"
+              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg transition-all cursor-pointer"
             >
-              <X className="h-5 w-5" />
+              <X className="h-6 w-6" />
             </button>
           </div>
         </div>
@@ -702,10 +740,10 @@ export default function LeadModal({
               <button
                 type="button"
                 onClick={() => setActiveLeftTab('ai')}
-                className={`flex-1 py-2.5 px-4 text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-full flex items-center justify-center gap-2 cursor-pointer border text-white ${
+                className={`flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-full flex items-center justify-center gap-1.5 cursor-pointer border text-white ${
                   activeLeftTab === 'ai'
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-[#111827] text-white border-slate-800 hover:bg-[#1f293d] dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700'
+                    : 'bg-[#111827] text-white border-slate-800 hover:bg-violet-600 hover:text-white dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-[#1f293d]'
                 }`}
               >
                 <Sparkles className="h-3.5 w-3.5 text-white" />
@@ -714,10 +752,10 @@ export default function LeadModal({
               <button
                 type="button"
                 onClick={() => setActiveLeftTab('profile')}
-                className={`flex-1 py-2.5 px-4 text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-full flex items-center justify-center gap-2 cursor-pointer border text-white ${
+                className={`flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-full flex items-center justify-center gap-1.5 cursor-pointer border text-white ${
                   activeLeftTab === 'profile'
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-[#111827] text-white border-slate-800 hover:bg-[#1f293d] dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700'
+                    : 'bg-[#111827] text-white border-slate-800 hover:bg-violet-600 hover:text-white dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-[#1f293d]'
                 }`}
               >
                 <Clipboard className="h-3.5 w-3.5 text-white" />
@@ -1084,35 +1122,35 @@ export default function LeadModal({
                   <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1">1. Spreadsheet Ingestion Identifiers</h4>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Serial No</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Serial No</label>
                       <input
                         type="text"
                         name="serialNo"
                         disabled={isSubAgent}
                         value={formFields.serialNo}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-bold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Entry Date</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Entry Date</label>
                       <input
                         type="text"
                         name="entryDate"
                         disabled={isSubAgent}
                         value={formFields.entryDate}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-bold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Star Importance</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Star Importance</label>
                       <select
                         name="importance"
                         disabled={isSubAgent}
                         value={formFields.importance}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 cursor-pointer font-bold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 cursor-pointer font-semibold"
                       >
                         <option value="1">⭐ Star Low (1)</option>
                         <option value="2">⭐⭐ Star Fair (2)</option>
@@ -1127,41 +1165,41 @@ export default function LeadModal({
                   <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1 pt-2">2. Candidate Information</h4>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Candidate Name</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Candidate Name</label>
                       <input
                         type="text"
                         name="name"
                         value={formFields.name}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-extrabold uppercase"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Candidate Mobile No</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Candidate Mobile No</label>
                       <input
                         type="text"
                         name="phone"
                         disabled={isSubAgent}
                         value={formFields.phone}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-bold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Alternative No (Optional)</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Alternative No (Optional)</label>
                       <input
                         type="text"
                         name="alternateNo"
                         value={formFields.alternateNo}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-bold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Gender</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Gender</label>
                       <SearchableSelect
                         value={formFields.gender}
                         onChange={(val) => setFormFields(prev => ({ ...prev, gender: val }))}
@@ -1172,29 +1210,29 @@ export default function LeadModal({
                           { value: 'F', label: '👩 F' },
                           { value: 'Not defined', label: '❓ NOT DEFINED' }
                         ]}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 font-extrabold uppercase cursor-pointer"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 font-semibold uppercase cursor-pointer"
                         dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Age</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Age</label>
                       <input
                         type="number"
                         name="age"
                         value={formFields.age}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-extrabold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Origin / State</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-400 mb-1">Origin / State</label>
                       <input
                         type="text"
                         name="origin"
                         placeholder="e.g. DARJEELING"
                         value={formFields.origin}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-extrabold uppercase"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase"
                       />
                     </div>
                   </div>
@@ -1203,7 +1241,7 @@ export default function LeadModal({
                   <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1 pt-2">3. Job Applied Profile</h4>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Target Country</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Target Country</label>
                       <SearchableSelect
                         value={formFields.country}
                         onChange={(val) => setFormFields(prev => ({ ...prev, country: val }))}
@@ -1214,12 +1252,12 @@ export default function LeadModal({
                             label: `✈️ ${c.toUpperCase()}`
                           }))
                         ]}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-slate-900 dark:text-slate-100 font-extrabold uppercase cursor-pointer"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-slate-900 dark:text-slate-100 font-semibold uppercase cursor-pointer"
                         dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Coordinator</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Coordinator</label>
                       <SearchableSelect
                         value={formFields.assignedTo}
                         onChange={(val) => setFormFields(prev => ({ ...prev, assignedTo: val }))}
@@ -1237,12 +1275,12 @@ export default function LeadModal({
                             }))
                           ))
                         ]}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-emerald-800 dark:text-emerald-400 font-extrabold cursor-pointer"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-emerald-800 dark:text-emerald-400 font-semibold cursor-pointer"
                         dropdownClassName="w-64 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Assign Date</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Assign Date</label>
                       <input
                         type="text"
                         name="assignDate"
@@ -1250,14 +1288,14 @@ export default function LeadModal({
                         placeholder="yyyy-mm-dd"
                         value={formFields.assignDate}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-bold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-400 mb-0.5">Target Position / Line</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Target Position / Line</label>
                       <SearchableSelect
                         value={formFields.position}
                         onChange={(val) => setFormFields(prev => ({ ...prev, position: val }))}
@@ -1268,38 +1306,38 @@ export default function LeadModal({
                             label: `💼 ${p.toUpperCase()}`
                           }))
                         ]}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-500 dark:disabled:text-slate-400 font-medium uppercase cursor-pointer"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-500 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
                         dropdownClassName="w-60 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Experience Criteria</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Experience Criteria</label>
                       <input
                         type="text"
                         name="experience"
                         placeholder="e.g. FRESHER"
                         value={formFields.experience}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Qualification</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Qualification</label>
                       <input
                         type="text"
                         name="qualification"
                         placeholder="e.g. 10th Pass, 12th, Graduate, ITI"
                         value={formFields.qualification || ''}
                         onChange={handleFieldChange}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-0.5">Lead Source</label>
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Lead Source</label>
                       <SearchableSelect
                         value={formFields.source}
                         onChange={(val) => setFormFields(prev => ({ ...prev, source: val }))}
@@ -1312,14 +1350,14 @@ export default function LeadModal({
                           { value: 'Referral', label: '🤝 REFERRAL' },
                           { value: 'Other', label: '❓ OTHER' }
                         ]}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-bold uppercase cursor-pointer"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
                         dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                       />
                     </div>
 
                     <div>
-                      <div className="flex justify-between items-center mb-0.5">
-                        <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400">Hiring Project</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300">Hiring Project</label>
                         <button
                           type="button"
                           onClick={() => setIsAddingProject(!isAddingProject)}
@@ -1335,7 +1373,7 @@ export default function LeadModal({
                             value={newProjectName}
                             onChange={(e) => setNewProjectName(e.target.value)}
                             placeholder="Project..."
-                            className="flex-1 text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-bold"
+                            className="flex-1 text-xs sm:text-[13px] px-2 py-1 rounded border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-semibold"
                           />
                           <button
                             type="button"
@@ -1366,7 +1404,7 @@ export default function LeadModal({
                               label: `📁 ${proj.toUpperCase()}`
                             }))
                           ]}
-                          className="w-full text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
+                          className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
                           dropdownClassName="w-56 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
                         />
                       )}
@@ -1378,7 +1416,7 @@ export default function LeadModal({
                   <div className="space-y-3">
 
                     <div>
-                      <label className="block text-[11px] font-extrabold text-rose-800 dark:text-rose-400 mb-0.5">Admin Placement instructions (Admins Only)</label>
+                      <label className="block text-xs font-semibold text-rose-800 dark:text-rose-400 mb-1">Admin Placement instructions (Admins Only)</label>
                       <textarea
                         name="adminRemarks"
                         placeholder="Admin instructions only..."
@@ -1386,15 +1424,15 @@ export default function LeadModal({
                         value={formFields.adminRemarks}
                         onChange={handleFieldChange}
                         rows={2}
-                        className="w-full text-xs p-3 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-900 dark:text-rose-400 focus:ring-1 focus:ring-rose-500 focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-bold"
+                        className="w-full text-xs sm:text-[13px] p-3 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-900 dark:text-rose-400 focus:ring-1 focus:ring-rose-500 focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
 
                     {/* Interactive tags creator section */}
                     <div className="pt-2 border-t border-slate-200 dark:border-slate-750">
-                      <label className="block text-[11px] font-extrabold text-slate-800 dark:text-slate-400 mb-1 flex items-center gap-1.5 uppercase tracking-wider">
+                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1 flex items-center gap-1.5 uppercase tracking-wider">
                         <span>🏷️ Candidate Category Tags</span>
-                        <span className="text-[9px] font-semibold text-slate-600 dark:text-slate-400 capitalize">(Enter or click Add to save)</span>
+                        <span className="text-[10px] font-medium text-slate-600 dark:text-slate-400 capitalize">(Enter or click Add to save)</span>
                       </label>
                       <div className="flex flex-wrap gap-1.5 mb-2 p-2 bg-white dark:bg-slate-900/40 rounded-xl border border-slate-200 dark:border-slate-750 min-h-[44px]">
                         {tags.length > 0 ? (
@@ -1421,7 +1459,7 @@ export default function LeadModal({
                           value={tagInputVal}
                           onChange={(e) => setTagInputVal(e.target.value)}
                           placeholder="Add tag (e.g. Chef, Nurse, Waiter)..."
-                          className="flex-1 text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-bold animate-all"
+                          className="flex-1 text-xs sm:text-[13px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-semibold transition-all"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
@@ -1552,10 +1590,10 @@ export default function LeadModal({
               <button
                 type="button"
                 onClick={() => setActiveRightTab('tasks')}
-                className={`flex-1 py-2.5 px-3 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border text-white ${
+                className={`flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border text-white ${
                   activeRightTab === 'tasks'
                     ? 'bg-violet-700 text-white border-violet-700 shadow-2xs'
-                    : 'bg-[#111827] text-white border-slate-800 hover:bg-[#1f293d] dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700'
+                    : 'bg-[#111827] text-white border-slate-800 hover:bg-violet-600 hover:text-white dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-[#1f293d]'
                 }`}
               >
                 <ListTodo className="h-3.5 w-3.5 text-white" />
@@ -1567,10 +1605,10 @@ export default function LeadModal({
               <button
                 type="button"
                 onClick={() => setActiveRightTab('timeline')}
-                className={`flex-1 py-2.5 px-3 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border text-white ${
+                className={`flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border text-white ${
                   activeRightTab === 'timeline'
                     ? 'bg-violet-700 text-white border-violet-700 shadow-2xs'
-                    : 'bg-[#111827] text-white border-slate-800 hover:bg-[#1f293d] dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700'
+                    : 'bg-[#111827] text-white border-slate-800 hover:bg-violet-600 hover:text-white dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-[#1f293d]'
                 }`}
               >
                 <History className="h-3.5 w-3.5 text-white" />
@@ -1593,26 +1631,26 @@ export default function LeadModal({
 
                     <form onSubmit={handleAddTask} className="space-y-3">
                       <div>
-                        <label className="block text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider">Action Description</label>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Action Description</label>
                         <input
                           type="text"
                           required
                           placeholder="e.g. Callback to request passport scan..."
                           value={newTaskTitle}
                           onChange={(e) => setNewTaskTitle(e.target.value)}
-                          className="w-full text-xs px-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all mt-1 font-semibold"
+                          className="w-full text-xs sm:text-[13px] px-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all mt-1 font-semibold"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">Follow-up Due Date</label>
+                          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">Follow-up Due Date</label>
                           <div className="relative">
                             <input
                               type="date"
                               required
                               value={newTaskDueDate}
                               onChange={(e) => setNewTaskDueDate(e.target.value)}
-                              className="w-full text-xs pl-8 pr-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 font-bold cursor-pointer dark:[color-scheme:dark] [color-scheme:light]"
+                              className="w-full text-xs sm:text-[13px] pl-8 pr-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 font-semibold cursor-pointer dark:[color-scheme:dark] [color-scheme:light]"
                             />
                             <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-emerald-600 dark:text-emerald-400 pointer-events-none" />
                           </div>
@@ -1697,9 +1735,21 @@ export default function LeadModal({
                           Activity Timeline & Audit Trail
                         </h4>
                       </div>
-                      <span className="text-[10px] font-extrabold text-indigo-700 dark:text-indigo-400 font-mono bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/40 px-2.5 py-0.5 rounded-full">
-                        {timelineCounts.total} Events Recorded
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-extrabold text-indigo-700 dark:text-indigo-400 font-mono bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/40 px-2.5 py-0.5 rounded-full">
+                          {timelineCounts.total} Events Recorded
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => fetchTimelineData(true)}
+                          disabled={isTimelineLoading}
+                          className="text-[10px] font-extrabold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 px-2.5 py-0.5 rounded-full transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs active:scale-95 disabled:opacity-50"
+                          title="Refresh historical call remarks & activity timeline"
+                        >
+                          <RefreshCw className={`h-3 w-3 text-indigo-600 dark:text-indigo-400 ${isTimelineLoading ? 'animate-spin' : ''}`} />
+                          <span>Sync</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Filter Pills */}
@@ -1769,7 +1819,7 @@ export default function LeadModal({
                         placeholder="Search timeline by coordinator or remark keywords..."
                         value={timelineSearch}
                         onChange={(e) => setTimelineSearch(e.target.value)}
-                        className="w-full text-xs pl-8.5 pr-7 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium"
+                        className="w-full text-xs sm:text-[13px] pl-8.5 pr-7 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-semibold"
                       />
                       {timelineSearch && (
                         <button
@@ -1783,8 +1833,45 @@ export default function LeadModal({
                     </div>
                   </div>
 
-                  {/* Activity List */}
-                  {filteredTimeline && filteredTimeline.length > 0 ? (
+                  {/* Activity Timeline Content or Skeleton Loader */}
+                  {isTimelineLoading ? (
+                    <div className="space-y-4 pt-1 text-left animate-in fade-in duration-150">
+                      <div className="flex items-center gap-2 py-2 px-3 bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-extrabold shadow-2xs">
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-600 dark:text-indigo-400 shrink-0" />
+                        <span>Fetching historical remarks & activity timeline...</span>
+                      </div>
+
+                      {/* Skeleton Timeline Items */}
+                      <div className="relative pl-5 border-l-2 border-slate-200 dark:border-slate-800 ml-2 space-y-4">
+                        {[1, 2, 3].map((idx) => (
+                          <div key={idx} className="relative text-left">
+                            {/* Marker Icon Skeleton */}
+                            <div className="absolute -left-7 top-1 h-5 w-5 rounded-full bg-slate-200 dark:bg-slate-800 animate-pulse border-2 border-slate-300 dark:border-slate-700 shadow-2xs" />
+
+                            {/* Card Content Skeleton */}
+                            <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5 shadow-2xs animate-pulse">
+                              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+                                <div className="flex items-center gap-2">
+                                  {/* Event Type Badge Skeleton */}
+                                  <div className="h-4 w-20 bg-slate-200 dark:bg-slate-800 rounded-md" />
+                                  {/* Coordinator Badge Skeleton */}
+                                  <div className="h-4 w-28 bg-purple-100 dark:bg-purple-950/80 rounded-md" />
+                                </div>
+                                {/* Date Skeleton */}
+                                <div className="h-3 w-28 bg-slate-200 dark:bg-slate-800 rounded" />
+                              </div>
+
+                              {/* Body Text Line Skeletons */}
+                              <div className="space-y-1.5 pt-1">
+                                <div className="h-3 bg-slate-200 dark:bg-slate-800 rounded w-11/12" />
+                                <div className="h-3 bg-slate-200 dark:bg-slate-800 rounded w-3/4" />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : filteredTimeline && filteredTimeline.length > 0 ? (
                     <div className="relative pl-5 border-l-2 border-slate-200 dark:border-slate-800 ml-2 space-y-4">
                       {filteredTimeline.map((event) => {
                         const isStage = event.type === 'status';

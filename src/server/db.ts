@@ -56,9 +56,8 @@ let dbVerified = false;
 let dbVerifying = false;
 
 // Helper to enforce timeouts on async Firestore promises so they never hang the server
-function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 20000): Promise<T> {
-  // Override low timeouts with a safe minimum of 15000ms to keep response times snappy while permitting some latency
-  const actualTimeout = Math.max(timeoutMs, 15000);
+function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 8000): Promise<T> {
+  const actualTimeout = Math.min(Math.max(timeoutMs, 1000), 10000);
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`Firestore operation timed out after ${actualTimeout}ms`));
@@ -181,11 +180,11 @@ function handleCloudError(context: string | any, err?: any) {
     cloudBreakerCooldownMs = 60 * 60 * 1000; // 1 hour cooldown for Quota errors
   } else if (isTimeout) {
     cloudErrorCount++;
-    if (cloudErrorCount >= 3) {
-      console.warn(`[Firestore Client] Circuit breaker tripped due to timeouts (${contextStr}). Temporarily disabling cloud sync for 5 minutes.`);
+    if (cloudErrorCount >= 2) {
+      console.warn(`[Firestore Client] Circuit breaker tripped due to timeouts (${contextStr}). Temporarily disabling cloud sync for 3 minutes to maintain server responsiveness.`);
       cloudSyncEnabled = false;
       lastCloudErrorTime = Date.now();
-      cloudBreakerCooldownMs = 5 * 60 * 1000;
+      cloudBreakerCooldownMs = 3 * 60 * 1000;
     }
   } else {
     console.warn(`[Firestore Client] Cloud error during ${contextStr}: ${errMsg}`);
