@@ -554,7 +554,7 @@ export default function LeadModal({
         {/* Header ribbon */}
         <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row gap-4 justify-between lg:items-center shrink-0 shadow-2xs">
           <div className="flex items-center gap-3">
-            <div className="p-2 border border-slate-300 dark:border-slate-700 rounded-full text-slate-700 dark:text-slate-300 shrink-0">
+            <div className="p-2 border border-slate-200 dark:border-slate-700 rounded-full text-slate-700 dark:text-slate-300 shrink-0">
               <Info className="h-5 w-5" />
             </div>
             <div>
@@ -634,7 +634,7 @@ export default function LeadModal({
 
           <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
             {/* Shorter, Thicker, Bolder and More Attractive Stage selection */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1.5 px-3 rounded-lg border border-slate-300 dark:border-slate-700 shadow-2xs">
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1.5 px-3 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
               <span className="text-xs uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider">STAGE:</span>
               <select
                 value={formFields.stage}
@@ -652,7 +652,7 @@ export default function LeadModal({
             </div>
 
             {/* Smaller Reminder Button matching Stage selection style but smaller */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1.5 px-3 rounded-lg border border-slate-300 dark:border-slate-700 shadow-2xs shrink-0">
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1.5 px-3 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs shrink-0">
               <span className="text-xs uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider flex items-center gap-1">
                 <Bell className={`h-3.5 w-3.5 ${formFields.reminderEnabled ? 'text-indigo-600 dark:text-indigo-400 fill-indigo-600' : 'text-slate-400'}`} />
                 <span>REMINDER:</span>
@@ -743,7 +743,7 @@ export default function LeadModal({
                 className={`group flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-full flex items-center justify-center gap-1.5 cursor-pointer border ${
                   activeLeftTab === 'ai'
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-500 dark:bg-slate-800 dark:text-emerald-400 dark:border-slate-700 dark:hover:bg-[#1f293d]'
+                    : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-500 dark:bg-slate-800 dark:text-emerald-400 dark:border-slate-700 dark:hover:bg-[#1f293d]'
                 }`}
               >
                 <Sparkles className={`h-3.5 w-3.5 ${activeLeftTab === 'ai' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
@@ -755,7 +755,7 @@ export default function LeadModal({
                 className={`group flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-full flex items-center justify-center gap-1.5 cursor-pointer border ${
                   activeLeftTab === 'profile'
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-500 dark:bg-slate-800 dark:text-emerald-400 dark:border-slate-700 dark:hover:bg-[#1f293d]'
+                    : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-500 dark:bg-slate-800 dark:text-emerald-400 dark:border-slate-700 dark:hover:bg-[#1f293d]'
                 }`}
               >
                 <Clipboard className={`h-3.5 w-3.5 ${activeLeftTab === 'profile' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
@@ -949,7 +949,7 @@ export default function LeadModal({
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docPassportCopy 
                             ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs' 
-                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
                         }`}>
                           {formFields.docPassportCopy && '✓'}
                         </span>
@@ -978,7 +978,7 @@ export default function LeadModal({
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docResume 
                             ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs' 
-                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
                         }`}>
                           {formFields.docResume && '✓'}
                         </span>
@@ -1007,7 +1007,7 @@ export default function LeadModal({
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docOfficeVisited 
                             ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs' 
-                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
                         }`}>
                           {formFields.docOfficeVisited && '✓'}
                         </span>
@@ -1036,7 +1036,7 @@ export default function LeadModal({
                         <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
                           formFields.docOthers 
                             ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs' 
-                            : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
                         }`}>
                           {formFields.docOthers && '✓'}
                         </span>
@@ -1064,7 +1064,7 @@ export default function LeadModal({
                         const val = e.target.value;
                         setFormFields(prev => ({ ...prev, notes: val }));
                       }}
-                      className="w-full text-xs p-3 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all font-bold font-sans min-h-[100px] text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-500"
+                      className="w-full text-xs p-3 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all font-bold font-sans min-h-[100px] text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-500"
                     />
                     <div className="flex justify-end mt-2">
                       <button
@@ -1129,7 +1129,7 @@ export default function LeadModal({
                         disabled={isSubAgent}
                         value={formFields.serialNo}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
                     <div>
@@ -1140,7 +1140,7 @@ export default function LeadModal({
                         disabled={isSubAgent}
                         value={formFields.entryDate}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
                     <div>
@@ -1150,7 +1150,7 @@ export default function LeadModal({
                         disabled={isSubAgent}
                         value={formFields.importance}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 cursor-pointer font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 cursor-pointer font-semibold"
                       >
                         <option value="1">⭐ Star Low (1)</option>
                         <option value="2">⭐⭐ Star Fair (2)</option>
@@ -1171,7 +1171,7 @@ export default function LeadModal({
                         name="name"
                         value={formFields.name}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase"
                       />
                     </div>
                     <div>
@@ -1182,7 +1182,7 @@ export default function LeadModal({
                         disabled={isSubAgent}
                         value={formFields.phone}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
                       />
                     </div>
                     <div>
@@ -1192,7 +1192,7 @@ export default function LeadModal({
                         name="alternateNo"
                         value={formFields.alternateNo}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
                       />
                     </div>
                   </div>
@@ -1210,8 +1210,8 @@ export default function LeadModal({
                           { value: 'F', label: '👩 F' },
                           { value: 'Not defined', label: '❓ NOT DEFINED' }
                         ]}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 font-semibold uppercase cursor-pointer"
-                        dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 font-semibold uppercase cursor-pointer"
+                        dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                       />
                     </div>
                     <div>
@@ -1221,7 +1221,7 @@ export default function LeadModal({
                         name="age"
                         value={formFields.age}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
                       />
                     </div>
                     <div>
@@ -1232,7 +1232,7 @@ export default function LeadModal({
                         placeholder="e.g. DARJEELING"
                         value={formFields.origin}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase"
                       />
                     </div>
                   </div>
@@ -1252,8 +1252,8 @@ export default function LeadModal({
                             label: `✈️ ${c.toUpperCase()}`
                           }))
                         ]}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-slate-900 dark:text-slate-100 font-semibold uppercase cursor-pointer"
-                        dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-slate-900 dark:text-slate-100 font-semibold uppercase cursor-pointer"
+                        dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                       />
                     </div>
                     <div>
@@ -1275,8 +1275,8 @@ export default function LeadModal({
                             }))
                           ))
                         ]}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-emerald-800 dark:text-emerald-400 font-semibold cursor-pointer"
-                        dropdownClassName="w-64 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-emerald-800 dark:text-emerald-400 font-semibold cursor-pointer"
+                        dropdownClassName="w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                       />
                     </div>
                     <div>
@@ -1288,7 +1288,7 @@ export default function LeadModal({
                         placeholder="yyyy-mm-dd"
                         value={formFields.assignDate}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
                   </div>
@@ -1306,8 +1306,8 @@ export default function LeadModal({
                             label: `💼 ${p.toUpperCase()}`
                           }))
                         ]}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-500 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
-                        dropdownClassName="w-60 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-500 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
+                        dropdownClassName="w-60 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                       />
                     </div>
                     <div>
@@ -1318,7 +1318,7 @@ export default function LeadModal({
                         placeholder="e.g. FRESHER"
                         value={formFields.experience}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
                   </div>
@@ -1332,7 +1332,7 @@ export default function LeadModal({
                         placeholder="e.g. 10th Pass, 12th, Graduate, ITI"
                         value={formFields.qualification || ''}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
 
@@ -1350,8 +1350,8 @@ export default function LeadModal({
                           { value: 'Referral', label: '🤝 REFERRAL' },
                           { value: 'Other', label: '❓ OTHER' }
                         ]}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
-                        dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
+                        dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                       />
                     </div>
 
@@ -1373,7 +1373,7 @@ export default function LeadModal({
                             value={newProjectName}
                             onChange={(e) => setNewProjectName(e.target.value)}
                             placeholder="Project..."
-                            className="flex-1 text-xs sm:text-[13px] px-2 py-1 rounded border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-semibold"
+                            className="flex-1 text-xs sm:text-[13px] px-2 py-1 rounded border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-semibold"
                           />
                           <button
                             type="button"
@@ -1404,8 +1404,8 @@ export default function LeadModal({
                               label: `📁 ${proj.toUpperCase()}`
                             }))
                           ]}
-                          className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
-                          dropdownClassName="w-56 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700"
+                          className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
+                          dropdownClassName="w-56 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                         />
                       )}
                     </div>
@@ -1437,7 +1437,7 @@ export default function LeadModal({
                       <div className="flex flex-wrap gap-1.5 mb-2 p-2 bg-white dark:bg-slate-900/40 rounded-xl border border-slate-200 dark:border-slate-750 min-h-[44px]">
                         {tags.length > 0 ? (
                           tags.map((tag, idx) => (
-                            <span key={idx} className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-[10px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 border border-slate-300 dark:border-slate-700">
+                            <span key={idx} className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-[10px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 border border-slate-200 dark:border-slate-700">
                               {tag}
                               <button
                                 type="button"
@@ -1459,7 +1459,7 @@ export default function LeadModal({
                           value={tagInputVal}
                           onChange={(e) => setTagInputVal(e.target.value)}
                           placeholder="Add tag (e.g. Chef, Nurse, Waiter)..."
-                          className="flex-1 text-xs sm:text-[13px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-semibold transition-all"
+                          className="flex-1 text-xs sm:text-[13px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-semibold transition-all"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
@@ -1505,7 +1505,7 @@ export default function LeadModal({
                                   setTags([...tags, sTag]);
                                   setTagInputVal('');
                                 }}
-                                className="bg-white dark:bg-slate-900 hover:bg-indigo-600 text-slate-700 dark:text-slate-300 hover:text-white text-[10px] font-extrabold px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:border-indigo-600 transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
+                                className="bg-white dark:bg-slate-900 hover:bg-indigo-600 text-slate-700 dark:text-slate-300 hover:text-white text-[10px] font-extrabold px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-indigo-600 transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
                               >
                                 <Plus className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-400 hover:text-white" />
                                 <span>{sTag}</span>
@@ -1553,7 +1553,7 @@ export default function LeadModal({
                   className={`py-2.5 px-4 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
                     formFields.callConnected === 'connected'
                       ? 'bg-emerald-600 dark:bg-emerald-600 text-white shadow-xs'
-                      : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750'
+                      : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750'
                   }`}
                 >
                   <span className="text-white text-xs">🟢</span>
@@ -1569,7 +1569,7 @@ export default function LeadModal({
                   className={`py-2.5 px-4 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
                     formFields.callConnected === 'not_connected'
                       ? 'bg-rose-600 dark:bg-rose-600 text-white shadow-xs'
-                      : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750'
+                      : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750'
                   }`}
                 >
                   <span className="text-white text-xs">🔴</span>
@@ -1593,7 +1593,7 @@ export default function LeadModal({
                 className={`group flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border ${
                   activeRightTab === 'tasks'
                     ? 'bg-violet-700 text-white border-violet-700 shadow-2xs'
-                    : 'bg-white text-slate-900 border-slate-300 hover:bg-violet-50 hover:border-violet-500 hover:text-violet-700 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-[#1f293d]'
+                    : 'bg-white text-slate-900 border-slate-200 hover:bg-violet-50 hover:border-violet-500 hover:text-violet-700 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-[#1f293d]'
                 }`}
               >
                 <ListTodo className={`h-3.5 w-3.5 ${activeRightTab === 'tasks' ? 'text-white' : 'text-slate-800 dark:text-slate-100 group-hover:text-violet-600 dark:group-hover:text-white'}`} />
@@ -1608,7 +1608,7 @@ export default function LeadModal({
                 className={`group flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border ${
                   activeRightTab === 'timeline'
                     ? 'bg-violet-700 text-white border-violet-700 shadow-2xs'
-                    : 'bg-white text-slate-900 border-slate-300 hover:bg-violet-50 hover:border-violet-500 hover:text-violet-700 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-[#1f293d]'
+                    : 'bg-white text-slate-900 border-slate-200 hover:bg-violet-50 hover:border-violet-500 hover:text-violet-700 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-[#1f293d]'
                 }`}
               >
                 <History className={`h-3.5 w-3.5 ${activeRightTab === 'timeline' ? 'text-white' : 'text-slate-800 dark:text-slate-100 group-hover:text-violet-600 dark:group-hover:text-white'}`} />
@@ -1638,7 +1638,7 @@ export default function LeadModal({
                           placeholder="e.g. Callback to request passport scan..."
                           value={newTaskTitle}
                           onChange={(e) => setNewTaskTitle(e.target.value)}
-                          className="w-full text-xs sm:text-[13px] px-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all mt-1 font-bold"
+                          className="w-full text-xs sm:text-[13px] px-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all mt-1 font-bold"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
@@ -1650,7 +1650,7 @@ export default function LeadModal({
                               required
                               value={newTaskDueDate}
                               onChange={(e) => setNewTaskDueDate(e.target.value)}
-                              className="w-full text-xs sm:text-[13px] pl-8 pr-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 font-bold cursor-pointer dark:[color-scheme:dark] [color-scheme:light]"
+                              className="w-full text-xs sm:text-[13px] pl-8 pr-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 font-bold cursor-pointer dark:[color-scheme:dark] [color-scheme:light]"
                             />
                             <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-emerald-600 dark:text-emerald-400 pointer-events-none" />
                           </div>
@@ -1747,7 +1747,7 @@ export default function LeadModal({
                           type="button"
                           onClick={() => fetchTimelineData(true)}
                           disabled={isTimelineLoading}
-                          className="text-[10px] font-extrabold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 px-2.5 py-0.5 rounded-full transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs active:scale-95 disabled:opacity-50"
+                          className="text-[10px] font-extrabold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2.5 py-0.5 rounded-full transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs active:scale-95 disabled:opacity-50"
                           title="Refresh historical call remarks & activity timeline"
                         >
                           <RefreshCw className={`h-3 w-3 text-indigo-600 dark:text-indigo-400 ${isTimelineLoading ? 'animate-spin' : ''}`} />
@@ -1764,7 +1764,7 @@ export default function LeadModal({
                         className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'all'
                             ? 'bg-violet-700 text-white border-violet-700 shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         All ({timelineCounts.total})
@@ -1775,7 +1775,7 @@ export default function LeadModal({
                         className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'status'
                             ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         📈 Stage ({timelineCounts.status})
@@ -1786,7 +1786,7 @@ export default function LeadModal({
                         className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'remark'
                             ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         📞 Remarks ({timelineCounts.remark})
@@ -1797,7 +1797,7 @@ export default function LeadModal({
                         className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'assignment'
                             ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         👤 Coordinator ({timelineCounts.assignment})
@@ -1808,7 +1808,7 @@ export default function LeadModal({
                         className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'task'
                             ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         📝 Tasks ({timelineCounts.task})

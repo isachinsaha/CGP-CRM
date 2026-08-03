@@ -286,7 +286,7 @@ export default function LeadBoard({
       >
         {/* Target country badge & Stars */}
         <div className="flex justify-between items-center gap-1.5 mb-2">
-          <span className="text-[11px] font-bold text-slate-200 bg-slate-750 border border-slate-700 px-2.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1.5 shadow-2xs">
+          <span className="text-[10px] font-extrabold text-[#0f172a] dark:text-slate-200 bg-[#e2e8f0] dark:bg-slate-800 border border-[#cbd5e1] dark:border-slate-700 px-2.5 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1.5 shadow-2xs font-sans">
             {lead.country && getCountryFlagUrl(lead.country) ? (
               <img 
                 src={getCountryFlagUrl(lead.country)} 
@@ -318,7 +318,7 @@ export default function LeadBoard({
         <h4 className="font-extrabold text-slate-100 text-sm tracking-wide uppercase font-sans">{formatCandidateName(lead.name)}</h4>
         <div className="flex items-center justify-between mt-1 pb-1.5 border-b border-slate-700">
           <span className="text-[11px] text-slate-300 font-semibold font-mono tracking-wide">{lead.phone}</span>
-          <span className="text-[10px] bg-slate-750 border border-slate-700 font-bold px-2 py-0.5 rounded text-slate-200 uppercase font-mono">
+          <span className="text-[10px] bg-[#e2e8f0] dark:bg-slate-800 border border-[#cbd5e1] dark:border-slate-700 font-extrabold px-2.5 py-0.5 rounded-md text-[#0f172a] dark:text-slate-200 uppercase tracking-wider font-mono shadow-2xs">
             {(() => {
               const g = String(lead.gender || '').toUpperCase().trim();
               if (g === 'F' || g === 'FEMALE') return 'F';

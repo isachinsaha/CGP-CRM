@@ -131,7 +131,7 @@ html.light, .light {
   --slate-900: #ffffff; /* Pure white card background */
   --slate-850: #ffffff; /* Pure white card background */
   --slate-800: #f1f5f9; /* Light gray pill/button background */
-  --slate-750: #e2e8f0; /* Crisp subtle gray border */
+  --slate-750: #1e293b; /* Sleek dark border for closed lead cards */
   --slate-700: #cbd5e1; /* Gray border */
   --slate-600: #94a3b8; /* Muted gray text */
   --slate-500: #64748b; /* Secondary gray text */
@@ -193,11 +193,47 @@ body {
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
-/* Scoped high-contrast black text for Lead Modal in Light Mode (when .dark is not present) */
+/* Scoped high-contrast black text and soft blended borders for Lead Modal in Light Mode (when .dark is not present) */
 html:not(.dark) #cgp-leads-modal,
 html.light #cgp-leads-modal,
 .light #cgp-leads-modal {
   color: #000000 !important;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #cbd5e1;
+  --slate-500: #cbd5e1;
+  --slate-700: #e2e8f0;
+  --slate-750: #e2e8f0;
+  --slate-800: #e2e8f0;
+}
+
+/* Force soft blended light border colors in Light Mode for Lead Modal elements */
+html:not(.dark) #cgp-leads-modal [class*="border-slate-"],
+html:not(.dark) #cgp-leads-modal [class*="border-gray-"],
+html:not(.dark) #cgp-leads-modal [class*="border-zinc-"],
+html:not(.dark) #cgp-leads-modal [class*="border-neutral-"],
+html.light #cgp-leads-modal [class*="border-slate-"],
+html.light #cgp-leads-modal [class*="border-gray-"],
+html.light #cgp-leads-modal [class*="border-zinc-"],
+html.light #cgp-leads-modal [class*="border-neutral-"],
+.light #cgp-leads-modal [class*="border-slate-"],
+.light #cgp-leads-modal [class*="border-gray-"],
+.light #cgp-leads-modal [class*="border-zinc-"],
+.light #cgp-leads-modal [class*="border-neutral-"] {
+  border-color: #e2e8f0 !important;
+}
+
+/* Soft blended border fallback for modal containers, inputs, buttons, and dividers in light mode */
+html:not(.dark) #cgp-leads-modal input:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
+html:not(.dark) #cgp-leads-modal select:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
+html:not(.dark) #cgp-leads-modal textarea:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
+html.light #cgp-leads-modal input:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
+html.light #cgp-leads-modal select:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
+html.light #cgp-leads-modal textarea:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
+.light #cgp-leads-modal input:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
+.light #cgp-leads-modal select:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
+.light #cgp-leads-modal textarea:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]) {
+  border-color: #e2e8f0 !important;
 }
 
 html:not(.dark) #cgp-leads-modal label,
