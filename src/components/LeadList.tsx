@@ -847,7 +847,7 @@ export default function LeadList({
               placeholder="Search Name, Phone, Origin, Position..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-purple bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium"
+              className="w-full pl-9 pr-4 py-1.5 text-xs rounded-lg border border-slate-400 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-purple bg-white dark:bg-slate-950 text-emerald-800 dark:text-emerald-300 placeholder-slate-400 dark:placeholder-slate-500 font-bold"
             />
           </div>
 
@@ -1420,7 +1420,7 @@ export default function LeadList({
                       {/* 2. Candidate Demographics */}
                       <td className="px-4 py-3 max-w-[200px]">
                         <div>
-                          <div className={`font-extrabold text-slate-100 uppercase tracking-normal truncate ${!isInlineEdit && 'group-hover:text-accent-emerald transition-colors'} flex items-center gap-1.5 font-sans`}>
+                          <div className={`font-extrabold text-emerald-800 dark:text-emerald-400 uppercase tracking-normal truncate ${!isInlineEdit && 'group-hover:text-accent-emerald transition-colors'} flex items-center gap-1.5 font-sans`}>
                             <span>{formatCandidateName(lead.name)}</span>
                             <button
                               onClick={(e) => {
@@ -1437,9 +1437,9 @@ export default function LeadList({
                               <Bell className={`h-3 w-3 ${lead.reminderEnabled ? 'fill-accent-purple animate-bounce' : ''}`} />
                             </button>
                           </div>
-                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">{lead.phone}</div>
+                          <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-mono font-bold mt-0.5">{lead.phone}</div>
 
-                          <div className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                          <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold mt-0.5">
                             {(() => {
                               const g = String(lead.gender || '').toUpperCase().trim();
                               if (g === 'F' || g === 'FEMALE') return 'Female';
@@ -1524,10 +1524,10 @@ export default function LeadList({
                           />
                         ) : (
                           <div>
-                            <div className="font-bold text-slate-100 truncate" title={lead.position}>
+                            <div className="font-bold text-emerald-800 dark:text-slate-100 truncate" title={lead.position}>
                               {lead.position || 'Open openings'}
                             </div>
-                            <div className="text-[10px] text-slate-400 mt-0.5 italic" title={lead.experience}>
+                            <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5 italic" title={lead.experience}>
                               {lead.experience || 'Fresh criteria'}
                             </div>
                           </div>
