@@ -874,7 +874,7 @@ export default function LeadModal({
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks1 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-600 dark:placeholder-slate-400 font-sans mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-extrabold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-600 dark:placeholder-slate-400 font-mono italic mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-extrabold text-xs"
                           />
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 text-left focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/10 transition-all">
@@ -885,7 +885,7 @@ export default function LeadModal({
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks2 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-600 dark:placeholder-slate-400 font-sans mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-extrabold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-600 dark:placeholder-slate-400 font-mono italic mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-extrabold text-xs"
                           />
                         </div>
                         <div className="p-3.5 bg-amber-100/90 dark:bg-amber-950/40 rounded-xl border-2 border-amber-400 dark:border-amber-700 text-left focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/20 transition-all shadow-2xs">
@@ -899,7 +899,7 @@ export default function LeadModal({
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks3 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-black dark:text-amber-100 placeholder-slate-600 dark:placeholder-amber-400/60 font-sans leading-relaxed focus:outline-none focus:ring-0 resize-none font-black text-xs"
+                            className="w-full bg-transparent border-none p-0 text-black dark:text-amber-100 placeholder-slate-600 dark:placeholder-amber-400/60 font-mono italic leading-relaxed focus:outline-none focus:ring-0 resize-none font-extrabold text-xs"
                           />
                         </div>
                       </div>
