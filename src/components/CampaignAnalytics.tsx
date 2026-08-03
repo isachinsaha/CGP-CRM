@@ -955,7 +955,7 @@ export default function CampaignAnalytics({
                     <Square className="h-4.5 w-4.5 text-slate-400 dark:text-slate-700 hover:text-emerald-600 dark:hover:text-accent-emerald group-hover:scale-110 transition-transform" />
                   </button>
                   <div className="space-y-2 flex-1 min-w-0">
-                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight group-hover:text-purple-600 dark:group-hover:text-accent-purple transition-colors break-words">
+                    <p className="text-xs font-bold text-slate-100 dark:text-slate-100 leading-tight group-hover:text-purple-600 dark:group-hover:text-accent-purple transition-colors break-words">
                       {task.title}
                     </p>
                     <div className="space-y-1">
@@ -968,12 +968,12 @@ export default function CampaignAnalytics({
                               onSelectLead?.(foundLead);
                             }
                           }}
-                          className="truncate uppercase font-black text-slate-900 dark:text-slate-300 hover:text-purple-600 dark:hover:text-accent-purple hover:underline cursor-pointer transition-colors"
+                          className="truncate uppercase font-black text-slate-100 dark:text-slate-300 hover:text-purple-600 dark:hover:text-accent-purple hover:underline cursor-pointer transition-colors"
                           title="View Candidate Profile"
                         >
                           {task.leadName}
                         </span>
-                        <span className="text-[9px] bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-1 py-0.2 rounded text-slate-800 dark:text-slate-300 font-mono font-bold shrink-0">
+                        <span className="text-[9px] bg-slate-800 dark:bg-slate-900 border border-slate-700 dark:border-slate-800 px-1 py-0.2 rounded text-slate-100 dark:text-slate-300 font-mono font-bold shrink-0">
                           ✈️ {task.leadCountry}
                         </span>
                       </div>

@@ -1437,7 +1437,7 @@ export default function LeadModal({
                       <div className="flex flex-wrap gap-1.5 mb-2 p-2 bg-white dark:bg-slate-900/40 rounded-xl border border-slate-200 dark:border-slate-750 min-h-[44px]">
                         {tags.length > 0 ? (
                           tags.map((tag, idx) => (
-                            <span key={idx} className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-[10px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 border border-slate-200 dark:border-slate-700">
+                            <span key={idx} className="bg-slate-800 dark:bg-slate-800 text-slate-100 dark:text-slate-200 text-[10px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 border border-slate-700 dark:border-slate-700">
                               {tag}
                               <button
                                 type="button"
@@ -1669,7 +1669,7 @@ export default function LeadModal({
                   </div>
 
                   <div className="space-y-2">
-                    <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider">Scheduled Tasks list</h4>
+                    <h4 className="text-xs font-black text-slate-100 dark:text-slate-300 uppercase tracking-wider">Scheduled Tasks list</h4>
                     
                     {lead.tasks && lead.tasks.length > 0 ? (
                       <div className="space-y-2">
