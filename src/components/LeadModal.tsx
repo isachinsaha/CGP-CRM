@@ -1669,7 +1669,7 @@ export default function LeadModal({
                   </div>
 
                   <div className="space-y-2">
-                    <h4 className="text-xs font-black text-slate-100 dark:text-slate-300 uppercase tracking-wider">Scheduled Tasks list</h4>
+                    <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider">Scheduled Tasks list</h4>
                     
                     {lead.tasks && lead.tasks.length > 0 ? (
                       <div className="space-y-2">
@@ -1678,7 +1678,7 @@ export default function LeadModal({
                             key={task.id}
                             className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${
                               task.completed 
-                                ? 'bg-slate-100/90 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 line-through shadow-2xs' 
+                                ? 'bg-slate-50 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 line-through shadow-2xs' 
                                 : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 shadow-2xs'
                             }`}
                           >
@@ -1691,24 +1691,24 @@ export default function LeadModal({
                                 {task.completed ? (
                                   <CheckSquare className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" />
                                 ) : (
-                                  <Square className="h-4.5 w-4.5 text-slate-500 dark:text-slate-500" />
+                                  <Square className="h-4.5 w-4.5 text-slate-500 dark:text-slate-400" />
                                 )}
                               </button>
                               <div className="text-xs text-left">
-                                <p className={`font-black uppercase tracking-wide ${task.completed ? 'text-slate-700 dark:text-slate-400' : 'text-black dark:text-slate-100'}`}>
+                                <p className={`font-black uppercase tracking-wide ${task.completed ? 'text-slate-500 dark:text-slate-400' : 'text-slate-900 dark:text-slate-100'}`}>
                                   {task.title}
                                 </p>
-                                <span className="text-[10px] text-slate-700 dark:text-slate-400 font-mono flex items-center gap-1 mt-0.5 font-bold">
-                                  <Calendar className="h-3 w-3 text-slate-600 dark:text-slate-400" /> 
+                                <span className="text-[10px] text-slate-600 dark:text-slate-400 font-mono flex items-center gap-1 mt-0.5 font-bold">
+                                  <Calendar className="h-3 w-3 text-slate-500 dark:text-slate-400" /> 
                                   <span>Due:</span> 
-                                  <strong className={task.completed ? 'text-slate-700 dark:text-slate-400' : 'text-rose-600 dark:text-rose-400 font-black'}>{task.dueDate}</strong>
+                                  <strong className={task.completed ? 'text-slate-500 dark:text-slate-400' : 'text-rose-600 dark:text-rose-400 font-black'}>{task.dueDate}</strong>
                                 </span>
                               </div>
                             </div>
                             <button
                               type="button"
                               onClick={() => handleDeleteTask(task.id)}
-                              className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-950/40 text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg transition-colors shrink-0 cursor-pointer"
+                              className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg transition-colors shrink-0 cursor-pointer"
                               title="Delete task item"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -1719,8 +1719,8 @@ export default function LeadModal({
                     ) : (
                       <div className="text-center py-10 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-400 space-y-1.5 shadow-2xs">
                         <ListTodo className="h-8 w-8 text-slate-400 dark:text-slate-600 mx-auto stroke-[1.5]" />
-                        <p className="text-xs font-black text-black dark:text-slate-300">No active follow-up reminders scheduled.</p>
-                        <p className="text-[10px] text-slate-700 dark:text-slate-400 font-semibold">Add tasks above to remind your telecaller of client updates.</p>
+                        <p className="text-xs font-black text-slate-900 dark:text-slate-300">No active follow-up reminders scheduled.</p>
+                        <p className="text-[10px] text-slate-600 dark:text-slate-400 font-semibold">Add tasks above to remind your telecaller of client updates.</p>
                       </div>
                     )}
                   </div>
@@ -1747,10 +1747,10 @@ export default function LeadModal({
                           type="button"
                           onClick={() => fetchTimelineData(true)}
                           disabled={isTimelineLoading}
-                          className="text-[10px] font-extrabold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 px-2.5 py-0.5 rounded-full transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs active:scale-95 disabled:opacity-50"
+                          className="text-[10px] font-extrabold text-white bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 border border-slate-800 dark:border-slate-700 px-2.5 py-0.5 rounded-full transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs active:scale-95 disabled:opacity-50"
                           title="Refresh historical call remarks & activity timeline"
                         >
-                          <RefreshCw className={`h-3 w-3 text-indigo-600 dark:text-indigo-400 ${isTimelineLoading ? 'animate-spin' : ''}`} />
+                          <RefreshCw className={`h-3 w-3 text-white ${isTimelineLoading ? 'animate-spin' : ''}`} />
                           <span>Sync</span>
                         </button>
                       </div>
