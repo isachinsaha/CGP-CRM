@@ -178,12 +178,12 @@ export default function LeadBoard({
     } else if (percentage >= 25) {
       level = 'yellow';
       rangeLabel = '25-50%';
-      selectedClass = 'bg-yellow-950/25 dark:bg-yellow-950/80 border-2 border-yellow-500 text-slate-100 shadow-md ring-2 ring-yellow-500/20';
-      unselectedClass = 'bg-yellow-950/20 border-yellow-800/60 hover:border-yellow-500 text-yellow-200 shadow-3xs';
-      badgeColor = 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40 font-black';
-      iconColor = 'text-yellow-400';
-      headerColor = 'text-yellow-300 bg-yellow-950/60 font-bold border border-yellow-800/50';
-      textColor = 'text-yellow-400';
+      selectedClass = 'bg-yellow-950/35 dark:bg-yellow-950/85 border-2 border-yellow-400 text-yellow-100 shadow-md ring-2 ring-yellow-400/40';
+      unselectedClass = 'bg-yellow-950/25 border-yellow-400/90 hover:border-yellow-300 text-yellow-200 shadow-3xs';
+      badgeColor = 'bg-yellow-400/25 text-yellow-300 border-yellow-400/60 font-black';
+      iconColor = 'text-yellow-300';
+      headerColor = 'text-yellow-200 bg-yellow-950/80 font-bold border border-yellow-400/60';
+      textColor = 'text-yellow-300';
     }
 
     return {
