@@ -130,9 +130,80 @@ export default function LeadBoard({
   });
   const [filterEndDate, setFilterEndDate] = useState<string>(() => new Date().toLocaleDateString('en-CA'));
 
+  // Dynamic percentage calculation and color rules for "In Discussion" container
+  const inDiscussionPctInfo = React.useMemo(() => {
+    let lifetimeScopeLeads: Lead[] = leads;
+
+    if (userRole === 'agent') {
+      lifetimeScopeLeads = leads.filter(l => l.assignedTo && l.assignedTo.toLowerCase() === currentAgentId.toLowerCase());
+    } else if (coordinatorFilter !== 'All') {
+      if (coordinatorFilter === 'Unassigned') {
+        lifetimeScopeLeads = leads.filter(l => !l.assignedTo);
+      } else {
+        lifetimeScopeLeads = leads.filter(l => l.assignedTo && l.assignedTo.toLowerCase() === coordinatorFilter.toLowerCase());
+      }
+    }
+
+    const totalAssignedLifetime = lifetimeScopeLeads.length;
+    const inDiscussionCount = lifetimeScopeLeads.filter(l => l.stage === 'negotiating').length;
+    const percentage = totalAssignedLifetime > 0 ? (inDiscussionCount / totalAssignedLifetime) * 100 : 0;
+
+    let level: 'green' | 'yellow' | 'orange' | 'red' = 'green';
+    let rangeLabel = '0-25%';
+    let selectedClass = 'bg-emerald-950/25 dark:bg-emerald-950/80 border-2 border-emerald-500 text-slate-100 shadow-md ring-2 ring-emerald-500/20';
+    let unselectedClass = 'bg-emerald-950/20 border-emerald-800/60 hover:border-emerald-500 text-emerald-200 shadow-3xs';
+    let badgeColor = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black';
+    let iconColor = 'text-emerald-400';
+    let headerColor = 'text-emerald-300 bg-emerald-950/60 font-bold border border-emerald-800/50';
+    let textColor = 'text-emerald-400';
+
+    if (percentage >= 75) {
+      level = 'red';
+      rangeLabel = '>75%';
+      selectedClass = 'bg-rose-950/25 dark:bg-rose-950/80 border-2 border-rose-500 text-slate-100 shadow-md ring-2 ring-rose-500/20';
+      unselectedClass = 'bg-rose-950/20 border-rose-800/60 hover:border-rose-500 text-rose-200 shadow-3xs';
+      badgeColor = 'bg-rose-500/20 text-rose-400 border-rose-500/40 font-black';
+      iconColor = 'text-rose-400';
+      headerColor = 'text-rose-300 bg-rose-950/60 font-bold border border-rose-800/50';
+      textColor = 'text-rose-400';
+    } else if (percentage >= 50) {
+      level = 'orange';
+      rangeLabel = '50-75%';
+      selectedClass = 'bg-amber-950/25 dark:bg-amber-950/80 border-2 border-amber-500 text-slate-100 shadow-md ring-2 ring-amber-500/20';
+      unselectedClass = 'bg-amber-950/20 border-amber-800/60 hover:border-amber-500 text-amber-200 shadow-3xs';
+      badgeColor = 'bg-amber-500/20 text-amber-400 border-amber-500/40 font-black';
+      iconColor = 'text-amber-400';
+      headerColor = 'text-amber-300 bg-amber-950/60 font-bold border border-amber-800/50';
+      textColor = 'text-amber-400';
+    } else if (percentage >= 25) {
+      level = 'yellow';
+      rangeLabel = '25-50%';
+      selectedClass = 'bg-yellow-950/25 dark:bg-yellow-950/80 border-2 border-yellow-500 text-slate-100 shadow-md ring-2 ring-yellow-500/20';
+      unselectedClass = 'bg-yellow-950/20 border-yellow-800/60 hover:border-yellow-500 text-yellow-200 shadow-3xs';
+      badgeColor = 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40 font-black';
+      iconColor = 'text-yellow-400';
+      headerColor = 'text-yellow-300 bg-yellow-950/60 font-bold border border-yellow-800/50';
+      textColor = 'text-yellow-400';
+    }
+
+    return {
+      totalAssignedLifetime,
+      inDiscussionCount,
+      percentage,
+      level,
+      rangeLabel,
+      selectedClass,
+      unselectedClass,
+      badgeColor,
+      iconColor,
+      headerColor,
+      textColor,
+    };
+  }, [leads, userRole, currentAgentId, coordinatorFilter]);
+
   const COLUMNS: Column[] = [
     { id: 'new', title: 'New Inbound', color: 'border-sky-900/40 bg-sky-950/15', headerColor: 'text-sky-400 bg-sky-950/40 font-medium' },
-    { id: 'negotiating', title: 'In Discussion', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-amber-400 bg-amber-950/40 font-medium' },
+    { id: 'negotiating', title: 'In Discussion', color: 'border-slate-750 bg-slate-900/35', headerColor: inDiscussionPctInfo.headerColor },
     { id: 'rotations', title: 'In Rotations', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-indigo-400 bg-indigo-950/40 font-medium animate-pulse' },
     { id: 'proposal', title: 'Office Visited/Interview Attended', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-purple-400 bg-purple-950/40 font-medium' },
     { id: 'won', title: 'Closed Won', color: 'border-emerald-900/40 bg-emerald-950/15', headerColor: 'text-emerald-400 bg-emerald-950/40 font-semibold' },
@@ -602,15 +673,17 @@ export default function LeadBoard({
                 let selectedClass = '';
                 let badgeColor = '';
                 let iconColor = 'text-slate-400';
+                let unselectedClass = 'bg-slate-850 border-slate-750 hover:border-slate-600 text-slate-200 hover:bg-slate-800/50 shadow-3xs';
                 
                 if (col.id === 'new') {
                   selectedClass = isSelected ? 'bg-sky-950/20 dark:bg-sky-950/80 border-2 border-sky-600 dark:border-sky-500 text-slate-100 shadow-md ring-2 ring-sky-500/20' : '';
                   badgeColor = isSelected ? 'bg-sky-500/20 text-sky-700 dark:text-sky-400 border-sky-500/30' : 'bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20';
                   if (isSelected) iconColor = 'text-sky-600 dark:text-sky-400';
                 } else if (col.id === 'negotiating') {
-                  selectedClass = isSelected ? 'bg-amber-950/20 dark:bg-amber-950/80 border-2 border-amber-600 dark:border-amber-500 text-slate-100 shadow-md ring-2 ring-amber-500/20' : '';
-                  badgeColor = isSelected ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20';
-                  if (isSelected) iconColor = 'text-amber-600 dark:text-amber-400';
+                  selectedClass = inDiscussionPctInfo.selectedClass;
+                  badgeColor = inDiscussionPctInfo.badgeColor;
+                  iconColor = inDiscussionPctInfo.iconColor;
+                  unselectedClass = inDiscussionPctInfo.unselectedClass;
                 } else if (col.id === 'rotations') {
                   selectedClass = isSelected ? 'bg-indigo-950/20 dark:bg-indigo-950/80 border-2 border-indigo-600 dark:border-indigo-500 text-slate-100 shadow-md ring-2 ring-indigo-500/20' : '';
                   badgeColor = isSelected ? 'bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 border-indigo-500/30' : 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20';
@@ -652,16 +725,23 @@ export default function LeadBoard({
                         ? 'border-accent-purple bg-accent-purple/10 scale-[1.03] ring-2 ring-accent-purple/40 shadow-lg'
                         : isSelected
                         ? `${selectedClass} scale-[1.02]`
-                        : 'bg-slate-850 border-slate-750 hover:border-slate-600 text-slate-200 hover:bg-slate-800/50 shadow-3xs'
+                        : unselectedClass
                     }`}
                   >
                     <div className="relative z-10 flex items-start justify-between w-full">
                       <div className={`text-sm font-bold flex items-center justify-center w-6.5 h-6.5 rounded-lg border ${isSelected ? 'bg-slate-900/20 border-slate-700' : 'bg-slate-900 border-slate-800'}`}>
                         <IconComponent className={`w-3.5 h-3.5 ${iconColor}`} />
                       </div>
-                      <span className={`text-[11px] font-black px-2 py-0.5 rounded-md font-mono border ${badgeColor}`}>
-                        {colLeads.length} {colLeads.length === 1 ? 'Lead' : 'Leads'}
-                      </span>
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className={`text-[11px] font-black px-2 py-0.5 rounded-md font-mono border ${badgeColor}`}>
+                          {colLeads.length} {colLeads.length === 1 ? 'Lead' : 'Leads'}
+                        </span>
+                        {col.id === 'negotiating' && (
+                          <span className={`text-[9px] font-extrabold font-mono ${inDiscussionPctInfo.textColor}`} title={`In Discussion load: ${inDiscussionPctInfo.inDiscussionCount}/${inDiscussionPctInfo.totalAssignedLifetime} lifetime assigned leads (${inDiscussionPctInfo.percentage.toFixed(1)}%)`}>
+                            {inDiscussionPctInfo.percentage.toFixed(1)}% ratio
+                          </span>
+                        )}
+                      </div>
                     </div>
                     
                     <div className="relative z-10 mt-1">
@@ -689,9 +769,15 @@ export default function LeadBoard({
                       Showing {visibleLeads.filter(l => l.stage === selectedStage).length} active records in pipeline phase
                     </p>
                   </div>
-                  <span className="self-start sm:self-center text-[10px] uppercase font-black text-accent-purple bg-purple-950/40 border border-purple-900/30 px-3 py-1.5 rounded-full font-mono">
-                    Active Directory
-                  </span>
+                  {selectedStage === 'negotiating' ? (
+                    <span className={`self-start sm:self-center text-[10px] uppercase font-black px-3 py-1.5 rounded-full font-mono border ${inDiscussionPctInfo.badgeColor}`}>
+                      In Discussion Load: {inDiscussionPctInfo.percentage.toFixed(1)}% ({inDiscussionPctInfo.inDiscussionCount}/{inDiscussionPctInfo.totalAssignedLifetime} assigned)
+                    </span>
+                  ) : (
+                    <span className="self-start sm:self-center text-[10px] uppercase font-black text-accent-purple bg-purple-950/40 border border-purple-900/30 px-3 py-1.5 rounded-full font-mono">
+                      Active Directory
+                    </span>
+                  )}
                 </div>
 
                 {/* Grid layout of lead cards under the selected stage */}
@@ -747,7 +833,7 @@ export default function LeadBoard({
                     {/* Column Header */}
                     <div className="flex items-center justify-between mb-4 border-b border-slate-700 pb-2.5 min-h-[44px]">
                       <span className={`text-[9px] sm:text-[9.5px] font-black uppercase tracking-tight px-2 py-1 rounded-md leading-normal break-words inline-block ${col.headerColor}`}>
-                        {col.title} ({colLeads.length})
+                        {col.title} ({colLeads.length}{col.id === 'negotiating' ? ` • ${inDiscussionPctInfo.percentage.toFixed(1)}%` : ''})
                       </span>
                     </div>
 
