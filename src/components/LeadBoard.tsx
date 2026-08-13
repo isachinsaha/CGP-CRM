@@ -169,12 +169,12 @@ export default function LeadBoard({
     } else if (percentage >= 50) {
       level = 'orange';
       rangeLabel = '50-75%';
-      selectedClass = 'bg-amber-950/25 dark:bg-amber-950/80 border-2 border-amber-500 text-slate-100 shadow-md ring-2 ring-amber-500/20';
-      unselectedClass = 'bg-amber-950/20 border-amber-800/60 hover:border-amber-500 text-amber-200 shadow-3xs';
-      badgeColor = 'bg-amber-500/20 text-amber-400 border-amber-500/40 font-black';
-      iconColor = 'text-amber-400';
-      headerColor = 'text-amber-300 bg-amber-950/60 font-bold border border-amber-800/50';
-      textColor = 'text-amber-400';
+      selectedClass = 'bg-orange-950/40 dark:bg-orange-950/85 border-2 border-orange-600 text-slate-100 shadow-md ring-2 ring-orange-600/30';
+      unselectedClass = 'bg-orange-950/30 border-orange-700/80 hover:border-orange-500 text-orange-200 shadow-3xs';
+      badgeColor = 'bg-orange-600/30 text-orange-300 border-orange-500/60 font-black';
+      iconColor = 'text-orange-500';
+      headerColor = 'text-orange-200 bg-orange-950/80 font-bold border border-orange-700/70';
+      textColor = 'text-orange-400';
     } else if (percentage >= 25) {
       level = 'yellow';
       rangeLabel = '25-50%';
@@ -204,8 +204,8 @@ export default function LeadBoard({
   const COLUMNS: Column[] = [
     { id: 'new', title: 'New Inbound', color: 'border-sky-900/40 bg-sky-950/15', headerColor: 'text-sky-400 bg-sky-950/40 font-medium' },
     { id: 'negotiating', title: 'In Discussion', color: 'border-slate-750 bg-slate-900/35', headerColor: inDiscussionPctInfo.headerColor },
-    { id: 'rotations', title: 'In Rotations', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-indigo-400 bg-indigo-950/40 font-medium animate-pulse' },
     { id: 'proposal', title: 'Office Visited/Interview Attended', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-purple-400 bg-purple-950/40 font-medium' },
+    { id: 'rotations', title: 'In Rotations', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-indigo-400 bg-indigo-950/40 font-medium animate-pulse' },
     { id: 'won', title: 'Closed Won', color: 'border-emerald-900/40 bg-emerald-950/15', headerColor: 'text-emerald-400 bg-emerald-950/40 font-semibold' },
     { id: 'lost', title: 'Closed Lost', color: 'border-slate-750 bg-slate-900/20', headerColor: 'text-slate-400 bg-slate-800' }
   ];
@@ -225,7 +225,7 @@ export default function LeadBoard({
   };
 
   const getStageNeighbors = (current: LeadStage): { prev: LeadStage | null; next: LeadStage | null } => {
-    const list: LeadStage[] = ['new', 'negotiating', 'rotations', 'proposal', 'won', 'lost'];
+    const list: LeadStage[] = ['new', 'negotiating', 'proposal', 'rotations', 'won', 'lost'];
     const idx = list.indexOf(current);
     return {
       prev: idx > 0 ? list[idx - 1] : null,

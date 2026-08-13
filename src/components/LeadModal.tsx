@@ -644,8 +644,8 @@ export default function LeadModal({
               >
                 <option value="new" className="font-extrabold bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">New Inbound</option>
                 <option value="negotiating" className="font-extrabold bg-white dark:bg-slate-900 text-amber-600">In Discussion</option>
-                <option value="rotations" className="font-extrabold bg-white dark:bg-slate-900 text-indigo-600">In Rotations</option>
                 <option value="proposal" className="font-extrabold bg-white dark:bg-slate-900 text-purple-600">Office Visited</option>
+                <option value="rotations" className="font-extrabold bg-white dark:bg-slate-900 text-indigo-600">In Rotations</option>
                 <option value="won" className="font-extrabold bg-white dark:bg-slate-900 text-emerald-600">Closed Won ✅</option>
                 <option value="lost" className="font-extrabold bg-white dark:bg-slate-900 text-rose-600">Closed Lost ❌</option>
               </select>

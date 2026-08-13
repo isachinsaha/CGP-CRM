@@ -1482,8 +1482,8 @@ export default function LeadList({
                         >
                           <option value="new">New Inbound</option>
                           <option value="negotiating">In Discussion</option>
-                          <option value="rotations">In Rotations</option>
                           <option value="proposal">Office Visited/Interview Attended</option>
+                          <option value="rotations">In Rotations</option>
                           <option value="won">Closed Won</option>
                           <option value="lost">Closed Lost</option>
                         </select>

@@ -1,4 +1,4 @@
-export type LeadStage = 'new' | 'negotiating' | 'rotations' | 'proposal' | 'won' | 'lost';
+export type LeadStage = 'new' | 'negotiating' | 'proposal' | 'rotations' | 'won' | 'lost';
 
 export type FitScore = 'high' | 'medium' | 'low' | 'unqualified';
 
