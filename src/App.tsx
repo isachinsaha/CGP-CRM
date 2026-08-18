@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Lead, LeadStage, StatSummary, Coordinator } from './types.ts';
 import { 
   LayoutGrid, Table, BarChart3, Briefcase, ShieldAlert, Sparkles, 
   RefreshCw, MessageSquare, Plus, HelpCircle, Layers, Lock, User, Check, X, Shield,
-  LogOut, Users, UserCheck, Sun, Moon, PiggyBank, Menu, ChevronRight, Settings, ChevronDown
+  LogOut, Users, UserCheck, Sun, Moon, PiggyBank, Menu, ChevronRight, Settings, ChevronDown, Download
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -23,13 +23,16 @@ import LoginScreen from './components/LoginScreen.tsx';
 import CoordinatorsManager from './components/CoordinatorsManager.tsx';
 import MetadataManager from './components/MetadataManager.tsx';
 import IncentiveRulesManager from './components/IncentiveRulesManager.tsx';
+import MessagingCenter from './components/MessagingCenter.tsx';
 import CGPLogo from './components/CGPLogo.tsx';
 import ImportantUpdatesBar from './components/ImportantUpdatesBar.tsx';
+import ErrorBoundary from './components/ErrorBoundary.tsx';
+import { BackupManagerModal } from './components/BackupManagerModal.tsx';
 
 // Import local assets
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'board' | 'list' | 'analytics' | 'jobs' | 'ai-matcher' | 'wallet'>('board');
+  const [activeTab, setActiveTab] = useState<'board' | 'list' | 'messages' | 'analytics' | 'jobs' | 'ai-matcher' | 'wallet'>('board');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [stats, setStats] = useState<StatSummary | null>(null);
@@ -39,8 +42,9 @@ export default function App() {
   const [isCoordManagerOpen, setIsCoordManagerOpen] = useState(false);
   const [isMetadataManagerOpen, setIsMetadataManagerOpen] = useState(false);
   const [isIncentiveRulesOpen, setIsIncentiveRulesOpen] = useState(false);
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [isManageOpen, setIsManageOpen] = useState(true);
+  const [isBackupManagerOpen, setIsBackupManagerOpen] = useState(false);
+  const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
+  const adminMenuRef = useRef<HTMLDivElement>(null);
 
   // Authentication & session state
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string; displayName: string; role: 'admin' | 'agent' } | null>(() => {
@@ -116,7 +120,7 @@ export default function App() {
     }
   }, [currentUser?.username]);
 
-  // Listen for Escape key to close open modals/panels
+  // Listen for Escape and Click Outside to close open dropdowns/modals
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -125,10 +129,20 @@ export default function App() {
         setIsCoordManagerOpen(false);
         setIsMetadataManagerOpen(false);
         setIsIncentiveRulesOpen(false);
+        setIsAdminMenuOpen(false);
+      }
+    };
+    const handleClickOutside = (e: MouseEvent) => {
+      if (adminMenuRef.current && !adminMenuRef.current.contains(e.target as Node)) {
+        setIsAdminMenuOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, []);
 
   // Dynamic countries and positions list states
@@ -246,6 +260,54 @@ export default function App() {
   const [enrollTags, setEnrollTags] = useState<string[]>([]);
   const [newEnrollTagInput, setNewEnrollTagInput] = useState('');
 
+  // Handle filters update safely without recreating object references
+  const handleFiltersChange = useCallback((newFilters: any) => {
+    setFilters((prev: any) => {
+      const prevKeys = Object.keys(prev);
+      const newKeys = Object.keys(newFilters);
+      if (prevKeys.length !== newKeys.length) return newFilters;
+      for (const k of newKeys) {
+        if (prev[k] !== newFilters[k]) return newFilters;
+      }
+      return prev;
+    });
+  }, []);
+
+  const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
+
+  // Initial one-time app bootstrap for static rosters, health, and custom tags
+  const fetchAppMetadata = useCallback(async () => {
+    try {
+      const [coordsRes, healthRes, metaRes] = await Promise.all([
+        fetch('/api/coordinators').catch(() => null),
+        fetch('/api/health').catch(() => null),
+        fetch('/api/metadata').catch(() => null)
+      ]);
+
+      if (coordsRes && coordsRes.ok) {
+        const coordsData = await coordsRes.json();
+        setCoordinatorsList(coordsData);
+      }
+      if (healthRes && healthRes.ok) {
+        const healthData = await healthRes.json();
+        setApiMode(healthData.aiMode);
+      }
+      if (metaRes && metaRes.ok) {
+        const metaData = await metaRes.json();
+        if (metaData.countries) setCountries(metaData.countries);
+        if (metaData.positions) setPositions(metaData.positions);
+        if (metaData.projects) setProjects(metaData.projects);
+        if (metaData.tagsList) setTagsList(metaData.tagsList);
+      }
+    } catch (err) {
+      console.warn('Failed to load static app metadata:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAppMetadata();
+  }, [fetchAppMetadata]);
+
   // Synchronize data from Express REST API
   const pullCrmData = async (silent = false) => {
     if (!silent) setIsRefreshing(true);
@@ -272,7 +334,11 @@ export default function App() {
         remarksFilter: filters.remarksFilter || 'All'
       });
 
-      const leadsRes = await fetch(`/api/leads?${params.toString()}`);
+      const [leadsRes, statsRes] = await Promise.all([
+        fetch(`/api/leads?${params.toString()}`),
+        fetch('/api/stats').catch(() => null)
+      ]);
+
       if (leadsRes.ok) {
         const leadsData = await leadsRes.json();
         const leadsArray = Array.isArray(leadsData) ? leadsData : (leadsData.leads || []);
@@ -300,34 +366,9 @@ export default function App() {
       }
 
       // 2. Fetch aggregate stats
-      const statsRes = await fetch('/api/stats');
-      if (statsRes.ok) {
+      if (statsRes && statsRes.ok) {
         const statsData = await statsRes.json();
         setStats(statsData);
-      }
-
-      // Fetch dynamic staff roster list
-      const coordsRes = await fetch('/api/coordinators');
-      if (coordsRes.ok) {
-        const coordsData = await coordsRes.json();
-        setCoordinatorsList(coordsData);
-      }
-
-      // 3. System capabilities configuration
-      const healthRes = await fetch('/api/health');
-      if (healthRes.ok) {
-        const healthData = await healthRes.json();
-        setApiMode(healthData.aiMode);
-      }
-
-      // 4. Fetch dynamic CRM metadata options from server
-      const metaRes = await fetch('/api/metadata');
-      if (metaRes.ok) {
-        const metaData = await metaRes.json();
-        if (metaData.countries) setCountries(metaData.countries);
-        if (metaData.positions) setPositions(metaData.positions);
-        if (metaData.projects) setProjects(metaData.projects);
-        if (metaData.tagsList) setTagsList(metaData.tagsList);
       }
     } catch (err) {
       console.error('Failed to sync placement entries from Express REST routes:', err);
@@ -339,7 +380,7 @@ export default function App() {
 
   useEffect(() => {
     pullCrmData();
-  }, [currentPage, filters, activeTab]);
+  }, [currentPage, filterKey, activeTab]);
 
   // Update lead stage pipeline state
   const handleUpdateStage = async (id: string, stage: LeadStage) => {
@@ -442,7 +483,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 dark:bg-slate-950 flex flex-col font-sans text-slate-100 antialiased selection:bg-accent-purple selection:text-white" id="cgp-root-viewport">
+    <div className="h-screen w-full flex flex-col bg-slate-100 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 antialiased overflow-hidden selection:bg-indigo-600 selection:text-white" id="cgp-root-viewport">
       
       {/* Dynamic Slide-in Success Welcome Toast */}
       {toastMessage && (
@@ -467,182 +508,260 @@ export default function App() {
         </motion.div>
       )}
 
-      {/* TOP HEADER BAR (Reference Layout) */}
-      <header className="bg-slate-900 dark:bg-slate-900 border-b border-slate-800 px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-40 shadow-lg">
-        {/* Left: Brand & Logo */}
-        <div className="flex items-center gap-3.5">
-          <div className="h-10 w-10 bg-white rounded-xl flex items-center justify-center p-1 shadow-md shrink-0 cursor-pointer" onClick={() => setActiveTab('board')}>
-            <CGPLogo size={36} rounded="rounded-lg" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-black text-slate-100 text-sm sm:text-base tracking-wider uppercase font-display leading-none">
-                CAREER GROWTH PLACEMENT
-              </h1>
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" title="System Operational" />
+      {/* TOP HEADER & NAVIGATION BAR */}
+      {(() => {
+        const activeChatCount = leads.filter(l => {
+          const msgs = (l.messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
+          return msgs.length > 0;
+        }).length;
+
+        const requestingCount = leads.filter(l => {
+          const msgs = (l.messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
+          const isUnassigned = !l.assignedTo || l.assignedTo.toLowerCase() === 'unassigned' || l.assignedTo.toLowerCase() === 'all' || l.assignedTo.trim() === '';
+          return msgs.length > 0 && isUnassigned;
+        }).length;
+
+        const navItems = [
+          { id: 'board', label: 'Pipeline', icon: LayoutGrid },
+          { id: 'messages', label: 'WhatsApp Chats', icon: MessageSquare, badge: activeChatCount, requestingBadge: requestingCount },
+          { id: 'list', label: 'Spreadsheet', icon: Table },
+          { id: 'analytics', label: 'Reports', icon: BarChart3 },
+          { id: 'ai-matcher', label: 'AI Matcher', icon: Sparkles },
+          { id: 'jobs', label: 'Active Jobs', icon: Briefcase },
+          { id: 'wallet', label: 'Incentive Wallet', icon: PiggyBank },
+        ];
+
+        return (
+          <div className="shrink-0 z-30 flex flex-col bg-white dark:bg-slate-900 shadow-xs">
+            {/* ROW 1: PRIMARY TOP HEADER BAR */}
+            <header className="px-3 sm:px-5 py-2.5 flex items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+              
+              {/* Left Brand Identity */}
+              <div 
+                className="flex items-center gap-2.5 cursor-pointer select-none shrink-0" 
+                onClick={() => setActiveTab('board')}
+                title="Career Growth Placement CRM"
+              >
+                <div className="h-9 w-9 bg-slate-900 dark:bg-white rounded-xl flex items-center justify-center p-1 shadow-xs shrink-0">
+                  <CGPLogo size={32} rounded="rounded-lg" />
+                </div>
+                <div className="text-left min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <h1 className="font-black text-slate-900 dark:text-slate-100 text-sm tracking-wider uppercase font-display leading-tight truncate">
+                      CAREER GROWTH
+                    </h1>
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="System Operational" />
+                  </div>
+                  <p className="text-[9.5px] text-emerald-600 dark:text-emerald-400 font-mono font-extrabold uppercase tracking-wider">
+                    Abroad Recruiting CRM
+                  </p>
+                </div>
+              </div>
+
+              {/* Right Profile Actions & Utilities */}
+              <div className="flex items-center gap-2 shrink-0">
+                {/* AI Inbound Parser button */}
+                <button
+                  onClick={() => setApiMode(prev => prev === 'live' ? 'simulation' : 'live')}
+                  className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs"
+                  title="Toggle Live Parser / Simulation"
+                >
+                  <span className="text-sm">🤖</span>
+                  <span className="uppercase text-[10px] font-mono tracking-wider font-extrabold hidden md:inline">
+                    AI PARSER
+                  </span>
+                </button>
+
+                {/* Admin Master Controls Dropdown */}
+                {userRole === 'admin' && (
+                  <div className="relative" ref={adminMenuRef}>
+                    <button
+                      onClick={() => setIsAdminMenuOpen(prev => !prev)}
+                      className="px-2.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700"
+                    >
+                      <Settings className="h-3.5 w-3.5 text-indigo-500" />
+                      <span className="hidden sm:inline">Admin Controls</span>
+                      <ChevronDown className={`h-3 w-3 transition-transform ${isAdminMenuOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {isAdminMenuOpen && (
+                      <div className="absolute top-full right-0 mt-2 w-56 bg-white dark:bg-slate-850 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-750 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 text-left">
+                        <div className="px-3.5 py-1 text-[10px] font-mono font-bold uppercase text-slate-400">Master Controls</div>
+                        <button
+                          onClick={() => { setIsCoordManagerOpen(true); setIsAdminMenuOpen(false); }}
+                          className="w-full px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition text-left cursor-pointer"
+                        >
+                          <Users className="h-4 w-4 text-indigo-500 shrink-0" />
+                          <span>Manage Staff Desk</span>
+                        </button>
+                        <button
+                          onClick={() => { setIsMetadataManagerOpen(true); setIsAdminMenuOpen(false); }}
+                          className="w-full px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition text-left cursor-pointer"
+                        >
+                          <Layers className="h-4 w-4 text-indigo-500 shrink-0" />
+                          <span>Manage Options & Tags</span>
+                        </button>
+                        <button
+                          onClick={() => { setIsIncentiveRulesOpen(true); setIsAdminMenuOpen(false); }}
+                          className="w-full px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition text-left cursor-pointer"
+                        >
+                          <PiggyBank className="h-4 w-4 text-emerald-500 shrink-0" />
+                          <span>Incentive Rules</span>
+                        </button>
+                        <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                        <button
+                          onClick={() => {
+                            setIsBackupManagerOpen(true);
+                            setIsAdminMenuOpen(false);
+                          }}
+                          className="w-full px-3.5 py-2 text-xs font-bold text-cyan-600 dark:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-950/40 flex items-center gap-2.5 transition text-left cursor-pointer"
+                          title="Open Automated Database & XLSX Backup Center with scheduled Monday archives & full database restore"
+                        >
+                          <Download className="h-4 w-4 text-cyan-500 shrink-0 animate-bounce" />
+                          <span>📦 Backup & Restore Center</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 1-Click Whole CRM Database Backup Center Button */}
+                <button
+                  onClick={() => setIsBackupManagerOpen(true)}
+                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-950/30 dark:hover:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/60 transition cursor-pointer shadow-3xs"
+                  title="Automated Monday DB & XLSX Backups & 1-Click Restore Center"
+                >
+                  <Download className="h-3.5 w-3.5 text-cyan-500 shrink-0" />
+                  <span className="font-extrabold whitespace-nowrap">Backup & Restore</span>
+                </button>
+
+                {/* Theme Toggle */}
+                <button
+                  onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
+                  className="p-1.5 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
+                  title={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
+                >
+                  {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+                </button>
+
+                {/* Refresh Cloud Data */}
+                <button
+                  onClick={() => pullCrmData()}
+                  disabled={isRefreshing}
+                  className="p-1.5 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
+                  title="Pull Cloud Data"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                </button>
+
+                {/* User Profile Pill & Sign out */}
+                <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <div className="h-7 w-7 rounded-lg bg-indigo-600 text-white font-black text-xs flex items-center justify-center uppercase shadow-2xs shrink-0">
+                      {currentUser?.displayName?.charAt(0).toUpperCase() || 'M'}
+                    </div>
+                    <div className="text-left hidden xl:block">
+                      <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate leading-tight max-w-[120px]">
+                        {currentUser?.displayName}
+                      </p>
+                      <p className="text-[9px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider font-mono">
+                        {userRole === 'admin' ? '👑 MASTER ADMIN' : 'COORDINATOR'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('cgp_crm_session');
+                      setCurrentUser(null);
+                    }}
+                    className="p-1.5 rounded-xl text-rose-500 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                    title="Sign Out"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </header>
+
+            {/* ROW 2: SEPARATE DEDICATED NAVIGATION MENU BAR WITH BREATHING SPACE AND INCREASED HEIGHT */}
+            <div className="px-3 sm:px-5 pt-2 pb-2.5 bg-slate-100/60 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800">
+              <nav className="bg-slate-950 text-white rounded-2xl px-3.5 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3 overflow-x-auto no-scrollbar shadow-md border border-slate-800/80">
+                
+                {/* Left Navigation Buttons */}
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                  {navItems.map((tab) => {
+                    const Icon = tab.icon;
+                    const isSelected = activeTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id as any)}
+                        className={`group px-3 sm:px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white shadow-sm font-black'
+                            : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                        }`}
+                      >
+                        <Icon className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
+                        <span className="whitespace-nowrap">{tab.label}</span>
+                        {tab.requestingBadge !== undefined && tab.requestingBadge > 0 && (
+                          <span className={`text-[9.5px] font-mono font-black px-1.5 py-0.2 rounded-full ${
+                            isSelected ? 'bg-amber-400 text-slate-950' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
+                          }`} title={`${tab.requestingBadge} requesting chats`}>
+                            {tab.requestingBadge}
+                          </span>
+                        )}
+                        {tab.badge !== undefined && tab.badge > 0 && (
+                          <span className={`text-[9.5px] font-mono font-black px-1.5 py-0.2 rounded-full ${
+                            isSelected ? 'bg-white text-indigo-700' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          }`}>
+                            {tab.badge}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Right Status & Enrol Candidate CTA Button (Only for Admin) */}
+                <div className="flex items-center gap-3 shrink-0 ml-auto pl-3 border-l border-slate-800">
+                  {/* Synced Info */}
+                  <div className="text-xs font-mono text-emerald-400 font-semibold hidden sm:flex items-center gap-1.5 whitespace-nowrap">
+                    <span>Synced: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                    <span>•</span>
+                    <strong className="text-emerald-300 font-black">{totalLeadsCount || leads.length} candidates</strong>
+                  </div>
+
+                  {/* Enrol Candidate CTA Button - ONLY VISIBLE FOR ADMIN */}
+                  {userRole === 'admin' && (
+                    <button
+                      onClick={() => setIsCreateModalOpen(true)}
+                      className="bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-black py-2 px-3.5 rounded-xl shadow-xs flex items-center gap-1.5 uppercase cursor-pointer transition-all tracking-wider whitespace-nowrap"
+                    >
+                      <Plus className="h-4 w-4 stroke-[3]" />
+                      <span>ENROL CANDIDATE</span>
+                    </button>
+                  )}
+                </div>
+              </nav>
             </div>
-            <p className="text-[10px] text-emerald-400 font-mono font-extrabold uppercase tracking-wider mt-1">
-              Abroad Recruiting Tele-Calling Hub
-            </p>
           </div>
-        </div>
+        );
+      })()}
 
-        {/* Right Header Actions */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* AI Inbound Parser button */}
-          <button
-            onClick={() => setApiMode(prev => prev === 'live' ? 'simulation' : 'live')}
-            className="bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-bold px-3.5 py-1.5 rounded-full border border-slate-700 flex items-center gap-2 cursor-pointer transition-all shadow-xs"
-            title="Toggle Live Parser / Simulation"
-          >
-            <span className="text-sm">🤖</span>
-            <span className="uppercase text-[11px] font-mono tracking-wider font-extrabold">
-              AI INBOUND PARSER
-            </span>
-          </button>
-
-          {/* User Badge */}
-          <div className="flex items-center gap-2 bg-slate-800/80 border border-slate-700/80 px-3 py-1 rounded-full shadow-xs">
-            <div className="h-7 w-7 rounded-full bg-indigo-600 text-white font-black text-xs flex items-center justify-center uppercase shadow-xs">
-              {currentUser?.displayName?.charAt(0).toUpperCase() || 'M'}
-            </div>
-            <div className="text-left hidden sm:block">
-              <p className="text-[11px] font-bold text-slate-200 leading-tight">
-                Good afternoon, {currentUser?.displayName}
-              </p>
-              <p className="text-[9px] font-black text-indigo-400 uppercase tracking-wider font-mono">
-                {userRole === 'admin' ? '👑 MASTER ADMIN' : 'COORDINATOR'}
-              </p>
-            </div>
-          </div>
-
-          {/* Admin Header Action Pills */}
-          {userRole === 'admin' && (
-            <>
-              <button
-                onClick={() => setIsCoordManagerOpen(true)}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold px-4 py-1.5 rounded-full shadow-md shadow-indigo-950/30 flex items-center gap-1.5 uppercase cursor-pointer transition-all"
-              >
-                <Users className="h-3.5 w-3.5" />
-                <span>MANAGE STAFF</span>
-              </button>
-
-              <button
-                onClick={() => setIsMetadataManagerOpen(true)}
-                className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold px-4 py-1.5 rounded-full shadow-xs flex items-center gap-1.5 uppercase cursor-pointer transition-all"
-              >
-                <Layers className="h-3.5 w-3.5 text-indigo-400" />
-                <span>MANAGE OPTIONS</span>
-              </button>
-
-              <button
-                onClick={() => setIsIncentiveRulesOpen(true)}
-                className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold px-4 py-1.5 rounded-full shadow-xs flex items-center gap-1.5 uppercase cursor-pointer transition-all"
-              >
-                <PiggyBank className="h-3.5 w-3.5 text-emerald-400" />
-                <span>INCENTIVE RULES</span>
-              </button>
-            </>
-          )}
-
-          {/* Theme, Refresh, Logout Buttons */}
-          <div className="flex items-center gap-1 pl-1 border-l border-slate-800">
-            <button
-              onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-              title={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
-            >
-              {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-            </button>
-
-            <button
-              onClick={() => pullCrmData()}
-              disabled={isRefreshing}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-              title="Pull Cloud Data"
-            >
-              <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-            </button>
-
-            <button
-              onClick={() => {
-                localStorage.removeItem('cgp_crm_session');
-                setCurrentUser(null);
-              }}
-              className="p-1.5 rounded-lg text-rose-400 hover:text-rose-200 hover:bg-rose-950/40 transition cursor-pointer"
-              title="Sign Out"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* HORIZONTAL TABS NAVIGATION BAR (Reference Layout) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-lg p-2 flex flex-wrap items-center justify-between gap-3 my-3 mx-4 sm:mx-6">
-        {/* Left Horizontal Tabs Pill Stack */}
-        <nav className="flex items-center gap-1.5 flex-wrap">
-          {[
-            { id: 'board', label: 'Your Pipeline', icon: LayoutGrid },
-            { id: 'list', label: 'Spreadsheet Explorer', icon: Table },
-            { id: 'analytics', label: 'Consultancy Reports', icon: BarChart3 },
-            { id: 'ai-matcher', label: 'AI Profile Matcher', icon: Sparkles },
-            { id: 'jobs', label: 'Active Jobs Hub', icon: Briefcase },
-            { id: 'wallet', label: 'Incentive Wallet', icon: PiggyBank },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isSelected = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`group px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border ${
-                  isSelected
-                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-950/40'
-                    : 'bg-transparent border-transparent text-black dark:text-slate-200 hover:bg-violet-600 hover:text-white dark:hover:bg-slate-800/60 dark:hover:text-slate-200'
-                }`}
-              >
-                <Icon className={`h-4 w-4 transition-colors ${isSelected ? 'text-white' : 'text-black dark:text-slate-300 group-hover:text-white dark:group-hover:text-slate-200'}`} />
-                <span className={`transition-colors ${isSelected ? 'text-white font-black' : 'text-black dark:text-slate-200 font-black group-hover:text-white dark:group-hover:text-slate-200'}`}>{tab.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* Right Sync Status & Enrol Action */}
-        <div className="flex items-center gap-4 ml-auto">
-          <span className="text-xs font-mono text-emerald-800 dark:text-emerald-400 font-semibold hidden md:inline-block">
-            Synced: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} • <strong className="text-emerald-800 dark:text-emerald-400 font-black">{totalLeadsCount || leads.length}</strong> <span className="text-emerald-800 dark:text-emerald-300 font-bold">candidates</span>
-          </span>
-
-          {userRole === 'admin' && (
-            <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold px-4 py-2 rounded-xl shadow-md shadow-emerald-950/30 flex items-center gap-1.5 uppercase cursor-pointer transition-all"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Enrol Candidate</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Main Core Content Area */}
-      <main className="flex-1 min-w-0 px-4 sm:px-6 pb-6 space-y-4 flex flex-col">
-        {/* Important Live Broadcast Updates Ticker */}
-        <ImportantUpdatesBar />
-
+      {/* MAIN WORKSPACE VIEWPORT */}
+      <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6 space-y-4 flex flex-col min-h-0">
         {/* Dynamic Display Stage Router */}
-        <div className="flex-1 flex flex-col">
-          {activeTab === 'board' && (
-              <motion.div
-                key="board-tab"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                className="flex-1 flex flex-col"
-              >
+        <div className="flex-1 flex flex-col min-h-0">
+          <ErrorBoundary fallbackTitle="Could Not Display Selected View">
+            {activeTab === 'board' && (
+              <div key="board-tab" className="flex-1 flex flex-col min-h-0 space-y-4">
+                {/* Important Live Broadcast Updates Ticker - ONLY on Pipeline Screen */}
+                <ErrorBoundary fallbackTitle="Updates Ticker Unavailable">
+                  <ImportantUpdatesBar />
+                </ErrorBoundary>
+                
                 <LeadBoard
                   leads={leads}
                   onSelectLead={setSelectedLead}
@@ -651,18 +770,11 @@ export default function App() {
                   currentAgentId={currentAgentId}
                   coordinators={coordinatorsList}
                 />
-              </motion.div>
+              </div>
             )}
 
             {activeTab === 'list' && (
-              <motion.div
-                key="list-tab"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                className="flex-1 flex flex-col"
-              >
+              <div key="list-tab" className="flex-1 flex flex-col min-h-0">
                 <LeadList
                   leads={leads}
                   onSelectLead={setSelectedLead}
@@ -676,88 +788,84 @@ export default function App() {
                   totalPagesCount={totalPagesCount}
                   currentPageOverride={currentPage}
                   onPageChange={setCurrentPage}
-                  onFiltersChange={setFilters}
+                  onFiltersChange={handleFiltersChange}
                   metaCountries={metaCountries}
                   metaProjects={metaProjects}
                   metaPositions={metaPositions}
                   metaTags={metaTags}
                 />
-              </motion.div>
+              </div>
             )}
 
-            {activeTab === 'analytics' && stats && (
-              <motion.div
-                key="analytics-tab"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                className="flex-1 flex flex-col"
-              >
-                <CampaignAnalytics 
-                  stats={stats} 
-                  leads={leads} 
-                  onRefreshData={() => pullCrmData(true)} 
+            {activeTab === 'messages' && (
+              <div key="messages-tab" className="flex-1 flex flex-col min-h-0">
+                <MessagingCenter
+                  leads={leads}
+                  onSelectLead={setSelectedLead}
                   userRole={userRole}
                   currentAgentId={currentAgentId}
-                  onSelectLead={setSelectedLead}
                   coordinators={coordinatorsList}
+                  countries={countries}
+                  positions={positions}
+                  projects={projects}
+                  onRefreshData={() => pullCrmData(true)}
+                  onLeadUpdated={async () => { await pullCrmData(true); }}
                 />
-              </motion.div>
+              </div>
+            )}
+
+            {activeTab === 'analytics' && (
+              <div key="analytics-tab" className="flex-1 flex flex-col min-h-0">
+                {stats ? (
+                  <CampaignAnalytics 
+                    stats={stats} 
+                    leads={leads} 
+                    onRefreshData={() => pullCrmData(true)} 
+                    userRole={userRole}
+                    currentAgentId={currentAgentId}
+                    onSelectLead={setSelectedLead}
+                    coordinators={coordinatorsList}
+                  />
+                ) : (
+                  <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 flex flex-col items-center justify-center gap-3">
+                    <RefreshCw className="h-8 w-8 text-indigo-500 animate-spin" />
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">Loading consultancy analytics...</p>
+                  </div>
+                )}
+              </div>
             )}
 
             {activeTab === 'jobs' && (
-              <motion.div
-                key="jobs-tab"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                className="flex-1 flex flex-col"
-              >
+              <div key="jobs-tab" className="flex-1 flex flex-col min-h-0">
                 <ActiveJobs
                   currentUser={currentUser}
                   countries={countries}
                   view="jobs"
                 />
-              </motion.div>
+              </div>
             )}
 
             {activeTab === 'wallet' && (
-              <motion.div
-                key="wallet-tab"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                className="flex-1 flex flex-col"
-              >
+              <div key="wallet-tab" className="flex-1 flex flex-col min-h-0">
                 <ActiveJobs
                   currentUser={currentUser}
                   countries={countries}
                   view="wallet"
                 />
-              </motion.div>
+              </div>
             )}
 
             {activeTab === 'ai-matcher' && (
-              <motion.div
-                key="ai-matcher-tab"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                className="flex-1 flex flex-col"
-              >
+              <div key="ai-matcher-tab" className="flex-1 flex flex-col min-h-0">
                 <AiProfileMatcher
                   onSelectLead={setSelectedLead}
                   onUpdateLead={async () => { await pullCrmData(true); }}
                   userRole={userRole}
                 />
-              </motion.div>
+              </div>
             )}
-          </div>
-
+          </ErrorBoundary>
+        </div>
       </main>
 
       {/* 2. MANUALLY ENROLL CANDIDATE MODAL DIALOG (Admin Power option) */}
@@ -1274,6 +1382,20 @@ export default function App() {
           onRulesChanged={() => pullCrmData(true)}
           countries={countries}
           projects={projects}
+        />
+      )}
+
+      {/* Automated Database & XLSX Backup / Restore Modal */}
+      {isBackupManagerOpen && (
+        <BackupManagerModal
+          isOpen={isBackupManagerOpen}
+          onClose={() => setIsBackupManagerOpen(false)}
+          onRestoreSuccess={() => {
+            pullCrmData(true);
+            setTimeout(() => {
+              window.location.reload();
+            }, 1000);
+          }}
         />
       )}
 

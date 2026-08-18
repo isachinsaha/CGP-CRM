@@ -8,6 +8,7 @@ import {
 import { motion } from 'motion/react';
 import { getCountryFlagUrl, formatCandidateName, isDefaultExperience, extractExperienceFromRemarks, getEffectiveExperience } from '../utils';
 import { SearchableSelect } from './SearchableSelect.tsx';
+import LeadWhatsAppChat from './LeadWhatsAppChat.tsx';
 
 interface LeadModalProps {
   lead: Lead;
@@ -37,11 +38,10 @@ export default function LeadModal({
   tagsList
 }: LeadModalProps) {
   const [lead, setLead] = useState<Lead>(initialLead);
-  const [activeLeftTab, setActiveLeftTab] = useState<'ai' | 'profile'>('ai');
-  const [activeRightTab, setActiveRightTab] = useState<'tasks' | 'timeline'>('tasks');
+  const [activeLeftTab, setActiveLeftTab] = useState<'ai' | 'profile' | 'tasks' | 'timeline'>('ai');
   
   // Activity Timeline filters & search
-  const [timelineFilter, setTimelineFilter] = useState<'all' | 'status' | 'remark' | 'assignment' | 'task'>('all');
+  const [timelineFilter, setTimelineFilter] = useState<'all' | 'status' | 'remark' | 'assignment' | 'task' | 'message'>('all');
   const [timelineSearch, setTimelineSearch] = useState('');
   const [copiedLogId, setCopiedLogId] = useState<string | null>(null);
 
@@ -78,10 +78,10 @@ export default function LeadModal({
 
   // Trigger fetch when switching to the timeline tab or when lead changes
   useEffect(() => {
-    if (activeRightTab === 'timeline') {
+    if (activeLeftTab === 'timeline') {
       fetchTimelineData(true);
     }
-  }, [activeRightTab, initialLead.id]);
+  }, [activeLeftTab, initialLead.id]);
 
   // Computed timeline items filtered by category and search query
   const timelineCounts = useMemo(() => {
@@ -92,6 +92,7 @@ export default function LeadModal({
       remark: list.filter(e => e.type === 'remark').length,
       assignment: list.filter(e => e.type === 'assignment').length,
       task: list.filter(e => e.type === 'task').length,
+      message: list.filter(e => e.type === 'message').length,
     };
   }, [lead.timeline]);
 
@@ -548,11 +549,11 @@ export default function LeadModal({
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 380, damping: 26 }}
-        className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-[1310px] h-[92vh] flex flex-col overflow-hidden text-slate-900 dark:text-slate-100 text-sm"
+        className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-[1560px] h-[95vh] flex flex-col overflow-hidden text-slate-900 dark:text-slate-100 text-sm"
       >
         
         {/* Header ribbon */}
-        <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row gap-4 justify-between lg:items-center shrink-0 shadow-2xs">
+        <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row gap-3 justify-between lg:items-center shrink-0 shadow-2xs">
           <div className="flex items-center gap-3">
             <div className="p-2 border border-slate-200 dark:border-slate-700 rounded-full text-slate-700 dark:text-slate-300 shrink-0">
               <Info className="h-5 w-5" />
@@ -632,27 +633,51 @@ export default function LeadModal({
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            {/* Live Telecaller Call Status Quick Toggle in Header */}
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs shrink-0">
+              <span className="text-xs uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider flex items-center gap-1">
+                <PhoneCall className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+                <span>CALL:</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const nextVal = formFields.callConnected === 'connected' ? 'not_connected' : 'connected';
+                  setFormFields(prev => ({ ...prev, callConnected: nextVal }));
+                }}
+                className={`text-xs font-black focus:outline-none cursor-pointer font-sans transition-all whitespace-nowrap flex items-center gap-1 px-2 py-0.5 rounded ${
+                  formFields.callConnected === 'connected'
+                    ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 font-extrabold'
+                    : 'text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 font-extrabold'
+                }`}
+                title="Toggle Telecaller Call Status"
+              >
+                <span>{formFields.callConnected === 'connected' ? '🟢 CONNECTED' : '🔴 NOT CONNECTED'}</span>
+              </button>
+            </div>
+
             {/* Shorter, Thicker, Bolder and More Attractive Stage selection */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1.5 px-3 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
               <span className="text-xs uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider">STAGE:</span>
               <select
-                value={formFields.stage}
+                value={formFields.stage === 'negotiating' ? 'in_discussion' : formFields.stage === 'proposal' ? 'office_visited' : formFields.stage === 'rotations' ? 'cold_leads' : formFields.stage}
                 name="stage"
                 onChange={handleFieldChange}
-                className="text-xs sm:text-[13px] font-extrabold bg-transparent text-slate-900 dark:text-slate-100 px-1 py-0.5 focus:outline-none cursor-pointer max-w-[150px] font-sans"
+                className="text-xs sm:text-[13px] font-extrabold bg-transparent text-slate-900 dark:text-slate-100 px-1 py-0.5 focus:outline-none cursor-pointer max-w-[160px] font-sans"
               >
-                <option value="new" className="font-extrabold bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">New Inbound</option>
-                <option value="negotiating" className="font-extrabold bg-white dark:bg-slate-900 text-amber-600">In Discussion</option>
-                <option value="proposal" className="font-extrabold bg-white dark:bg-slate-900 text-purple-600">Office Visited</option>
-                <option value="rotations" className="font-extrabold bg-white dark:bg-slate-900 text-indigo-600">In Rotations</option>
-                <option value="won" className="font-extrabold bg-white dark:bg-slate-900 text-emerald-600">Closed Won ✅</option>
-                <option value="lost" className="font-extrabold bg-white dark:bg-slate-900 text-rose-600">Closed Lost ❌</option>
+                <option value="new" className="font-extrabold bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">1. NEW INBOUND</option>
+                <option value="in_discussion" className="font-extrabold bg-white dark:bg-slate-900 text-amber-600">2. IN DISCUSSION</option>
+                <option value="strong_opportunity" className="font-extrabold bg-white dark:bg-slate-900 text-sky-600">3. STRONG OPPORTUNITY</option>
+                <option value="office_visited" className="font-extrabold bg-white dark:bg-slate-900 text-purple-600">4. OFFICE VISITED / INTERVIEW</option>
+                <option value="won" className="font-extrabold bg-white dark:bg-slate-900 text-emerald-600">5. WON ✅</option>
+                <option value="cold_leads" className="font-extrabold bg-white dark:bg-slate-900 text-blue-600">6. COLD LEADS</option>
+                <option value="lost" className="font-extrabold bg-white dark:bg-slate-900 text-rose-600">7. LOST ❌</option>
               </select>
             </div>
 
             {/* Smaller Reminder Button matching Stage selection style but smaller */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1.5 px-3 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs shrink-0">
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs shrink-0">
               <span className="text-xs uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider flex items-center gap-1">
                 <Bell className={`h-3.5 w-3.5 ${formFields.reminderEnabled ? 'text-indigo-600 dark:text-indigo-400 fill-indigo-600' : 'text-slate-400'}`} />
                 <span>REMINDER:</span>
@@ -696,7 +721,7 @@ export default function LeadModal({
               type="button"
               onClick={() => saveProfileEdits()}
               disabled={savingForm}
-              className={`flex items-center justify-center gap-2 py-2.5 px-6 rounded-xl shadow-xs font-black text-xs sm:text-sm uppercase tracking-wider transition-all duration-200 cursor-pointer disabled:opacity-50 select-none shrink-0 text-white ${
+              className={`flex items-center justify-center gap-1.5 py-2 px-5 rounded-xl shadow-xs font-black text-xs sm:text-sm uppercase tracking-wider transition-all duration-200 cursor-pointer disabled:opacity-50 select-none shrink-0 text-white ${
                 saveSuccess 
                   ? 'bg-emerald-600' 
                   : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95'
@@ -704,17 +729,17 @@ export default function LeadModal({
             >
               {savingForm ? (
                 <>
-                  <RefreshCw className="h-4.5 w-4.5 animate-spin text-white" />
+                  <RefreshCw className="h-4 w-4 animate-spin text-white" />
                   <span className="text-white font-black">Saving</span>
                 </>
               ) : saveSuccess ? (
                 <>
-                  <Check className="h-4.5 w-4.5 text-white stroke-[3.5px]" />
+                  <Check className="h-4 w-4 text-white stroke-[3.5px]" />
                   <span className="text-white font-black">Saved</span>
                 </>
               ) : (
                 <>
-                  <Check className="h-4.5 w-4.5 text-white stroke-[3.5px]" />
+                  <Check className="h-4 w-4 text-white stroke-[3.5px]" />
                   <span className="text-white font-black">SAVE</span>
                 </>
               )}
@@ -722,7 +747,7 @@ export default function LeadModal({
 
             <button
               onClick={onClose}
-              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg transition-all cursor-pointer"
+              className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg transition-all cursor-pointer"
             >
               <X className="h-6 w-6" />
             </button>
@@ -732,39 +757,64 @@ export default function LeadModal({
         {/* Double Column Area */}
         <div className="flex-1 flex overflow-hidden">
           
-          {/* Left Column: Form Details / Smart Metadata */}
-          <div className="w-1/2 border-r border-slate-200 dark:border-slate-750 flex flex-col bg-slate-50/50 dark:bg-slate-900/10 overflow-y-auto">
+          {/* Left Column: Form Details / Smart Metadata / Tasks / Activity Timeline */}
+          <div className="w-[48%] xl:w-[46%] 2xl:w-[44%] border-r border-slate-200 dark:border-slate-800 flex flex-col bg-slate-50/50 dark:bg-slate-900/10 overflow-y-auto shrink-0">
             
-            {/* Left Tabs */}
-            <div className="flex p-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 sticky top-0 z-20 gap-2">
+            {/* Left Tabs (4 Full Tabs: AI Classification, Office Form Sheet, Tasks, Timeline) */}
+            <div className="flex p-2 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 sticky top-0 z-20 gap-1.5 overflow-x-auto">
               <button
                 type="button"
                 onClick={() => setActiveLeftTab('ai')}
-                className={`group flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-full flex items-center justify-center gap-1.5 cursor-pointer border ${
+                className={`group flex-1 py-2 px-2 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1 cursor-pointer border whitespace-nowrap ${
                   activeLeftTab === 'ai'
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-500 dark:bg-slate-800 dark:text-emerald-400 dark:border-slate-700 dark:hover:bg-[#1f293d]'
+                    : 'bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-500 dark:bg-slate-800 dark:text-emerald-400 dark:border-slate-700 dark:hover:bg-[#1f293d]'
                 }`}
               >
-                <Sparkles className={`h-3.5 w-3.5 ${activeLeftTab === 'ai' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
-                <span className={`font-black ${activeLeftTab === 'ai' ? 'text-white' : 'text-emerald-700 dark:text-emerald-400'}`}>AI Classification</span>
+                <Sparkles className={`h-3.5 w-3.5 shrink-0 ${activeLeftTab === 'ai' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
+                <span className="truncate">AI Profile</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveLeftTab('profile')}
-                className={`group flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-full flex items-center justify-center gap-1.5 cursor-pointer border ${
+                className={`group flex-1 py-2 px-2 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1 cursor-pointer border whitespace-nowrap ${
                   activeLeftTab === 'profile'
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-500 dark:bg-slate-800 dark:text-emerald-400 dark:border-slate-700 dark:hover:bg-[#1f293d]'
+                    : 'bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-500 dark:bg-slate-800 dark:text-emerald-400 dark:border-slate-700 dark:hover:bg-[#1f293d]'
                 }`}
               >
-                <Clipboard className={`h-3.5 w-3.5 ${activeLeftTab === 'profile' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
-                <span className={`font-black ${activeLeftTab === 'profile' ? 'text-white' : 'text-emerald-700 dark:text-emerald-400'}`}>Office Form Sheet</span>
+                <Clipboard className={`h-3.5 w-3.5 shrink-0 ${activeLeftTab === 'profile' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
+                <span className="truncate">Form Sheet</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveLeftTab('tasks')}
+                className={`group flex-1 py-2 px-2 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1 cursor-pointer border whitespace-nowrap ${
+                  activeLeftTab === 'tasks'
+                    ? 'bg-violet-700 text-white border-violet-700 shadow-xs'
+                    : 'bg-white text-violet-800 border-violet-200 hover:bg-violet-50 hover:border-violet-500 dark:bg-slate-800 dark:text-violet-400 dark:border-slate-700 dark:hover:bg-[#1f293d]'
+                }`}
+              >
+                <ListTodo className={`h-3.5 w-3.5 shrink-0 ${activeLeftTab === 'tasks' ? 'text-white' : 'text-violet-600 dark:text-violet-400'}`} />
+                <span className="truncate">Tasks ({ (lead.tasks || []).filter(t => !t.completed).length })</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveLeftTab('timeline')}
+                className={`group flex-1 py-2 px-2 text-[11px] font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1 cursor-pointer border whitespace-nowrap ${
+                  activeLeftTab === 'timeline'
+                    ? 'bg-indigo-700 text-white border-indigo-700 shadow-xs'
+                    : 'bg-white text-indigo-800 border-indigo-200 hover:bg-indigo-50 hover:border-indigo-500 dark:bg-slate-800 dark:text-indigo-400 dark:border-slate-700 dark:hover:bg-[#1f293d]'
+                }`}
+              >
+                <History className={`h-3.5 w-3.5 shrink-0 ${activeLeftTab === 'timeline' ? 'text-white' : 'text-indigo-600 dark:text-indigo-400'}`} />
+                <span className="truncate">Timeline ({ lead.timeline?.length || 0 })</span>
               </button>
             </div>
 
             <div className="p-5 space-y-5 flex-1 text-left">
-              {activeLeftTab === 'ai' ? (
+              {/* TAB 1: AI PROFILE */}
+              {activeLeftTab === 'ai' && (
                 <div className="space-y-5 animate-in fade-in duration-200">
                   
                   {/* AI Profiling Highlights block */}
@@ -1107,9 +1157,10 @@ export default function LeadModal({
                     </div>
                   </div>
                 </div>
-              ) : (
-                
-                // CGP Comprehensive spreadsheet-like form
+              )}
+
+              {/* TAB 2: OFFICE FORM SHEET */}
+              {activeLeftTab === 'profile' && (
                 <form onSubmit={saveProfileEdits} className="space-y-4 animate-in fade-in duration-200 text-left">
                   {isSubAgent && (
                     <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-900/30 text-amber-800 dark:text-amber-400 text-[11px] rounded-lg flex items-center gap-1.5 leading-relaxed font-semibold">
@@ -1527,106 +1578,13 @@ export default function LeadModal({
                   </button>
                 </form>
               )}
-            </div>
-          </div>
 
-          {/* Right Column: Dynamic Action Hub (Timeline, Task Center, AISensy Templates) */}
-          <div className="w-1/2 flex flex-col h-full bg-slate-50/50 dark:bg-slate-950/40 relative justify-between border-l border-slate-200 dark:border-slate-800">
-            
-            {/* Live Telecaller Call Status */}
-            <div className="p-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 space-y-3 shrink-0 text-left shadow-2xs">
-              <div className="flex justify-between items-center">
-                <h4 className="text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider flex items-center gap-2">
-                  <PhoneCall className="h-4 w-4 text-purple-600 dark:text-purple-400" /> Live Telecaller Call Status
-                </h4>
-                <span className="text-[9px] font-extrabold text-white bg-emerald-600 dark:bg-emerald-700 px-2.5 py-0.5 rounded font-mono uppercase shadow-2xs">
-                  Connected status
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFormFields(prev => ({ ...prev, callConnected: 'connected' }));
-                  }}
-                  className={`py-2.5 px-4 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                    formFields.callConnected === 'connected'
-                      ? 'bg-emerald-600 dark:bg-emerald-600 text-white shadow-xs'
-                      : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750'
-                  }`}
-                >
-                  <span className="text-white text-xs">🟢</span>
-                  <span className="text-white">CONNECTED</span>
-                  <Check className="h-3.5 w-3.5 text-white stroke-[3px]" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFormFields(prev => ({ ...prev, callConnected: 'not_connected' }));
-                  }}
-                  className={`py-2.5 px-4 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                    formFields.callConnected === 'not_connected'
-                      ? 'bg-rose-600 dark:bg-rose-600 text-white shadow-xs'
-                      : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750'
-                  }`}
-                >
-                  <span className="text-white text-xs">🔴</span>
-                  <span>NOT CONNECTED</span>
-                  <X className="h-3.5 w-3.5 text-white stroke-[3px]" />
-                </button>
-              </div>
-
-              {formFields.callConnected === 'not_connected' && (
-                <div className="p-2.5 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 rounded-xl text-[10.5px] font-bold flex items-center gap-1.5 animate-pulse mt-1">
-                  <span>⚠️ Please schedule a callback task under "Actions & Reminders" below before committing.</span>
-                </div>
-              )}
-            </div>
-
-            {/* Header / Tabs switcher */}
-            <div className="flex p-2 mt-6 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-20 shrink-0 gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveRightTab('tasks')}
-                className={`group flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border ${
-                  activeRightTab === 'tasks'
-                    ? 'bg-violet-700 text-white border-violet-700 shadow-2xs'
-                    : 'bg-white text-slate-900 border-slate-200 hover:bg-violet-50 hover:border-violet-500 hover:text-violet-700 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-[#1f293d]'
-                }`}
-              >
-                <ListTodo className={`h-3.5 w-3.5 ${activeRightTab === 'tasks' ? 'text-white' : 'text-slate-800 dark:text-slate-100 group-hover:text-violet-600 dark:group-hover:text-white'}`} />
-                <span className={`font-black ${activeRightTab === 'tasks' ? 'text-white' : 'text-slate-900 dark:text-slate-100 group-hover:text-violet-700 dark:group-hover:text-white'}`}>
-                  Actions & Reminders ({ (lead.tasks || []).filter(t => !t.completed).length })
-                </span>
-              </button>
-              
-              <button
-                type="button"
-                onClick={() => setActiveRightTab('timeline')}
-                className={`group flex-1 py-2.5 px-3 text-[11px] sm:text-xs font-black tracking-wider uppercase transition-all duration-200 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border ${
-                  activeRightTab === 'timeline'
-                    ? 'bg-violet-700 text-white border-violet-700 shadow-2xs'
-                    : 'bg-white text-slate-900 border-slate-200 hover:bg-violet-50 hover:border-violet-500 hover:text-violet-700 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-[#1f293d]'
-                }`}
-              >
-                <History className={`h-3.5 w-3.5 ${activeRightTab === 'timeline' ? 'text-white' : 'text-slate-800 dark:text-slate-100 group-hover:text-violet-600 dark:group-hover:text-white'}`} />
-                <span className={`font-black ${activeRightTab === 'timeline' ? 'text-white' : 'text-slate-900 dark:text-slate-100 group-hover:text-violet-700 dark:group-hover:text-white'}`}>
-                  Activity Timeline ({ lead.timeline?.length || 0 })
-                </span>
-              </button>
-            </div>
-
-            {/* Display selected tab */}
-            <div className="flex-1 overflow-y-auto p-5 text-left">
-              
-              {/* TAB 1: ACTIONS & REMINDERS (Tasks list) */}
-              {activeRightTab === 'tasks' && (
+              {/* TAB 3: TASKS & TELECALLER REMINDERS */}
+              {activeLeftTab === 'tasks' && (
                 <div className="space-y-4 animate-in fade-in duration-200">
                   <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
                     <h4 className="text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider mb-3 flex items-center gap-2">
-                      <ListTodo className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> Schedule Telecaller Action Item
+                      <ListTodo className="h-4 w-4 text-violet-600 dark:text-violet-400" /> Schedule Telecaller Action Item
                     </h4>
 
                     <form onSubmit={handleAddTask} className="space-y-3">
@@ -1638,7 +1596,7 @@ export default function LeadModal({
                           placeholder="e.g. Callback to request passport scan..."
                           value={newTaskTitle}
                           onChange={(e) => setNewTaskTitle(e.target.value)}
-                          className="w-full text-xs sm:text-[13px] px-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all mt-1 font-bold"
+                          className="w-full text-xs sm:text-[13px] px-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-violet-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all mt-1 font-bold"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
@@ -1650,15 +1608,15 @@ export default function LeadModal({
                               required
                               value={newTaskDueDate}
                               onChange={(e) => setNewTaskDueDate(e.target.value)}
-                              className="w-full text-xs sm:text-[13px] pl-8 pr-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-900 dark:text-slate-100 font-bold cursor-pointer dark:[color-scheme:dark] [color-scheme:light]"
+                              className="w-full text-xs sm:text-[13px] pl-8 pr-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-violet-500 text-slate-900 dark:text-slate-100 font-bold cursor-pointer dark:[color-scheme:dark] [color-scheme:light]"
                             />
-                            <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-emerald-600 dark:text-emerald-400 pointer-events-none" />
+                            <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-violet-600 dark:text-violet-400 pointer-events-none" />
                           </div>
                         </div>
                         <div className="flex items-end">
                           <button
                             type="submit"
-                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold rounded-lg transition-all shadow-2xs cursor-pointer flex items-center justify-center gap-1.5 uppercase tracking-wider"
+                            className="w-full py-2 bg-violet-700 hover:bg-violet-800 text-white text-xs font-extrabold rounded-lg transition-all shadow-2xs cursor-pointer flex items-center justify-center gap-1.5 uppercase tracking-wider"
                           >
                             <ArrowRight className="h-3.5 w-3.5" />
                             Schedule Task
@@ -1727,8 +1685,8 @@ export default function LeadModal({
                 </div>
               )}
 
-              {/* TAB 2: ACTIVITY TIMELINE */}
-              {activeRightTab === 'timeline' && (
+              {/* TAB 4: ACTIVITY TIMELINE */}
+              {activeLeftTab === 'timeline' && (
                 <div className="space-y-4 animate-in fade-in duration-200">
                   {/* Timeline Header & Count */}
                   <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-xs">
@@ -1741,7 +1699,7 @@ export default function LeadModal({
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-extrabold text-indigo-700 dark:text-indigo-400 font-mono bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/40 px-2.5 py-0.5 rounded-full">
-                          {timelineCounts.total} Events Recorded
+                          {timelineCounts.total} Events
                         </span>
                         <button
                           type="button"
@@ -1761,9 +1719,9 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => setTimelineFilter('all')}
-                        className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
+                        className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'all'
-                            ? 'bg-violet-700 text-white border-violet-700 shadow-xs'
+                            ? 'bg-indigo-700 text-white border-indigo-700 shadow-xs'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
@@ -1772,7 +1730,7 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => setTimelineFilter('status')}
-                        className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
+                        className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'status'
                             ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
@@ -1783,7 +1741,7 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => setTimelineFilter('remark')}
-                        className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
+                        className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'remark'
                             ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
@@ -1794,24 +1752,35 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => setTimelineFilter('assignment')}
-                        className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
+                        className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'assignment'
                             ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
-                        👤 Coordinator ({timelineCounts.assignment})
+                        👤 Coord ({timelineCounts.assignment})
                       </button>
                       <button
                         type="button"
                         onClick={() => setTimelineFilter('task')}
-                        className={`text-[11px] font-black px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
+                        className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'task'
                             ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         📝 Tasks ({timelineCounts.task})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTimelineFilter('message')}
+                        className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                          timelineFilter === 'message'
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        💬 Chat ({timelineCounts.message})
                       </button>
                     </div>
 
@@ -1820,10 +1789,10 @@ export default function LeadModal({
                       <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
                       <input
                         type="text"
-                        placeholder="Search timeline by coordinator or remark keywords..."
+                        placeholder="Search timeline events..."
                         value={timelineSearch}
                         onChange={(e) => setTimelineSearch(e.target.value)}
-                        className="w-full text-xs sm:text-[13px] pl-8.5 pr-7 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-semibold"
+                        className="w-full text-xs pl-8.5 pr-7 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-semibold"
                       />
                       {timelineSearch && (
                         <button
@@ -1849,23 +1818,15 @@ export default function LeadModal({
                       <div className="relative pl-5 border-l-2 border-slate-200 dark:border-slate-800 ml-2 space-y-4">
                         {[1, 2, 3].map((idx) => (
                           <div key={idx} className="relative text-left">
-                            {/* Marker Icon Skeleton */}
                             <div className="absolute -left-7 top-1 h-5 w-5 rounded-full bg-slate-200 dark:bg-slate-800 animate-pulse border-2 border-slate-300 dark:border-slate-700 shadow-2xs" />
-
-                            {/* Card Content Skeleton */}
                             <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5 shadow-2xs animate-pulse">
                               <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
                                 <div className="flex items-center gap-2">
-                                  {/* Event Type Badge Skeleton */}
                                   <div className="h-4 w-20 bg-slate-200 dark:bg-slate-800 rounded-md" />
-                                  {/* Coordinator Badge Skeleton */}
                                   <div className="h-4 w-28 bg-purple-100 dark:bg-purple-950/80 rounded-md" />
                                 </div>
-                                {/* Date Skeleton */}
                                 <div className="h-3 w-28 bg-slate-200 dark:bg-slate-800 rounded" />
                               </div>
-
-                              {/* Body Text Line Skeletons */}
                               <div className="space-y-1.5 pt-1">
                                 <div className="h-3 bg-slate-200 dark:bg-slate-800 rounded w-11/12" />
                                 <div className="h-3 bg-slate-200 dark:bg-slate-800 rounded w-3/4" />
@@ -1883,6 +1844,7 @@ export default function LeadModal({
                         const isAssign = event.type === 'assignment';
                         const isTask = event.type === 'task';
                         const isCreation = event.type === 'creation';
+                        const isMessage = event.type === 'message';
 
                         const formattedDate = event.timestamp
                           ? `${new Date(event.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} at ${new Date(event.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
@@ -1890,8 +1852,8 @@ export default function LeadModal({
 
                         return (
                           <div key={event.id} className="relative group text-left">
-                            {/* Marker Icon */}
                             <div className={`absolute -left-7 top-1 h-5 w-5 rounded-full border-2 flex items-center justify-center text-[10px] shadow-xs ${
+                              isMessage ? 'bg-emerald-100 dark:bg-emerald-950 border-emerald-500 text-emerald-700 dark:text-emerald-300' :
                               isStage ? 'bg-purple-100 dark:bg-purple-950 border-purple-500 text-purple-700 dark:text-purple-300' :
                               isRemark ? 'bg-amber-100 dark:bg-amber-950 border-amber-500 text-amber-700 dark:text-amber-300' :
                               isAssign ? 'bg-emerald-100 dark:bg-emerald-950 border-emerald-500 text-emerald-700 dark:text-emerald-300' :
@@ -1899,21 +1861,20 @@ export default function LeadModal({
                               isCreation ? 'bg-indigo-100 dark:bg-indigo-950 border-indigo-500 text-indigo-700 dark:text-indigo-300' :
                               'bg-slate-100 dark:bg-slate-900 border-slate-400 dark:border-slate-700 text-slate-700 dark:text-slate-300'
                             }`}>
+                              {isMessage && '💬'}
                               {isStage && '📈'}
                               {isRemark && '📞'}
                               {isAssign && '👤'}
                               {isTask && '📝'}
                               {isCreation && '✨'}
-                              {!isStage && !isRemark && !isAssign && !isTask && !isCreation && '⚙️'}
+                              {!isMessage && !isStage && !isRemark && !isAssign && !isTask && !isCreation && '⚙️'}
                             </div>
 
-                            {/* Card Content */}
                             <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 transition-all text-xs shadow-xs space-y-2">
-                              {/* Header Meta */}
                               <div className="flex flex-wrap items-center justify-between gap-1.5 pb-1.5 border-b border-slate-100 dark:border-slate-800">
                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                  {/* Event Type Pill */}
                                   <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider border ${
+                                    isMessage ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60' :
                                     isStage ? 'bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60' :
                                     isRemark ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60' :
                                     isAssign ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60' :
@@ -1921,15 +1882,15 @@ export default function LeadModal({
                                     isCreation ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/60' :
                                     'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                                   }`}>
+                                    {isMessage && 'WhatsApp Message'}
                                     {isStage && 'Stage Change'}
                                     {isRemark && 'Call Remark'}
                                     {isAssign && 'Coordinator Reassigned'}
                                     {isTask && 'Action Item'}
                                     {isCreation && 'Inbound Lead'}
-                                    {!isStage && !isRemark && !isAssign && !isTask && !isCreation && 'System Log'}
+                                    {!isMessage && !isStage && !isRemark && !isAssign && !isTask && !isCreation && 'System Log'}
                                   </span>
 
-                                  {/* Coordinator / Actor Pill */}
                                   <span className="text-[10px] font-black bg-purple-100 dark:bg-purple-950/80 border border-purple-300 dark:border-purple-800 px-2.5 py-0.5 rounded-md inline-flex items-center gap-1 shadow-2xs">
                                     <span className="text-purple-900 dark:text-purple-300 font-black">By:</span>
                                     <span className="text-black dark:text-slate-100 font-black">
@@ -1961,7 +1922,6 @@ export default function LeadModal({
                                 </div>
                               </div>
 
-                              {/* Text Body */}
                               <p className="text-slate-800 dark:text-slate-200 leading-relaxed font-semibold font-sans whitespace-pre-wrap text-xs pt-0.5">
                                 {event.text}
                               </p>
@@ -1986,11 +1946,24 @@ export default function LeadModal({
 
             </div>
 
-            {/* Footer quick instructions banner */}
-            <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-3 text-[10px] text-slate-500 dark:text-slate-400 font-mono text-center shrink-0">
-              ⚡ Career Growth Placement • Candidate Pipeline & Follow-ups live in Cloud Storage.
+            {/* Left Column Footer */}
+            <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 px-4 py-2 text-[10px] text-slate-500 dark:text-slate-400 font-mono text-center shrink-0 flex items-center justify-between">
+              <span>⚡ CGP Candidate Management</span>
+              <span>💾 Auto-synced</span>
             </div>
+          </div>
 
+          {/* Right Column: Full-width dedicated WhatsApp Messaging Console */}
+          <div className="flex-1 flex flex-col h-full bg-slate-50/50 dark:bg-slate-950/40 relative overflow-hidden">
+            <LeadWhatsAppChat
+              lead={lead}
+              onLeadUpdated={(updated) => {
+                if (updated) setLead(updated);
+                onLeadUpdated();
+              }}
+              userRole={userRole}
+              currentAgentId={currentAgentId}
+            />
           </div>
 
         </div>

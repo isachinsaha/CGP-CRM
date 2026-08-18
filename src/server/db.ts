@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import * as XLSX from 'xlsx';
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, 
@@ -34,6 +35,150 @@ const METADATA_FILE = path.join(DATA_DIR, 'metadata.json');
 const WALLETS_FILE = path.join(DATA_DIR, 'wallets.json');
 const INCENTIVE_RULES_FILE = path.join(DATA_DIR, 'incentive_rules.json');
 
+// --- SAFE ATOMIC JSON READ / WRITE / RECOVERY HELPERS ---
+
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+if (!fs.existsSync(BACKUP_DIR)) {
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  } catch {}
+}
+
+/**
+ * Atomically writes JSON to disk via temp file replacement to prevent corrupted/truncated files on crashes or interrupts.
+ */
+export function safeWriteJsonSync(filePath: string, data: any): void {
+  try {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const serialized = JSON.stringify(data, null, 2);
+    const tempPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).substring(2, 7)}`;
+    fs.writeFileSync(tempPath, serialized, 'utf-8');
+    fs.renameSync(tempPath, filePath);
+
+    // Write primary backup file
+    try {
+      const backupPath = `${filePath}.bak`;
+      fs.writeFileSync(backupPath, serialized, 'utf-8');
+    } catch {
+      // Ignore backup error
+    }
+
+    // If data is a non-empty array with substantial records, preserve a periodic snapshot
+    if (Array.isArray(data) && data.length > 50 && filePath.includes('leads')) {
+      try {
+        const baseName = path.basename(filePath, '.json');
+        const snapshotPath = path.join(BACKUP_DIR, `${baseName}_snapshot.json`);
+        // Only write snapshot if it doesn't exist or is older than 30 mins
+        if (!fs.existsSync(snapshotPath) || (Date.now() - fs.statSync(snapshotPath).mtimeMs > 1800000)) {
+          fs.writeFileSync(snapshotPath, serialized, 'utf-8');
+        }
+      } catch {
+        // Ignore snapshot error
+      }
+    }
+  } catch (err) {
+    console.error(`[SafeJSON] Atomic write failed for ${filePath}, attempting direct write:`, err);
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (directErr) {
+      console.error(`[SafeJSON] Fatal: Direct write failed for ${filePath}:`, directErr);
+    }
+  }
+}
+
+/**
+ * Recovers truncated JSON arrays by finding the last closed object and closing the array.
+ */
+function attemptTruncatedJsonArrayRepair<T>(corruptedStr: string): T | null {
+  const trimmed = corruptedStr.trim();
+  if (!trimmed.startsWith('[')) return null;
+  let lastCloseBracket = trimmed.lastIndexOf('}');
+  while (lastCloseBracket > 0) {
+    const candidate = trimmed.substring(0, lastCloseBracket + 1) + '\n]';
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        console.log(`[SafeJSON] Successfully salvaged ${parsed.length} records from truncated JSON array!`);
+        return parsed as T;
+      }
+    } catch {
+      lastCloseBracket = trimmed.lastIndexOf('}', lastCloseBracket - 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Safely reads JSON from disk, automatically falling back to snapshots/backups or repairing truncated JSON files.
+ */
+export function safeReadJsonSync<T>(filePath: string, fallback: T): T {
+  if (!fs.existsSync(filePath)) {
+    return fallback;
+  }
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    if (!raw || raw.trim().length === 0) {
+      return fallback;
+    }
+    return JSON.parse(raw) as T;
+  } catch (err: any) {
+    console.warn(`[SafeJSON] Corrupted or incomplete JSON detected in ${filePath} (${err?.message || err}). Initiating automatic recovery...`);
+    
+    // 1. Try reading the snapshot file first if available
+    try {
+      const baseName = path.basename(filePath, '.json');
+      const snapshotPath = path.join(BACKUP_DIR, `${baseName}_snapshot.json`);
+      if (fs.existsSync(snapshotPath)) {
+        const snapRaw = fs.readFileSync(snapshotPath, 'utf-8');
+        if (snapRaw && snapRaw.trim().length > 0) {
+          const parsedSnap = JSON.parse(snapRaw) as T;
+          if (Array.isArray(parsedSnap) && parsedSnap.length > 0) {
+            console.log(`[SafeJSON] Successfully recovered ${parsedSnap.length} records from snapshot for ${filePath}`);
+            safeWriteJsonSync(filePath, parsedSnap);
+            return parsedSnap;
+          }
+        }
+      }
+    } catch {}
+
+    // 2. Try reading the .bak backup file
+    const backupPath = `${filePath}.bak`;
+    if (fs.existsSync(backupPath)) {
+      try {
+        const backupRaw = fs.readFileSync(backupPath, 'utf-8');
+        if (backupRaw && backupRaw.trim().length > 0) {
+          const parsedBackup = JSON.parse(backupRaw) as T;
+          console.log(`[SafeJSON] Successfully recovered valid data from backup for ${filePath}`);
+          safeWriteJsonSync(filePath, parsedBackup);
+          return parsedBackup;
+        }
+      } catch (backupErr) {
+        console.warn(`[SafeJSON] Backup file was also corrupted for ${backupPath}`);
+      }
+    }
+
+    // 3. Try salvaging truncated JSON array
+    try {
+      const rawCorrupted = fs.readFileSync(filePath, 'utf-8');
+      const salvaged = attemptTruncatedJsonArrayRepair<T>(rawCorrupted);
+      if (salvaged) {
+        safeWriteJsonSync(filePath, salvaged);
+        return salvaged;
+      }
+    } catch (salvageErr) {
+      console.warn(`[SafeJSON] Salvage attempt failed for ${filePath}:`, salvageErr);
+    }
+
+    // 4. Fallback to default state and repair the corrupted file
+    console.warn(`[SafeJSON] Re-initializing ${filePath} with clean default state.`);
+    safeWriteJsonSync(filePath, fallback);
+    return fallback;
+  }
+}
+
 // Mutex to prevent overlapping database read/write and Firestore sync operations
 class DatabaseMutex {
   private queue: Promise<any> = Promise.resolve();
@@ -56,8 +201,8 @@ let dbVerified = false;
 let dbVerifying = false;
 
 // Helper to enforce timeouts on async Firestore promises so they never hang the server
-function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 15000): Promise<T> {
-  const actualTimeout = Math.max(timeoutMs, 12000);
+function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 3000): Promise<T> {
+  const actualTimeout = timeoutMs;
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`Firestore operation timed out after ${actualTimeout}ms`));
@@ -81,30 +226,31 @@ let lastCloudErrorTime = 0;
 let cloudBreakerCooldownMs = 5 * 60 * 1000; // default 5 minutes
 let quotaLimitExceeded = false;
 
-async function verifyDatabaseAccess() {
-  if (dbVerified || !db) return;
-  if (dbVerifying) return;
+async function verifyDatabaseAccess(): Promise<boolean> {
+  if (dbVerified) return true;
+  if (!db) return false;
+  if (dbVerifying) return false;
   dbVerifying = true;
   
   try {
-    console.log(`[Firestore Client] Verifying access to configured database: "${currentDbId}"...`);
-    // Try a simple getDoc on a non-existent document with a fast timeout to check database provisioning
+    console.log(`[Firestore Client] Verifying connectivity to database: "${currentDbId}"...`);
     const testRef = doc(db, 'metadata', 'test_connection');
-    await runWithTimeout(getDoc(testRef), 3000);
+    await runWithTimeout(getDoc(testRef), 2500);
     dbVerified = true;
-    console.log(`[Firestore Client] Configured database "${currentDbId}" verified and fully active.`);
+    cloudSyncEnabled = true;
+    cloudErrorCount = 0;
+    console.log(`[Firestore Client] Database "${currentDbId}" verified and active.`);
+    return true;
   } catch (err: any) {
     const errMsg = err?.message || String(err);
     const isQuota = errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota') || errMsg.includes('quota') || errMsg.includes('limit exceeded');
     
     if (isQuota) {
       handleCloudError('Database Verification', err);
-      dbVerified = true;
-      return;
+      dbVerified = false;
+      return false;
     }
 
-    console.warn(`[Firestore Client] Verification of configured database "${currentDbId}" failed:`, errMsg);
-    
     // If database does not exist or we get NOT_FOUND / INVALID, fallback to default database
     if (currentDbId !== '(default)' && (
       errMsg.includes('NOT_FOUND') || 
@@ -114,18 +260,29 @@ async function verifyDatabaseAccess() {
       errMsg.includes('Invalid database') ||
       errMsg.includes('invalid')
     )) {
-      console.warn(`[Firestore Client] Custom database "${currentDbId}" is not provisioned or active. GRACEFULLY FALLING BACK TO "(default)" DATABASE.`);
+      console.warn(`[Firestore Client] Custom database "${currentDbId}" unavailable. Falling back to "(default)".`);
       try {
         db = getFirestore(firebaseApp, '(default)');
         currentDbId = '(default)';
+        const testRef = doc(db, 'metadata', 'test_connection');
+        await runWithTimeout(getDoc(testRef), 2500);
         dbVerified = true;
-        console.log(`[Firestore Client] Successfully fell back and re-initialized to "(default)" database.`);
+        cloudSyncEnabled = true;
+        console.log(`[Firestore Client] Successfully connected to "(default)" database.`);
+        return true;
       } catch (fallbackErr) {
-        console.error('[Firestore Client] Fatal: Failed to fall back to "(default)" database:', fallbackErr);
+        dbVerified = false;
+        cloudSyncEnabled = false;
+        lastCloudErrorTime = Date.now();
+        console.warn('[Firestore Client] Firestore connection timed out or unavailable. Operating smoothly in local storage mode.');
+        return false;
       }
     } else {
-      // Mark as verified for general network timeout / other errors so we do not spam verification queries
-      dbVerified = true;
+      dbVerified = false;
+      cloudSyncEnabled = false;
+      lastCloudErrorTime = Date.now();
+      console.warn('[Firestore Client] Firestore connection timed out or unavailable. Operating smoothly in local storage mode.');
+      return false;
     }
   } finally {
     dbVerifying = false;
@@ -135,26 +292,19 @@ async function verifyDatabaseAccess() {
 function checkCloudStatus(): boolean {
   if (!db) return false;
   
-  // Trigger verification asynchronously
-  if (!dbVerified && !dbVerifying) {
-    verifyDatabaseAccess().catch(err => {
-      handleCloudError('verifyDatabaseAccess', err);
-    });
-  }
-
   if (!cloudSyncEnabled) {
     const now = Date.now();
     if (now - lastCloudErrorTime > cloudBreakerCooldownMs) {
-      console.log('[Firestore Client] Circuit breaker cooldown finished. Attempting to re-enable cloud sync.');
       cloudSyncEnabled = true;
       cloudErrorCount = 0;
       quotaLimitExceeded = false;
-      cloudBreakerCooldownMs = 5 * 60 * 1000; // Reset to default
+      dbVerified = false;
     } else {
       return false;
     }
   }
-  return true;
+
+  return dbVerified;
 }
 
 function handleCloudError(context: string | any, err?: any) {
@@ -232,6 +382,9 @@ function initFirestore() {
 
 // Perform initial initialization
 initFirestore();
+setTimeout(() => {
+  verifyDatabaseAccess().catch(() => {});
+}, 1000);
 
 // In-Memory Cache for Firestore to dramatically reduce Firestore read operations (and avoid hitting Quota Limits)
 interface CacheEntry<T> {
@@ -294,11 +447,8 @@ export async function initializeCoordinatorsDatabase() {
   ];
 
   // ALWAYS write to local file first so we have a local copy and stay fully functional!
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
   if (!fs.existsSync(COORDINATORS_FILE)) {
-    fs.writeFileSync(COORDINATORS_FILE, JSON.stringify(defaultCoordinators, null, 2), 'utf-8');
+    safeWriteJsonSync(COORDINATORS_FILE, defaultCoordinators);
   }
 
   if (checkCloudStatus()) {
@@ -343,11 +493,7 @@ export async function getCoordinators(): Promise<Coordinator[]> {
       dbCache.coordinators = { data: coords, timestamp: Date.now() };
 
       // Sync and warm the local cache file
-      try {
-        fs.writeFileSync(COORDINATORS_FILE, JSON.stringify(coords, null, 2), 'utf-8');
-      } catch (err) {
-        console.error('Failed to sync cloud coordinators to local cache:', err);
-      }
+      safeWriteJsonSync(COORDINATORS_FILE, coords);
 
       return coords;
     } catch (err: any) {
@@ -355,18 +501,9 @@ export async function getCoordinators(): Promise<Coordinator[]> {
       handleCloudError(err);
     }
   }
-  try {
-    const data = fs.readFileSync(COORDINATORS_FILE, 'utf-8');
-    const coords = JSON.parse(data) as Coordinator[];
-
-    // Cache the fallback local values too
-    dbCache.coordinators = { data: coords, timestamp: Date.now() };
-
-    return coords;
-  } catch (err) {
-    console.error('Failed to read coordinators file', err);
-    return [];
-  }
+  const coords = safeReadJsonSync<Coordinator[]>(COORDINATORS_FILE, []);
+  dbCache.coordinators = { data: coords, timestamp: Date.now() };
+  return coords;
 }
 
 // Save all coordinators
@@ -377,11 +514,7 @@ export async function saveCoordinators(coordinators: Coordinator[]): Promise<voi
   dbCache.coordinators = { data: coordinators, timestamp: Date.now() };
 
   // Write to local JSON file first so we ALWAYS have a local copy and stay fully functional!
-  try {
-    fs.writeFileSync(COORDINATORS_FILE, JSON.stringify(coordinators, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to write coordinators file', err);
-  }
+  safeWriteJsonSync(COORDINATORS_FILE, coordinators);
 
   if (checkCloudStatus()) {
     // Await cloud sync to guarantee data persistence under Cloud Run
@@ -688,11 +821,8 @@ async function initializeDatabase() {
   ];
 
   // ALWAYS write to local file first so we have a local copy and stay fully functional!
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
   if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(initialLeads, null, 2), 'utf-8');
+    safeWriteJsonSync(DATA_FILE, initialLeads);
   }
 
   if (checkCloudStatus()) {
@@ -837,30 +967,16 @@ async function getLeadsInternal(): Promise<Lead[]> {
     return dbCache.leads.data;
   }
 
-  // 1. Read existing local leads
-  let localLeads: Lead[] = [];
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const data = fs.readFileSync(DATA_FILE, 'utf-8');
-      localLeads = JSON.parse(data) as Lead[];
-    }
-  } catch (err) {
-    console.error('Failed to read local leads database:', err);
-  }
+  // 1. Read existing local leads safely with auto-recovery
+  const localLeads: Lead[] = safeReadJsonSync<Lead[]>(DATA_FILE, []);
 
-  // 2. Read last successfully synced leads
+  // 2. Read last successfully synced leads safely
   let lastSyncedLeads: Lead[] = [];
-  try {
-    if (fs.existsSync(DATA_FILE_SYNCED)) {
-      const data = fs.readFileSync(DATA_FILE_SYNCED, 'utf-8');
-      lastSyncedLeads = JSON.parse(data) as Lead[];
-    } else {
-      // If synced file doesn't exist yet, seed it with current local leads to start tracking
-      lastSyncedLeads = [...localLeads];
-      fs.writeFileSync(DATA_FILE_SYNCED, JSON.stringify(lastSyncedLeads, null, 2), 'utf-8');
-    }
-  } catch (err) {
-    console.error('Failed to read last synced leads:', err);
+  if (fs.existsSync(DATA_FILE_SYNCED)) {
+    lastSyncedLeads = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, [...localLeads]);
+  } else {
+    lastSyncedLeads = [...localLeads];
+    safeWriteJsonSync(DATA_FILE_SYNCED, lastSyncedLeads);
   }
 
   let finalLeads = [...localLeads];
@@ -964,12 +1080,8 @@ async function getLeadsInternal(): Promise<Lead[]> {
       }
 
       // Since cloud synchronization was fully successful, we update local and synced files with final merged state!
-      try {
-        fs.writeFileSync(DATA_FILE, JSON.stringify(finalLeads, null, 2), 'utf-8');
-        fs.writeFileSync(DATA_FILE_SYNCED, JSON.stringify(finalLeads, null, 2), 'utf-8');
-      } catch (err) {
-        console.error('Failed to write synced databases', err);
-      }
+      safeWriteJsonSync(DATA_FILE, finalLeads);
+      safeWriteJsonSync(DATA_FILE_SYNCED, finalLeads);
 
     } catch (err: any) {
       console.error('[Firestore Client] Failed to get/sync leads with cloud, using local-only state:', err);
@@ -1028,24 +1140,12 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
   dbCache.leads = { data: leads, timestamp: Date.now() };
 
   // Write to local JSON file first so we ALWAYS have a local copy and stay fully functional!
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(leads, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to write database', err);
-  }
+  safeWriteJsonSync(DATA_FILE, leads);
 
   if (checkCloudStatus()) {
     try {
       // Compare local leads with our last synced file to identify what needs to be saved/deleted in Firestore
-      let lastSyncedLeads: Lead[] = [];
-      try {
-        if (fs.existsSync(DATA_FILE_SYNCED)) {
-          const syncedData = fs.readFileSync(DATA_FILE_SYNCED, 'utf-8');
-          lastSyncedLeads = JSON.parse(syncedData) as Lead[];
-        }
-      } catch (err) {
-        console.error('Failed to read last synced file in saveLeads:', err);
-      }
+      const lastSyncedLeads: Lead[] = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, []);
 
       const syncedMap = new Map<string, Lead>();
       lastSyncedLeads.forEach(l => { if (l && l.id) syncedMap.set(l.id, l); });
@@ -1072,6 +1172,12 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
           leadsToDelete.push(syncedL.id);
         }
       });
+
+      // Safety guardrail: Prevent cascading cloud deletion if local array shrunk unexpectedly by >30%
+      if (leadsToDelete.length > 50 && leads.length < lastSyncedLeads.length * 0.7) {
+        console.warn(`[Firestore Client] SAFETY INTERVENTION: Detected abrupt drop in lead count (${lastSyncedLeads.length} -> ${leads.length}). Suppressing ${leadsToDelete.length} automatic cloud deletions to protect database integrity.`);
+        leadsToDelete.length = 0;
+      }
 
       if (leadsToSave.length > 0 || leadsToDelete.length > 0) {
         console.log(`[Firestore Client] Syncing saveLeads diff: ${leadsToSave.length} leads to set, ${leadsToDelete.length} leads to delete (total: ${leads.length})`);
@@ -1106,11 +1212,7 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
       }
 
       // Since all Firestore operations succeeded, we can safely update the local DATA_FILE_SYNCED cache
-      try {
-        fs.writeFileSync(DATA_FILE_SYNCED, JSON.stringify(leads, null, 2), 'utf-8');
-      } catch (err) {
-        console.error('Failed to update synced cache file:', err);
-      }
+      safeWriteJsonSync(DATA_FILE_SYNCED, leads);
 
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save leads delta to cloud:', err);
@@ -1158,16 +1260,25 @@ export async function getStats(): Promise<StatSummary> {
 
   const byStage: Record<LeadStage, number> = {
     new: 0,
-    negotiating: 0,
-    rotations: 0,
-    proposal: 0,
+    in_discussion: 0,
+    strong_opportunity: 0,
+    office_visited: 0,
     won: 0,
-    lost: 0
+    cold_leads: 0,
+    lost: 0,
+    negotiating: 0,
+    proposal: 0,
+    rotations: 0
   };
 
   leads.forEach(l => {
-    if (byStage[l.stage] !== undefined) {
-      byStage[l.stage]++;
+    let stageKey = l.stage;
+    if (stageKey === 'negotiating') stageKey = 'in_discussion';
+    else if (stageKey === 'proposal') stageKey = 'office_visited';
+    else if (stageKey === 'rotations') stageKey = 'cold_leads';
+
+    if (byStage[stageKey] !== undefined) {
+      byStage[stageKey]++;
     }
   });
 
@@ -1554,11 +1665,7 @@ export async function getJobs(): Promise<Job[]> {
       dbCache.jobs = { data: sortedJobs, timestamp: Date.now() };
 
       // Sync the local file cache with current cloud state so cold-starts are fully populated!
-      try {
-        fs.writeFileSync(JOBS_FILE, JSON.stringify(sortedJobs, null, 2), 'utf-8');
-      } catch (err) {
-        console.error('Failed to sync cloud jobs to local cache:', err);
-      }
+      safeWriteJsonSync(JOBS_FILE, sortedJobs);
 
       return sortedJobs;
     } catch (err: any) {
@@ -1566,36 +1673,30 @@ export async function getJobs(): Promise<Job[]> {
       handleCloudError(err);
     }
   }
-  try {
-    const data = fs.readFileSync(JOBS_FILE, 'utf-8');
-    const jobs = JSON.parse(data) as Job[];
-    const sanitized = jobs.map(j => ({
-      id: j.id || `job_${Math.random().toString(36).substring(2, 7)}`,
-      title: j.title || '',
-      country: j.country || 'Other',
-      salaryRange: j.salaryRange || '',
-      requirement: j.requirement || '',
-      processingFeeMale: j.processingFeeMale || '',
-      processingFeeFemale: j.processingFeeFemale || '',
-      accommodation: j.accommodation || '',
-      ageLimit: j.ageLimit || '',
-      conditions: Array.isArray(j.conditions) ? j.conditions : [],
-      modeOfInterview: j.modeOfInterview || 'Online',
-      applicability: j.applicability || 'Both Male & Female Candidates can Apply',
-      otherTerms: j.otherTerms || '',
-      isActive: j.isActive !== undefined ? Boolean(j.isActive) : true,
-      createdAt: j.createdAt || new Date().toISOString()
-    }));
-    const sortedSanitized = sanitized.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  const jobs = safeReadJsonSync<Job[]>(JOBS_FILE, []);
+  const sanitized = jobs.map(j => ({
+    id: j.id || `job_${Math.random().toString(36).substring(2, 7)}`,
+    title: j.title || '',
+    country: j.country || 'Other',
+    salaryRange: j.salaryRange || '',
+    requirement: j.requirement || '',
+    processingFeeMale: j.processingFeeMale || '',
+    processingFeeFemale: j.processingFeeFemale || '',
+    accommodation: j.accommodation || '',
+    ageLimit: j.ageLimit || '',
+    conditions: Array.isArray(j.conditions) ? j.conditions : [],
+    modeOfInterview: j.modeOfInterview || 'Online',
+    applicability: j.applicability || 'Both Male & Female Candidates can Apply',
+    otherTerms: j.otherTerms || '',
+    isActive: j.isActive !== undefined ? Boolean(j.isActive) : true,
+    createdAt: j.createdAt || new Date().toISOString()
+  }));
+  const sortedSanitized = sanitized.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
-    // Cache the fallback local values too
-    dbCache.jobs = { data: sortedSanitized, timestamp: Date.now() };
+  // Cache the fallback local values too
+  dbCache.jobs = { data: sortedSanitized, timestamp: Date.now() };
 
-    return sortedSanitized;
-  } catch (err) {
-    console.error('Failed to read jobs file', err);
-    return [];
-  }
+  return sortedSanitized;
 }
 
 // Save all jobs
@@ -1607,11 +1708,7 @@ export async function saveJobs(jobs: Job[]): Promise<void> {
   dbCache.jobs = { data: validJobs, timestamp: Date.now() };
 
   // Write to local file first so we ALWAYS have a local copy and stay fully functional!
-  try {
-    fs.writeFileSync(JOBS_FILE, JSON.stringify(validJobs, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to write jobs file', err);
-  }
+  safeWriteJsonSync(JOBS_FILE, validJobs);
 
   if (checkCloudStatus()) {
     // Await cloud sync to guarantee data persistence under Cloud Run
@@ -1659,11 +1756,8 @@ export async function initializeUpdatesDatabase() {
   ];
 
   // ALWAYS write to local file first so we have a local copy and stay fully functional!
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
   if (!fs.existsSync(UPDATES_FILE)) {
-    fs.writeFileSync(UPDATES_FILE, JSON.stringify(defaultUpdates, null, 2), 'utf-8');
+    safeWriteJsonSync(UPDATES_FILE, defaultUpdates);
   }
 
   if (checkCloudStatus()) {
@@ -1717,11 +1811,7 @@ export async function getUpdates(): Promise<ImportantUpdate[]> {
       dbCache.updates = { data: sortedUpdates, timestamp: Date.now() };
 
       // Sync the local file cache with current cloud state so cold-starts are fully populated!
-      try {
-        fs.writeFileSync(UPDATES_FILE, JSON.stringify(sortedUpdates, null, 2), 'utf-8');
-      } catch (err) {
-        console.error('Failed to sync cloud updates to local cache:', err);
-      }
+      safeWriteJsonSync(UPDATES_FILE, sortedUpdates);
 
       return sortedUpdates;
     } catch (err: any) {
@@ -1729,19 +1819,13 @@ export async function getUpdates(): Promise<ImportantUpdate[]> {
       handleCloudError(err);
     }
   }
-  try {
-    const data = fs.readFileSync(UPDATES_FILE, 'utf-8');
-    const updates = JSON.parse(data) as ImportantUpdate[];
-    const sortedSanitized = updates.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  const updates = safeReadJsonSync<ImportantUpdate[]>(UPDATES_FILE, []);
+  const sortedSanitized = updates.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
-    // Cache the fallback local values too
-    dbCache.updates = { data: sortedSanitized, timestamp: Date.now() };
+  // Cache the fallback local values too
+  dbCache.updates = { data: sortedSanitized, timestamp: Date.now() };
 
-    return sortedSanitized;
-  } catch (err) {
-    console.error('Failed to read updates file', err);
-    return [];
-  }
+  return sortedSanitized;
 }
 
 // Save all updates
@@ -1752,11 +1836,7 @@ export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
   // Update in-memory cache immediately so changes are instantly reflected on reads
   dbCache.updates = { data: validUpdates, timestamp: Date.now() };
 
-  try {
-    fs.writeFileSync(UPDATES_FILE, JSON.stringify(validUpdates, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to write updates file', err);
-  }
+  safeWriteJsonSync(UPDATES_FILE, validUpdates);
 
   if (checkCloudStatus()) {
     // Await cloud sync to guarantee data persistence under Cloud Run
@@ -1807,11 +1887,8 @@ export async function initializeMetadataDatabase() {
     ]
   };
 
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
   if (!fs.existsSync(METADATA_FILE)) {
-    fs.writeFileSync(METADATA_FILE, JSON.stringify(defaultMetadata, null, 2), 'utf-8');
+    safeWriteJsonSync(METADATA_FILE, defaultMetadata);
   }
 
   if (checkCloudStatus()) {
@@ -1832,6 +1909,17 @@ export async function initializeMetadataDatabase() {
 
 export async function getMetadata(): Promise<CgpMetadata> {
   await initializeMetadataDatabase();
+
+  const fallbackMetadata: CgpMetadata = {
+    countries: ['Kuwait', 'Dubai', 'Qatar', 'Germany', 'Japan', 'Albania'],
+    positions: ['Waiter', 'Waitress', 'Chef', 'Nurse', 'Cleaner', 'Driver', 'Electrician'],
+    projects: ['Napkin affairs', 'Alltoobi', 'Lulu hypermarket', 'General Intake'],
+    tagsList: [
+      'Chef', 'Nurse', 'Waiter', 'Waitress', 'Driver', 'Accountant', 
+      'Manager', 'Sales', 'Developer', 'Electrician', 'Plumber', 
+      'Receptionist', 'Housekeeper', 'Security', 'Painter', 'Mechanic', 'Operator'
+    ]
+  };
 
   // Check in-memory cache first
   if (dbCache.metadata && (Date.now() - dbCache.metadata.timestamp < CACHE_TTL_MS)) {
@@ -1854,11 +1942,7 @@ export async function getMetadata(): Promise<CgpMetadata> {
         dbCache.metadata = { data: metadata, timestamp: Date.now() };
 
         // Sync the local file cache with current cloud state so cold-starts are fully populated!
-        try {
-          fs.writeFileSync(METADATA_FILE, JSON.stringify(metadata, null, 2), 'utf-8');
-        } catch (err) {
-          console.error('Failed to sync cloud metadata to local cache:', err);
-        }
+        safeWriteJsonSync(METADATA_FILE, metadata);
 
         return metadata;
       }
@@ -1867,30 +1951,9 @@ export async function getMetadata(): Promise<CgpMetadata> {
       handleCloudError(err);
     }
   }
-  try {
-    const data = fs.readFileSync(METADATA_FILE, 'utf-8');
-    const metadata = JSON.parse(data) as CgpMetadata;
-
-    // Cache the fallback local values too
-    dbCache.metadata = { data: metadata, timestamp: Date.now() };
-
-    return metadata;
-  } catch (err) {
-    console.error('Failed to read metadata file', err);
-    const fallbackMetadata = {
-      countries: ['Kuwait', 'Dubai', 'Qatar', 'Germany', 'Japan', 'Albania'],
-      positions: ['Waiter', 'Waitress', 'Chef', 'Nurse', 'Cleaner', 'Driver', 'Electrician'],
-      projects: ['Napkin affairs', 'Alltoobi', 'Lulu hypermarket', 'General Intake'],
-      tagsList: [
-        'Chef', 'Nurse', 'Waiter', 'Waitress', 'Driver', 'Accountant', 
-        'Manager', 'Sales', 'Developer', 'Electrician', 'Plumber', 
-        'Receptionist', 'Housekeeper', 'Security', 'Painter', 'Mechanic', 'Operator'
-      ]
-    };
-
-    dbCache.metadata = { data: fallbackMetadata, timestamp: Date.now() };
-    return fallbackMetadata;
-  }
+  const metadata = safeReadJsonSync<CgpMetadata>(METADATA_FILE, fallbackMetadata);
+  dbCache.metadata = { data: metadata, timestamp: Date.now() };
+  return metadata;
 }
 
 export async function saveMetadata(metadata: CgpMetadata): Promise<void> {
@@ -1899,11 +1962,7 @@ export async function saveMetadata(metadata: CgpMetadata): Promise<void> {
   // Update in-memory cache immediately so changes are instantly reflected on reads
   dbCache.metadata = { data: metadata, timestamp: Date.now() };
 
-  try {
-    fs.writeFileSync(METADATA_FILE, JSON.stringify(metadata, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to write metadata file', err);
-  }
+  safeWriteJsonSync(METADATA_FILE, metadata);
 
   if (checkCloudStatus()) {
     // Await cloud sync to guarantee data persistence under Cloud Run
@@ -1919,11 +1978,8 @@ export async function saveMetadata(metadata: CgpMetadata): Promise<void> {
 // --- WALLET DATABASE FUNCTIONS ---
 
 export async function initializeWalletsDatabase() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
   if (!fs.existsSync(WALLETS_FILE)) {
-    fs.writeFileSync(WALLETS_FILE, JSON.stringify([], null, 2), 'utf-8');
+    safeWriteJsonSync(WALLETS_FILE, []);
   }
 
   if (checkCloudStatus()) {
@@ -1982,11 +2038,7 @@ export async function getWallets(): Promise<Wallet[]> {
       // Update cache
       dbCache.wallets = { data: wallets, timestamp: Date.now() };
 
-      try {
-        fs.writeFileSync(WALLETS_FILE, JSON.stringify(wallets, null, 2), 'utf-8');
-      } catch (err) {
-        console.error('Failed to sync cloud wallets to local cache:', err);
-      }
+      safeWriteJsonSync(WALLETS_FILE, wallets);
 
       return wallets;
     } catch (err: any) {
@@ -1995,15 +2047,9 @@ export async function getWallets(): Promise<Wallet[]> {
     }
   }
 
-  try {
-    const data = fs.readFileSync(WALLETS_FILE, 'utf-8');
-    const wallets = JSON.parse(data) as Wallet[];
-    dbCache.wallets = { data: wallets, timestamp: Date.now() };
-    return wallets;
-  } catch (err) {
-    console.error('Failed to read wallets file', err);
-    return [];
-  }
+  const wallets = safeReadJsonSync<Wallet[]>(WALLETS_FILE, []);
+  dbCache.wallets = { data: wallets, timestamp: Date.now() };
+  return wallets;
 }
 
 export async function saveWallets(wallets: Wallet[]): Promise<void> {
@@ -2011,11 +2057,7 @@ export async function saveWallets(wallets: Wallet[]): Promise<void> {
 
   dbCache.wallets = { data: wallets, timestamp: Date.now() };
 
-  try {
-    fs.writeFileSync(WALLETS_FILE, JSON.stringify(wallets, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to write wallets file', err);
-  }
+  safeWriteJsonSync(WALLETS_FILE, wallets);
 
   if (checkCloudStatus()) {
     try {
@@ -2132,11 +2174,8 @@ export async function initializeIncentiveRulesDatabase() {
     }
   ];
 
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
   if (!fs.existsSync(INCENTIVE_RULES_FILE)) {
-    fs.writeFileSync(INCENTIVE_RULES_FILE, JSON.stringify(defaultRules, null, 2), 'utf-8');
+    safeWriteJsonSync(INCENTIVE_RULES_FILE, defaultRules);
   }
 
   if (checkCloudStatus()) {
@@ -2187,11 +2226,7 @@ async function getIncentiveRulesInternal(): Promise<IncentiveRule[]> {
 
       dbCache.incentive_rules = { data: rules, timestamp: Date.now() };
 
-      try {
-        fs.writeFileSync(INCENTIVE_RULES_FILE, JSON.stringify(rules, null, 2), 'utf-8');
-      } catch (err) {
-        console.error('Failed to sync cloud incentive rules to local cache:', err);
-      }
+      safeWriteJsonSync(INCENTIVE_RULES_FILE, rules);
 
       return rules;
     } catch (err: any) {
@@ -2200,15 +2235,9 @@ async function getIncentiveRulesInternal(): Promise<IncentiveRule[]> {
     }
   }
 
-  try {
-    const data = fs.readFileSync(INCENTIVE_RULES_FILE, 'utf-8');
-    const rules = JSON.parse(data) as IncentiveRule[];
-    dbCache.incentive_rules = { data: rules, timestamp: Date.now() };
-    return rules;
-  } catch (err) {
-    console.error('Failed to read incentive rules file', err);
-    return [];
-  }
+  const rules = safeReadJsonSync<IncentiveRule[]>(INCENTIVE_RULES_FILE, []);
+  dbCache.incentive_rules = { data: rules, timestamp: Date.now() };
+  return rules;
 }
 
 async function saveIncentiveRulesInternal(rules: IncentiveRule[]): Promise<void> {
@@ -2217,11 +2246,7 @@ async function saveIncentiveRulesInternal(rules: IncentiveRule[]): Promise<void>
 
   dbCache.incentive_rules = { data: validRules, timestamp: Date.now() };
 
-  try {
-    fs.writeFileSync(INCENTIVE_RULES_FILE, JSON.stringify(validRules, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to write incentive rules file', err);
-  }
+  safeWriteJsonSync(INCENTIVE_RULES_FILE, validRules);
 
   if (checkCloudStatus()) {
     try {
@@ -2258,5 +2283,391 @@ export async function getIncentiveRules(): Promise<IncentiveRule[]> {
 export async function saveIncentiveRules(rules: IncentiveRule[]): Promise<void> {
   return dbMutex.run(() => saveIncentiveRulesInternal(rules));
 }
+
+// ==========================================
+// AUTOMATIC FULL DATABASE & XLSX BACKUP SYSTEM
+// ==========================================
+
+export interface FullDatabaseBackup {
+  version: number;
+  timestamp: string;
+  source: string;
+  data: {
+    leads: Lead[];
+    coordinators: Coordinator[];
+    jobs: Job[];
+    updates: ImportantUpdate[];
+    wallets: Wallet[];
+    incentiveRules: IncentiveRule[];
+    metadata: any;
+  };
+  summary: {
+    totalLeads: number;
+    totalCoordinators: number;
+    totalJobs: number;
+    totalWallets: number;
+    totalIncentiveRules: number;
+  };
+}
+
+export interface BackupFileInfo {
+  fileName: string;
+  filePath: string;
+  type: 'db_json' | 'xlsx';
+  sizeBytes: number;
+  sizeFormatted: string;
+  createdAt: string;
+  timestamp: number;
+  isMondayScheduled?: boolean;
+}
+
+const SCHEDULED_BACKUP_DIR = path.join(DATA_DIR, 'backups', 'scheduled');
+if (!fs.existsSync(SCHEDULED_BACKUP_DIR)) {
+  try {
+    fs.mkdirSync(SCHEDULED_BACKUP_DIR, { recursive: true });
+  } catch {}
+}
+
+/**
+ * Creates a 100% complete, restorable JSON Database Backup object.
+ */
+export async function createFullDatabaseBackup(sourceDescription: string = 'Manual'): Promise<FullDatabaseBackup> {
+  const leads = await getLeads();
+  const coordinators = await getCoordinators();
+  const jobs = await getJobs();
+  const updates = await getUpdates();
+  const wallets = await getWallets();
+  const incentiveRules = await getIncentiveRules();
+  const metadata = await getMetadata();
+
+  const backup: FullDatabaseBackup = {
+    version: 1,
+    timestamp: new Date().toISOString(),
+    source: sourceDescription,
+    data: {
+      leads,
+      coordinators,
+      jobs,
+      updates,
+      wallets,
+      incentiveRules,
+      metadata
+    },
+    summary: {
+      totalLeads: leads.length,
+      totalCoordinators: coordinators.length,
+      totalJobs: jobs.length,
+      totalWallets: wallets.length,
+      totalIncentiveRules: incentiveRules.length
+    }
+  };
+
+  return backup;
+}
+
+/**
+ * Generates the full master Excel workbook buffer for all database collections.
+ */
+export async function generateFullXLSXBuffer(): Promise<Buffer> {
+  const leads = await getLeads();
+  const coordinators = await getCoordinators();
+  const jobs = await getJobs();
+  const updates = await getUpdates();
+  const wallets = await getWallets();
+  const incentiveRules = await getIncentiveRules();
+
+  const workbook = XLSX.utils.book_new();
+
+  // 1. Sheet: "Candidates Master"
+  const masterCandidatesData = leads.map((lead, idx) => ({
+    'Serial': lead.serialNo || `INQ-${1000 + idx + 1}`,
+    'Lead ID': lead.id,
+    'Applicant Name': lead.name || '',
+    'Phone': lead.phone || '',
+    'Alternate Phone': lead.alternateNo || '',
+    'Gender': lead.gender || 'M',
+    'Age': lead.age || '',
+    'Origin / City': lead.origin || '',
+    'Country Interest': lead.country || '',
+    'Job Position': lead.position || '',
+    'Experience': lead.experience || '',
+    'Qualification': lead.qualification || '',
+    'Pipeline Stage': lead.stage,
+    'Stage Key': lead.stage,
+    'Fit Score': (lead.fitScore || 'unqualified').toUpperCase(),
+    'Assigned Coordinator': lead.assignedTo || 'Unassigned',
+    'Admin Remarks': lead.adminRemarks || '',
+    'Remarks 1 (First Call)': lead.remarks1 || '',
+    'Remarks 2 (Follow-up)': lead.remarks2 || '',
+    'Remarks 3 (Final Status)': lead.remarks3 || '',
+    'Call Connected Status': lead.callConnected || '',
+    'Office Visited': lead.docOfficeVisited ? 'YES' : 'NO',
+    'Passport Copy': lead.docPassportCopy ? 'YES' : 'NO',
+    'Resume Received': lead.docResume ? 'YES' : 'NO',
+    'Other Docs': lead.docOthers ? 'YES' : 'NO',
+    'Importance Rating': lead.importance || 3,
+    'Project': lead.project || '',
+    'Source / Campaign': lead.source || lead.campaign || '',
+    'Tags': Array.isArray(lead.tags) ? lead.tags.join(', ') : '',
+    'Next Action': lead.nextAction || '',
+    'Commission / Budget': lead.budget || 0,
+    'Entry Date': lead.entryDate || (lead.createdAt ? lead.createdAt.split('T')[0] : ''),
+    'Assign Date': lead.assignDate || '',
+    'Created At': lead.createdAt || '',
+    'Updated At': lead.updatedAt || ''
+  }));
+  const sheetCandidates = XLSX.utils.json_to_sheet(masterCandidatesData);
+  XLSX.utils.book_append_sheet(workbook, sheetCandidates, "Candidates Master");
+
+  // 2. Sheet: "WhatsApp Messages"
+  const messagesData: any[] = [];
+  leads.forEach(lead => {
+    if (Array.isArray(lead.messages) && lead.messages.length > 0) {
+      lead.messages.forEach(msg => {
+        messagesData.push({
+          'Candidate Serial': lead.serialNo || '',
+          'Candidate Name': lead.name || '',
+          'Candidate Phone': lead.phone || '',
+          'Assigned Coordinator': lead.assignedTo || '',
+          'Sender': msg.sender || '',
+          'Message Text': msg.text || '',
+          'Timestamp': msg.timestamp || ''
+        });
+      });
+    }
+  });
+  if (messagesData.length > 0) {
+    const sheetMessages = XLSX.utils.json_to_sheet(messagesData);
+    XLSX.utils.book_append_sheet(workbook, sheetMessages, "WhatsApp Messages");
+  }
+
+  // 3. Sheet: "Scheduled Tasks"
+  const tasksData: any[] = [];
+  leads.forEach(lead => {
+    if (Array.isArray(lead.tasks) && lead.tasks.length > 0) {
+      lead.tasks.forEach(t => {
+        tasksData.push({
+          'Candidate Serial': lead.serialNo || '',
+          'Candidate Name': lead.name || '',
+          'Candidate Phone': lead.phone || '',
+          'Assigned Coordinator': lead.assignedTo || '',
+          'Task Title': t.title || '',
+          'Due Date': t.dueDate || '',
+          'Status': t.completed ? 'COMPLETED' : 'PENDING',
+          'Created At': t.createdAt || ''
+        });
+      });
+    }
+  });
+  if (tasksData.length > 0) {
+    const sheetTasks = XLSX.utils.json_to_sheet(tasksData);
+    XLSX.utils.book_append_sheet(workbook, sheetTasks, "Scheduled Tasks");
+  }
+
+  // 4. Sheet: "Activity Logs"
+  const timelineData: any[] = [];
+  leads.forEach(lead => {
+    if (Array.isArray(lead.timeline) && lead.timeline.length > 0) {
+      lead.timeline.forEach(tl => {
+        timelineData.push({
+          'Candidate Serial': lead.serialNo || '',
+          'Candidate Name': lead.name || '',
+          'Candidate Phone': lead.phone || '',
+          'Event Type': tl.type || '',
+          'Actor': tl.actor || '',
+          'Activity Detail': tl.text || '',
+          'Timestamp': tl.timestamp || ''
+        });
+      });
+    }
+  });
+  if (timelineData.length > 0) {
+    const sheetTimeline = XLSX.utils.json_to_sheet(timelineData);
+    XLSX.utils.book_append_sheet(workbook, sheetTimeline, "Activity Logs");
+  }
+
+  // 5. Sheet: "Staff Coordinators"
+  const coordsData = coordinators.map(c => ({
+    'ID': c.id,
+    'Username': c.username,
+    'Display Name': c.displayName,
+    'Role': c.role,
+    'Created At': c.createdAt || ''
+  }));
+  const sheetCoords = XLSX.utils.json_to_sheet(coordsData);
+  XLSX.utils.book_append_sheet(workbook, sheetCoords, "Staff Coordinators");
+
+  // 6. Sheet: "Job Openings"
+  const jobsData = jobs.map(j => ({
+    'Job ID': j.id,
+    'Title': j.title,
+    'Country': j.country,
+    'Salary Range': j.salaryRange || '',
+    'Requirements': j.requirement || '',
+    'Age Limit': j.ageLimit || '',
+    'Accommodation': j.accommodation || '',
+    'Interview Mode': j.modeOfInterview || '',
+    'Processing Fee (M)': j.processingFeeMale || '',
+    'Processing Fee (F)': j.processingFeeFemale || '',
+    'Active Status': j.isActive !== false ? 'ACTIVE' : 'INACTIVE',
+    'Created At': j.createdAt || ''
+  }));
+  const sheetJobs = XLSX.utils.json_to_sheet(jobsData);
+  XLSX.utils.book_append_sheet(workbook, sheetJobs, "Job Openings");
+
+  // 7. Sheet: "Wallets & Balances"
+  const walletsData = wallets.map(w => {
+    const credits = (w.transactions || []).filter(t => t.type === 'credit').reduce((acc, t) => acc + (t.amount || 0), 0);
+    const debits = (w.transactions || []).filter(t => t.type === 'debit').reduce((acc, t) => acc + (t.amount || 0), 0);
+    return {
+      'Username': w.username,
+      'Display Name': w.displayName,
+      'Current Balance (INR)': w.balance || 0,
+      'Total Credits (INR)': credits,
+      'Total Debits (INR)': debits,
+      'Transaction Count': (w.transactions || []).length,
+      'Updated At': w.updatedAt || ''
+    };
+  });
+  const sheetWallets = XLSX.utils.json_to_sheet(walletsData);
+  XLSX.utils.book_append_sheet(workbook, sheetWallets, "Coordinators Wallets");
+
+  // 8. Sheet: "Incentive Rules"
+  const rulesData = incentiveRules.map(r => ({
+    'Rule ID': r.id,
+    'Project Name': r.projectName || 'All',
+    'Country': r.country || 'All',
+    'Incentive Amount (INR)': r.amount || 0,
+    'Created At': r.createdAt || ''
+  }));
+  if (rulesData.length > 0) {
+    const sheetRules = XLSX.utils.json_to_sheet(rulesData);
+    XLSX.utils.book_append_sheet(workbook, sheetRules, "Incentive Rules");
+  }
+
+  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+}
+
+/**
+ * Executes a full automatic backup of both the Database JSON (restorable) and the Master XLSX workbook to disk.
+ */
+export async function executeScheduledFullBackup(isMondayRun: boolean = false): Promise<{ dbPath: string; xlsxPath: string; summary: any }> {
+  const now = new Date();
+  const dateStamp = now.toISOString().split('T')[0];
+  const timeStamp = now.toTimeString().split(' ')[0].replace(/:/g, '-');
+  const prefix = isMondayRun ? 'MONDAY_AUTO_BACKUP' : 'AUTO_BACKUP';
+
+  // 1. Generate full restorable DB backup
+  const fullDbBackup = await createFullDatabaseBackup(isMondayRun ? 'Automatic Monday Scheduled Full Backup' : 'Automatic Backup');
+  const dbFileName = `${prefix}_DB_${dateStamp}_${timeStamp}.json`;
+  const dbFilePath = path.join(SCHEDULED_BACKUP_DIR, dbFileName);
+  safeWriteJsonSync(dbFilePath, fullDbBackup);
+
+  // Also maintain a 'latest_master_backup.json' for instant 1-click fallback
+  const latestDbPath = path.join(SCHEDULED_BACKUP_DIR, 'latest_master_backup.json');
+  safeWriteJsonSync(latestDbPath, fullDbBackup);
+
+  // 2. Generate Master XLSX workbook
+  const xlsxBuffer = await generateFullXLSXBuffer();
+  const xlsxFileName = `${prefix}_SPREADSHEET_${dateStamp}_${timeStamp}.xlsx`;
+  const xlsxFilePath = path.join(SCHEDULED_BACKUP_DIR, xlsxFileName);
+  fs.writeFileSync(xlsxFilePath, xlsxBuffer);
+
+  // Also maintain a 'latest_master_backup.xlsx'
+  const latestXlsxPath = path.join(SCHEDULED_BACKUP_DIR, 'latest_master_backup.xlsx');
+  fs.writeFileSync(latestXlsxPath, xlsxBuffer);
+
+  console.log(`[AutoBackup] Completed ${prefix}: Created DB backup (${fullDbBackup.summary.totalLeads} leads) and Master XLSX backup.`);
+
+  return {
+    dbPath: dbFilePath,
+    xlsxPath: xlsxFilePath,
+    summary: fullDbBackup.summary
+  };
+}
+
+/**
+ * Restores the entire database from a FullDatabaseBackup object smoothly into both Local Disk and Cloud Firestore.
+ */
+export async function restoreDatabaseFromBackup(backupData: FullDatabaseBackup): Promise<{ success: boolean; restoredCounts: any; message: string }> {
+  if (!backupData || !backupData.data || !Array.isArray(backupData.data.leads)) {
+    throw new Error('Invalid backup file format: Missing candidates dataset.');
+  }
+
+  const { leads, coordinators, jobs, updates, wallets, incentiveRules, metadata } = backupData.data;
+
+  // 1. Save all datasets through their respective transactional internal methods
+  if (Array.isArray(leads) && leads.length > 0) {
+    await saveLeads(leads);
+  }
+  if (Array.isArray(coordinators) && coordinators.length > 0) {
+    await saveCoordinators(coordinators);
+  }
+  if (Array.isArray(jobs) && jobs.length > 0) {
+    await saveJobs(jobs);
+  }
+  if (Array.isArray(updates) && updates.length > 0) {
+    await saveUpdates(updates);
+  }
+  if (Array.isArray(wallets) && wallets.length > 0) {
+    await saveWallets(wallets);
+  }
+  if (Array.isArray(incentiveRules) && incentiveRules.length > 0) {
+    await saveIncentiveRules(incentiveRules);
+  }
+  if (metadata && typeof metadata === 'object') {
+    await saveMetadata(metadata);
+  }
+
+  console.log(`[RestoreSystem] Successfully restored full database from backup dated ${backupData.timestamp}: ${leads.length} candidates restored.`);
+
+  return {
+    success: true,
+    restoredCounts: {
+      leads: leads?.length || 0,
+      coordinators: coordinators?.length || 0,
+      jobs: jobs?.length || 0,
+      wallets: wallets?.length || 0,
+      incentiveRules: incentiveRules?.length || 0
+    },
+    message: `Database successfully restored ${leads?.length || 0} candidates and all system tables.`
+  };
+}
+
+/**
+ * Lists all existing scheduled and manual backups on disk.
+ */
+export function listAvailableBackups(): BackupFileInfo[] {
+  const backups: BackupFileInfo[] = [];
+  if (!fs.existsSync(SCHEDULED_BACKUP_DIR)) return backups;
+
+  const files = fs.readdirSync(SCHEDULED_BACKUP_DIR);
+  for (const file of files) {
+    if (file.endsWith('.json') || file.endsWith('.xlsx')) {
+      const fullPath = path.join(SCHEDULED_BACKUP_DIR, file);
+      try {
+        const stats = fs.statSync(fullPath);
+        const isJson = file.endsWith('.json');
+        const sizeKb = (stats.size / 1024).toFixed(1);
+        const sizeMb = (stats.size / (1024 * 1024)).toFixed(2);
+        const sizeFormatted = stats.size > 1024 * 1024 ? `${sizeMb} MB` : `${sizeKb} KB`;
+
+        backups.push({
+          fileName: file,
+          filePath: fullPath,
+          type: isJson ? 'db_json' : 'xlsx',
+          sizeBytes: stats.size,
+          sizeFormatted,
+          createdAt: new Date(stats.mtime).toISOString(),
+          timestamp: stats.mtimeMs,
+          isMondayScheduled: file.includes('MONDAY')
+        });
+      } catch {}
+    }
+  }
+
+  return backups.sort((a, b) => b.timestamp - a.timestamp);
+}
+
 
 

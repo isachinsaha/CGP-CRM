@@ -69,11 +69,13 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
     };
   }, []);
 
-  // Poll for updates every 30 seconds to keep clients fully in sync
+  // Poll for updates every 90 seconds only when tab is visible
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchUpdates();
-    }, 30000);
+      if (document.visibilityState === 'visible') {
+        fetchUpdates();
+      }
+    }, 90000);
     return () => clearInterval(interval);
   }, []);
 
@@ -93,57 +95,54 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
   return (
     <div 
       id="important-updates-bar" 
-      className="bg-emerald-500/5 border border-emerald-500/15 rounded-2xl overflow-hidden flex items-center h-12 shadow-sm shadow-emerald-500/5 select-text relative"
+      className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-500/20 rounded-2xl overflow-hidden flex items-center h-12 shadow-sm shadow-emerald-500/5 select-text relative"
     >
       {/* Left fixed banner label */}
       <div 
-        className="bg-emerald-600 px-4.5 h-full flex items-center gap-2 font-black text-[11px] tracking-wider uppercase shrink-0 z-10 shadow-md select-none"
-        style={{ color: 'var(--color-update-bar-text)' }}
+        className="bg-emerald-600 px-4.5 h-full flex items-center gap-2 font-black text-[11px] tracking-wider uppercase shrink-0 z-10 shadow-md select-none text-white"
       >
         <span className="relative flex h-2 w-2">
           <span 
-            className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-            style={{ backgroundColor: 'var(--color-update-bar-text)' }}
+            className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"
           ></span>
           <span 
-            className="relative inline-flex rounded-full h-2 w-2"
-            style={{ backgroundColor: 'var(--color-update-bar-text)' }}
+            className="relative inline-flex rounded-full h-2 w-2 bg-white"
           ></span>
         </span>
-        <Volume2 className="h-3.5 w-3.5" />
-        <span>Important Updates</span>
+        <Volume2 className="h-3.5 w-3.5 text-white" />
+        <span className="text-white font-black tracking-wide">Important Updates</span>
       </div>
 
       {/* Marquee Container */}
       <div className="flex-1 overflow-hidden relative h-full flex items-center">
-        <div className="animate-marquee flex items-center gap-12 text-xs font-black text-emerald-500 tracking-wide hover:[animation-play-state:paused]">
+        <div className="animate-marquee flex items-center gap-12 text-xs font-bold text-emerald-900 dark:text-emerald-300 tracking-wide hover:[animation-play-state:paused]">
           {/* Main updates content */}
           <div className="flex items-center gap-12 whitespace-nowrap">
             {updates.map((update, idx) => {
               const isCopied = copiedId === `orig-${update.id || idx}`;
               return (
                 <span key={`orig-${update.id || idx}`} className="flex items-center gap-4 select-text group/update">
-                  <span className="text-emerald-600/60 font-mono text-[10px]">({new Date(update.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})})</span>
-                  <span>{update.text}</span>
+                  <span className="text-emerald-600 dark:text-emerald-400/70 font-mono text-[10px]">({new Date(update.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})})</span>
+                  <span className="font-semibold text-slate-800 dark:text-emerald-200">{update.text}</span>
                   <button
                     type="button"
                     onClick={() => handleCopy(update.text, `orig-${update.id || idx}`)}
-                    className="p-1 px-2 rounded bg-emerald-950/50 hover:bg-emerald-800/40 text-emerald-400 hover:text-white transition-all cursor-pointer flex items-center justify-center gap-1 border border-emerald-900/30 text-[9px] font-black uppercase tracking-wider select-none"
+                    className="p-1 px-2.5 rounded-lg bg-emerald-100 dark:bg-emerald-950/70 hover:bg-emerald-200 dark:hover:bg-emerald-900 text-emerald-800 dark:text-emerald-300 transition-all cursor-pointer flex items-center justify-center gap-1 border border-emerald-300 dark:border-emerald-800/60 text-[9px] font-black uppercase tracking-wider select-none shadow-2xs"
                     title="Copy update text/link"
                   >
                     {isCopied ? (
                       <>
-                        <Check className="h-3 w-3 text-emerald-400 stroke-[3px]" />
-                        <span className="text-[8px] font-mono text-emerald-400">Copied!</span>
+                        <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400 stroke-[3px]" />
+                        <span className="text-[8.5px] font-mono text-emerald-600 dark:text-emerald-400 font-black">Copied!</span>
                       </>
                     ) : (
                       <>
-                        <Copy className="h-3 w-3 text-emerald-500 group-hover/update:scale-110" />
-                        <span className="text-[8px] font-mono text-emerald-500 group-hover/update:text-emerald-350">Copy</span>
+                        <Copy className="h-3 w-3 text-emerald-600 dark:text-emerald-400 group-hover/update:scale-110" />
+                        <span className="text-[8.5px] font-mono text-emerald-700 dark:text-emerald-300">Copy</span>
                       </>
                     )}
                   </button>
-                  <span className="text-emerald-700/50 text-base font-bold">★</span>
+                  <span className="text-emerald-400 dark:text-emerald-600 text-base font-bold">★</span>
                 </span>
               );
             })}
@@ -154,27 +153,27 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
               const isCopied = copiedId === `dup-${update.id || idx}`;
               return (
                 <span key={`dup-${update.id || idx}`} className="flex items-center gap-4 select-text group/update-dup">
-                  <span className="text-emerald-600/60 font-mono text-[10px]">({new Date(update.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})})</span>
-                  <span>{update.text}</span>
+                  <span className="text-emerald-600 dark:text-emerald-400/70 font-mono text-[10px]">({new Date(update.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})})</span>
+                  <span className="font-semibold text-slate-800 dark:text-emerald-200">{update.text}</span>
                   <button
                     type="button"
                     onClick={() => handleCopy(update.text, `dup-${update.id || idx}`)}
-                    className="p-1 px-2 rounded bg-emerald-950/50 hover:bg-emerald-800/40 text-emerald-400 hover:text-white transition-all cursor-pointer flex items-center justify-center gap-1 border border-emerald-900/30 text-[9px] font-black uppercase tracking-wider select-none"
+                    className="p-1 px-2.5 rounded-lg bg-emerald-100 dark:bg-emerald-950/70 hover:bg-emerald-200 dark:hover:bg-emerald-900 text-emerald-800 dark:text-emerald-300 transition-all cursor-pointer flex items-center justify-center gap-1 border border-emerald-300 dark:border-emerald-800/60 text-[9px] font-black uppercase tracking-wider select-none shadow-2xs"
                     title="Copy update text/link"
                   >
                     {isCopied ? (
                       <>
-                        <Check className="h-3 w-3 text-emerald-400 stroke-[3px]" />
-                        <span className="text-[8px] font-mono text-emerald-400">Copied!</span>
+                        <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400 stroke-[3px]" />
+                        <span className="text-[8.5px] font-mono text-emerald-600 dark:text-emerald-400 font-black">Copied!</span>
                       </>
                     ) : (
                       <>
-                        <Copy className="h-3 w-3 text-emerald-500 group-hover/update-dup:scale-110" />
-                        <span className="text-[8px] font-mono text-emerald-500 group-hover/update-dup:text-emerald-350">Copy</span>
+                        <Copy className="h-3 w-3 text-emerald-600 dark:text-emerald-400 group-hover/update-dup:scale-110" />
+                        <span className="text-[8.5px] font-mono text-emerald-700 dark:text-emerald-300">Copy</span>
                       </>
                     )}
                   </button>
-                  <span className="text-emerald-700/50 text-base font-bold">★</span>
+                  <span className="text-emerald-400 dark:text-emerald-600 text-base font-bold">★</span>
                 </span>
               );
             })}

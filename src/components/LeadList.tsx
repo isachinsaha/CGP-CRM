@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
-import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Bell, Download, Sparkles, TrendingUp, X, UploadCloud } from 'lucide-react';
+import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Bell, Download, Sparkles, TrendingUp, X, UploadCloud, MessageSquare } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { getCountryFlagUrl, formatCandidateName } from '../utils';
 import { SearchableSelect } from './SearchableSelect';
@@ -90,6 +90,7 @@ export default function LeadList({
   // Bulk import states
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [importStatus, setImportStatus] = useState<{
     loading?: boolean;
     success?: boolean;
@@ -101,7 +102,7 @@ export default function LeadList({
 
   // Sync currentPage from override if present
   useEffect(() => {
-    if (currentPageOverride !== undefined) {
+    if (currentPageOverride !== undefined && currentPageOverride !== currentPage) {
       setCurrentPage(currentPageOverride);
     }
   }, [currentPageOverride]);
@@ -111,33 +112,46 @@ export default function LeadList({
     setCurrentPage(1);
   }, [searchQuery, countryFilter, projectFilter, positionFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter, remarksFilter]);
 
-  // Synchronize filter updates back to parent if server-side filtering is enabled
+  // Synchronize filter updates back to parent if server-side filtering is enabled with debounce
+  const prevFiltersRef = React.useRef<string>('');
   useEffect(() => {
-    if (onFiltersChange) {
-      onFiltersChange({
-        search: searchQuery,
-        country: countryFilter,
-        coordinator: coordinatorFilter,
-        fitScore: fitScoreFilter,
-        tag: tagFilter,
-        project: projectFilter,
-        position: positionFilter,
-        dateFilter: dateFilter,
-        customStartDate,
-        customEndDate,
-        bucket: bucketToggle,
-        gender: genderFilter,
-        remarksFilter
-      });
-    }
-  }, [searchQuery, countryFilter, coordinatorFilter, fitScoreFilter, tagFilter, projectFilter, positionFilter, genderFilter, dateFilter, customStartDate, customEndDate, bucketToggle, remarksFilter]);
+    if (!onFiltersChange) return;
+
+    const currentPayload = {
+      search: searchQuery,
+      country: countryFilter,
+      coordinator: coordinatorFilter,
+      fitScore: fitScoreFilter,
+      tag: tagFilter,
+      project: projectFilter,
+      position: positionFilter,
+      dateFilter: dateFilter,
+      customStartDate,
+      customEndDate,
+      bucket: bucketToggle,
+      gender: genderFilter,
+      remarksFilter
+    };
+
+    const serialized = JSON.stringify(currentPayload);
+    if (prevFiltersRef.current === serialized) return;
+
+    const timer = setTimeout(() => {
+      prevFiltersRef.current = serialized;
+      onFiltersChange(currentPayload);
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, countryFilter, coordinatorFilter, fitScoreFilter, tagFilter, projectFilter, positionFilter, genderFilter, dateFilter, customStartDate, customEndDate, bucketToggle, remarksFilter, onFiltersChange]);
 
   // Synchronize page index back to parent
+  const prevPageRef = React.useRef<number>(currentPage);
   useEffect(() => {
-    if (onPageChange) {
+    if (onPageChange && prevPageRef.current !== currentPage) {
+      prevPageRef.current = currentPage;
       onPageChange(currentPage);
     }
-  }, [currentPage]);
+  }, [currentPage, onPageChange]);
 
   const mapImportedRow = (row: any) => {
     // Helper to extract values leniently
@@ -256,64 +270,147 @@ export default function LeadList({
     reader.readAsBinaryString(file);
   };
 
-  // Export handlers
-  const handleExportXLSX = () => {
-    if (filteredLeads.length === 0) return;
-    const dataToExport = filteredLeads.map((lead, idx) => ({
-      'Serial': idx + 1,
-      'Applicant Name': lead.name,
-      'Phone': lead.phone,
-      'Country Interest': lead.country,
-      'Job Position': lead.positionOpening,
-      'Pipeline Stage': lead.stage,
-      'Fit Score': (lead.fitScore || 'unqualified').toUpperCase(),
-      'Coordinator Assigned': lead.assignedTo || 'Unassigned',
-      'Passport Copy Received': lead.docPassportCopy ? 'YES' : 'NO',
-      'Resume Received': lead.docResume ? 'YES' : 'NO',
-      'Office Visited': lead.docOfficeVisited ? 'YES' : 'NO',
-      'Remarks 1 (First Call)': lead.remarks1 || '',
-      'Remarks 2 (Follow-up)': lead.remarks2 || '',
-      'Remarks 3 (Final Status)': lead.remarks3 || '',
-      'Created Date': new Date(lead.createdAt).toLocaleDateString()
-    }));
+  // Helper to fetch 100% of matching leads across all pages if server-side pagination is active
+  const fetchAllMatchingLeads = async (): Promise<Lead[]> => {
+    try {
+      const params = new URLSearchParams({
+        all: 'true',
+        search: searchQuery || '',
+        country: countryFilter || 'All',
+        project: projectFilter || 'All',
+        position: positionFilter || 'All',
+        gender: genderFilter || 'All',
+        fitScore: fitScoreFilter || 'All',
+        tag: tagFilter || 'All',
+        coordinator: coordinatorFilter || 'All',
+        stage: 'All',
+        dateFilter: dateFilter || 'All',
+        customStartDate: customStartDate || '',
+        customEndDate: customEndDate || '',
+        remarksFilter: remarksFilter || 'All',
+        bucket: bucketToggle || 'all',
+        role: userRole || 'agent',
+        username: currentAgentId || ''
+      });
 
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Candidates");
-    XLSX.writeFile(workbook, `CRM_Spreadsheet_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+      const res = await fetch(`/api/leads?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.leads) && data.leads.length > 0) {
+          return data.leads;
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching all leads for export:', err);
+    }
+    return filteredLeads;
   };
 
-  const handleExportCSV = () => {
-    if (filteredLeads.length === 0) return;
-    const dataToExport = filteredLeads.map((lead, idx) => ({
-      'Serial': idx + 1,
-      'Applicant Name': lead.name,
-      'Phone': lead.phone,
-      'Country Interest': lead.country,
-      'Job Position': lead.positionOpening,
-      'Pipeline Stage': lead.stage,
-      'Fit Score': (lead.fitScore || 'unqualified').toUpperCase(),
-      'Coordinator Assigned': lead.assignedTo || 'Unassigned',
-      'Passport Copy Received': lead.docPassportCopy ? 'YES' : 'NO',
-      'Resume Received': lead.docResume ? 'YES' : 'NO',
-      'Office Visited': lead.docOfficeVisited ? 'YES' : 'NO',
-      'Remarks 1 (First Call)': lead.remarks1 || '',
-      'Remarks 2 (Follow-up)': lead.remarks2 || '',
-      'Remarks 3 (Final Status)': lead.remarks3 || '',
-      'Created Date': new Date(lead.createdAt).toLocaleDateString()
-    }));
+  // Export handlers
+  const handleExportXLSX = async () => {
+    setIsExporting(true);
+    try {
+      const leadsToExport = await fetchAllMatchingLeads();
+      if (!leadsToExport || leadsToExport.length === 0) {
+        alert('No candidate records found matching your filters to export.');
+        return;
+      }
 
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
-    const csvContent = XLSX.utils.sheet_to_csv(worksheet);
-    
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `CRM_Spreadsheet_Export_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      const dataToExport = leadsToExport.map((lead, idx) => ({
+        'Serial': lead.serialNo || `INQ-${1000 + idx + 1}`,
+        'Applicant Name': lead.name,
+        'Phone': lead.phone,
+        'Alternate Phone': lead.alternateNo || '',
+        'Gender': lead.gender || 'M',
+        'Age': lead.age || '',
+        'Origin / City': lead.origin || '',
+        'Country Interest': lead.country,
+        'Job Position': lead.position || '',
+        'Experience': lead.experience || '',
+        'Qualification': lead.qualification || '',
+        'Pipeline Stage': lead.stage,
+        'Fit Score': (lead.fitScore || 'unqualified').toUpperCase(),
+        'Coordinator Assigned': lead.assignedTo || 'Unassigned',
+        'Passport Copy Received': lead.docPassportCopy ? 'YES' : 'NO',
+        'Resume Received': lead.docResume ? 'YES' : 'NO',
+        'Office Visited': lead.docOfficeVisited ? 'YES' : 'NO',
+        'Remarks 1 (First Call)': lead.remarks1 || '',
+        'Remarks 2 (Follow-up)': lead.remarks2 || '',
+        'Remarks 3 (Final Status)': lead.remarks3 || '',
+        'Admin Remarks': lead.adminRemarks || '',
+        'Project': lead.project || '',
+        'Source': lead.source || '',
+        'Created Date': lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : ''
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Candidates");
+      XLSX.writeFile(workbook, `CRM_Candidates_Export_${leadsToExport.length}_Records_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch (err) {
+      console.error('Export XLSX failed:', err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportCSV = async () => {
+    setIsExporting(true);
+    try {
+      const leadsToExport = await fetchAllMatchingLeads();
+      if (!leadsToExport || leadsToExport.length === 0) {
+        alert('No candidate records found matching your filters to export.');
+        return;
+      }
+
+      const dataToExport = leadsToExport.map((lead, idx) => ({
+        'Serial': lead.serialNo || `INQ-${1000 + idx + 1}`,
+        'Applicant Name': lead.name,
+        'Phone': lead.phone,
+        'Alternate Phone': lead.alternateNo || '',
+        'Gender': lead.gender || 'M',
+        'Age': lead.age || '',
+        'Origin / City': lead.origin || '',
+        'Country Interest': lead.country,
+        'Job Position': lead.position || '',
+        'Experience': lead.experience || '',
+        'Qualification': lead.qualification || '',
+        'Pipeline Stage': lead.stage,
+        'Fit Score': (lead.fitScore || 'unqualified').toUpperCase(),
+        'Coordinator Assigned': lead.assignedTo || 'Unassigned',
+        'Passport Copy Received': lead.docPassportCopy ? 'YES' : 'NO',
+        'Resume Received': lead.docResume ? 'YES' : 'NO',
+        'Office Visited': lead.docOfficeVisited ? 'YES' : 'NO',
+        'Remarks 1 (First Call)': lead.remarks1 || '',
+        'Remarks 2 (Follow-up)': lead.remarks2 || '',
+        'Remarks 3 (Final Status)': lead.remarks3 || '',
+        'Admin Remarks': lead.adminRemarks || '',
+        'Project': lead.project || '',
+        'Source': lead.source || '',
+        'Created Date': lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : ''
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const csvContent = XLSX.utils.sheet_to_csv(worksheet);
+      
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `CRM_Candidates_Export_${leadsToExport.length}_Records_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Export CSV failed:', err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Whole Backup Master XLSX Download - Downloads 100% of the entire database with all sheets
+  const handleDownloadWholeBackupXLSX = () => {
+    window.location.href = '/api/backup/full-xlsx';
   };
 
   const handleGenerateAIReport = async () => {
@@ -821,11 +918,16 @@ export default function LeadList({
   const getStageHeader = (stage: LeadStage) => {
     switch (stage) {
       case 'new': return 'bg-slate-800 text-slate-300 border border-slate-700';
+      case 'in_discussion':
       case 'negotiating': return 'bg-amber-950/40 text-amber-400 border border-amber-900/30';
-      case 'rotations': return 'bg-indigo-950/40 text-indigo-400 border border-indigo-900/30';
+      case 'strong_opportunity': return 'bg-sky-950/40 text-sky-400 border border-sky-900/30 font-bold';
+      case 'office_visited':
       case 'proposal': return 'bg-purple-950/40 text-purple-400 border border-purple-900/30';
       case 'won': return 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/30 font-bold';
+      case 'cold_leads':
+      case 'rotations': return 'bg-blue-950/40 text-blue-400 border border-blue-900/30';
       case 'lost': return 'bg-slate-800 text-slate-400 border border-slate-700';
+      default: return 'bg-slate-800 text-slate-300 border border-slate-700';
     }
   };
 
@@ -992,7 +1094,7 @@ export default function LeadList({
           <button
             type="button"
             onClick={handleExportCSV}
-            disabled={filteredLeads.length === 0}
+            disabled={filteredLeads.length === 0 || isExporting}
             className="text-xs font-black px-3.5 py-1.5 bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-3xs"
             title="Export filtered directory to .CSV"
           >
@@ -1000,16 +1102,27 @@ export default function LeadList({
             <span>📄 Export CSV</span>
           </button>
 
-          {/* Export XLSX Button */}
+          {/* Export Filtered XLSX Button */}
           <button
             type="button"
             onClick={handleExportXLSX}
-            disabled={filteredLeads.length === 0}
+            disabled={filteredLeads.length === 0 || isExporting}
             className="text-xs font-black px-3.5 py-1.5 bg-emerald-950/20 hover:bg-emerald-950/40 text-emerald-400 border border-emerald-900/30 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-3xs"
-            title="Export filtered directory to Microsoft Excel .XLSX"
+            title="Export filtered directory (all pages) to Microsoft Excel .XLSX"
           >
             <Download className="h-3.5 w-3.5 text-emerald-500" />
-            <span>📊 Export XLSX</span>
+            <span>{isExporting ? '⏳ Exporting...' : '📊 Export XLSX'}</span>
+          </button>
+
+          {/* Whole Database Backup XLSX Button - 100% Complete Multi-Sheet Excel */}
+          <button
+            type="button"
+            onClick={handleDownloadWholeBackupXLSX}
+            className="text-xs font-black px-3.5 py-1.5 bg-gradient-to-r from-blue-900/40 to-indigo-900/40 hover:from-blue-900/60 hover:to-indigo-900/60 text-cyan-300 border border-cyan-500/40 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-md hover:shadow-cyan-900/30"
+            title="Download Complete Whole CRM Database in multi-sheet XLSX (All candidates, chats, tasks, timeline, jobs, coordinators)"
+          >
+            <Download className="h-3.5 w-3.5 text-cyan-400 animate-bounce" />
+            <span className="font-extrabold tracking-wide">📦 Whole Backup (.XLSX)</span>
           </button>
 
           {/* Bulk Enrollment Button - Admin only */}
@@ -1421,7 +1534,22 @@ export default function LeadList({
                       <td className="px-4 py-3 max-w-[200px]">
                         <div>
                           <div className={`font-extrabold text-emerald-800 dark:text-emerald-400 uppercase tracking-normal truncate ${!isInlineEdit && 'group-hover:text-accent-emerald transition-colors'} flex items-center gap-1.5 font-sans`}>
-                            <span>{formatCandidateName(lead.name)}</span>
+                            <span className="truncate">{formatCandidateName(lead.name)}</span>
+                            {(() => {
+                              const inboundCount = (lead.messages || []).filter(m => m.sender === 'lead').length;
+                              if (inboundCount > 0) {
+                                return (
+                                  <span 
+                                    className="shrink-0 text-[9.5px] font-black text-emerald-950 dark:text-emerald-300 bg-emerald-400 dark:bg-emerald-950/90 border border-emerald-500/50 dark:border-emerald-700/80 px-1.5 py-0.2 rounded-full flex items-center gap-0.5 shadow-2xs animate-pulse font-mono"
+                                    title={`${inboundCount} candidate WhatsApp message${inboundCount > 1 ? 's' : ''} received`}
+                                  >
+                                    <MessageSquare className="h-2.5 w-2.5 fill-current" />
+                                    <span>{inboundCount}</span>
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1476,16 +1604,17 @@ export default function LeadList({
                       {/* 10. Pipeline Stage select box */}
                       <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                         <select
-                          value={lead.stage}
+                          value={lead.stage === 'negotiating' ? 'in_discussion' : lead.stage === 'proposal' ? 'office_visited' : lead.stage === 'rotations' ? 'cold_leads' : lead.stage}
                           onChange={(e) => onUpdateStage(lead.id, e.target.value as LeadStage)}
-                          className={`text-[9px] font-bold rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer w-[102px] truncate ${getStageHeader(lead.stage)}`}
+                          className={`text-[9px] font-bold rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer w-[110px] truncate ${getStageHeader(lead.stage)}`}
                         >
-                          <option value="new">New Inbound</option>
-                          <option value="negotiating">In Discussion</option>
-                          <option value="proposal">Office Visited/Interview Attended</option>
-                          <option value="rotations">In Rotations</option>
-                          <option value="won">Closed Won</option>
-                          <option value="lost">Closed Lost</option>
+                          <option value="new">1. NEW INBOUND</option>
+                          <option value="in_discussion">2. IN DISCUSSION</option>
+                          <option value="strong_opportunity">3. STRONG OPPORTUNITY</option>
+                          <option value="office_visited">4. OFFICE VISITED/INTERVIEW ATTENDED</option>
+                          <option value="won">5. WON</option>
+                          <option value="cold_leads">6. COLD LEADS</option>
+                          <option value="lost">7. LOST</option>
                         </select>
                       </td>
 

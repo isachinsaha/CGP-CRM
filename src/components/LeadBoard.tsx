@@ -15,7 +15,10 @@ import {
   LayoutGrid,
   Trello,
   RotateCw,
-  Search
+  Search,
+  Zap,
+  Snowflake,
+  CheckCircle2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { getCountryFlagUrl, formatCandidateName } from '../utils';
@@ -145,7 +148,7 @@ export default function LeadBoard({
     }
 
     const totalAssignedLifetime = lifetimeScopeLeads.length;
-    const inDiscussionCount = lifetimeScopeLeads.filter(l => l.stage === 'negotiating').length;
+    const inDiscussionCount = lifetimeScopeLeads.filter(l => l.stage === 'in_discussion' || l.stage === 'negotiating').length;
     const percentage = totalAssignedLifetime > 0 ? (inDiscussionCount / totalAssignedLifetime) * 100 : 0;
 
     let level: 'green' | 'yellow' | 'orange' | 'red' = 'green';
@@ -202,12 +205,13 @@ export default function LeadBoard({
   }, [leads, userRole, currentAgentId, coordinatorFilter]);
 
   const COLUMNS: Column[] = [
-    { id: 'new', title: 'New Inbound', color: 'border-sky-900/40 bg-sky-950/15', headerColor: 'text-sky-400 bg-sky-950/40 font-medium' },
-    { id: 'negotiating', title: 'In Discussion', color: 'border-slate-750 bg-slate-900/35', headerColor: inDiscussionPctInfo.headerColor },
-    { id: 'proposal', title: 'Office Visited/Interview Attended', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-purple-400 bg-purple-950/40 font-medium' },
-    { id: 'rotations', title: 'In Rotations', color: 'border-slate-750 bg-slate-900/35', headerColor: 'text-indigo-400 bg-indigo-950/40 font-medium animate-pulse' },
-    { id: 'won', title: 'Closed Won', color: 'border-emerald-900/40 bg-emerald-950/15', headerColor: 'text-emerald-400 bg-emerald-950/40 font-semibold' },
-    { id: 'lost', title: 'Closed Lost', color: 'border-slate-750 bg-slate-900/20', headerColor: 'text-slate-400 bg-slate-800' }
+    { id: 'new', title: '1. New Inbound', color: 'border-sky-900/40 bg-sky-950/15', headerColor: 'text-sky-400 bg-sky-950/40 font-medium' },
+    { id: 'in_discussion', title: '2. In Discussion', color: 'border-slate-750 bg-slate-900/35', headerColor: inDiscussionPctInfo.headerColor },
+    { id: 'strong_opportunity', title: '3. Strong Opportunity', color: 'border-sky-900/40 bg-sky-950/15', headerColor: 'text-sky-400 bg-sky-950/40 font-medium' },
+    { id: 'office_visited', title: '4. Office Visited / Interview', color: 'border-purple-900/40 bg-purple-950/15', headerColor: 'text-purple-400 bg-purple-950/40 font-medium' },
+    { id: 'won', title: '5. Won', color: 'border-emerald-900/40 bg-emerald-950/15', headerColor: 'text-emerald-400 bg-emerald-950/40 font-semibold' },
+    { id: 'cold_leads', title: '6. Cold Leads', color: 'border-blue-900/40 bg-blue-950/15', headerColor: 'text-blue-400 bg-blue-950/40 font-medium' },
+    { id: 'lost', title: '7. Lost', color: 'border-slate-750 bg-slate-900/20', headerColor: 'text-slate-400 bg-slate-800' }
   ];
 
   const getFitScoreBadge = (score: string) => {
@@ -225,11 +229,17 @@ export default function LeadBoard({
   };
 
   const getStageNeighbors = (current: LeadStage): { prev: LeadStage | null; next: LeadStage | null } => {
-    const list: LeadStage[] = ['new', 'negotiating', 'proposal', 'rotations', 'won', 'lost'];
-    const idx = list.indexOf(current);
+    const list: LeadStage[] = ['new', 'in_discussion', 'strong_opportunity', 'office_visited', 'won', 'cold_leads', 'lost'];
+    // Map legacy alias to standard
+    let normalized = current;
+    if (current === 'negotiating') normalized = 'in_discussion';
+    else if (current === 'proposal') normalized = 'office_visited';
+    else if (current === 'rotations') normalized = 'cold_leads';
+
+    const idx = list.indexOf(normalized);
     return {
       prev: idx > 0 ? list[idx - 1] : null,
-      next: idx < list.length - 1 ? list[idx + 1] : null
+      next: idx < list.length - 1 && idx >= 0 ? list[idx + 1] : null
     };
   };
 
@@ -332,12 +342,26 @@ export default function LeadBoard({
   // Lead Card Render Helper to avoid duplicate JSX
   const renderLeadCard = (lead: Lead) => {
     const { prev, next } = getStageNeighbors(lead.stage);
-    const r1 = lead.remarks1?.trim() || '';
-    const r2 = lead.remarks2?.trim() || '';
-    const r3 = lead.remarks3?.trim() || '';
+    const r1 = String(lead.remarks1 || '').trim();
+    const r2 = String(lead.remarks2 || '').trim();
+    const r3 = String(lead.remarks3 || '').trim();
+    const adminR = String(lead.adminRemarks || '').trim();
+    const assigned = String(lead.assignedTo || '').trim();
     const hasRemarks = r1 !== '' || r2 !== '' || r3 !== '';
     const latestRemarkLabel = r3 !== '' ? '📞 3rd Remark' : r2 !== '' ? '📞 2nd Remark' : '📞 1st Remark';
     const latestRemarkValue = r3 !== '' ? r3 : r2 !== '' ? r2 : r1;
+
+    let formattedDate = 'Recent';
+    try {
+      if (lead.updatedAt) {
+        const d = new Date(lead.updatedAt);
+        if (!isNaN(d.getTime())) {
+          formattedDate = d.toLocaleDateString(undefined, {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+        }
+      }
+    } catch {
+      formattedDate = 'Recent';
+    }
 
     return (
       <motion.div
@@ -348,9 +372,11 @@ export default function LeadBoard({
         whileTap={{ scale: 0.995 }}
         transition={{ type: "spring", stiffness: 400, damping: 28 }}
         draggable="true"
-        onDragStart={(e) => {
-          e.dataTransfer.setData('text/plain', lead.id);
-          e.dataTransfer.effectAllowed = 'move';
+        onDragStart={(e: any) => {
+          if (e.dataTransfer) {
+            e.dataTransfer.setData('text/plain', lead.id);
+            e.dataTransfer.effectAllowed = 'move';
+          }
         }}
         className="bg-slate-850 rounded-2xl border border-slate-750 p-4 shadow-xs cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full hover:shadow-lg hover:shadow-accent-emerald/5"
         onClick={() => onSelectLead(lead)}
@@ -358,9 +384,9 @@ export default function LeadBoard({
         {/* Target country badge & Stars */}
         <div className="flex justify-between items-center gap-1.5 mb-2">
           <span className="text-[10px] font-extrabold text-[#0f172a] dark:text-slate-200 bg-[#e2e8f0] dark:bg-slate-800 border border-[#cbd5e1] dark:border-slate-700 px-2.5 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1.5 shadow-2xs font-sans">
-            {lead.country && getCountryFlagUrl(lead.country) ? (
+            {lead.country && getCountryFlagUrl(String(lead.country)) ? (
               <img 
-                src={getCountryFlagUrl(lead.country)} 
+                src={getCountryFlagUrl(String(lead.country))} 
                 alt="" 
                 className="w-4 h-3 object-cover rounded-2xs inline-block shadow-2xs"
                 referrerPolicy="no-referrer"
@@ -385,10 +411,28 @@ export default function LeadBoard({
           </div>
         </div>
 
-        {/* Name / Phone */}
-        <h4 className="font-extrabold text-slate-100 text-sm tracking-wide uppercase font-sans">{formatCandidateName(lead.name)}</h4>
+        {/* Name / Phone & Message Count Badge */}
+        <div className="flex items-center justify-between gap-1.5">
+          <h4 className="font-extrabold text-slate-100 text-sm tracking-wide uppercase font-sans truncate">{formatCandidateName(String(lead.name || 'Candidate'))}</h4>
+          {(() => {
+            const inboundCount = (lead.messages || []).filter(m => m && m.sender === 'lead').length;
+            const totalMsgCount = (lead.messages || []).filter(m => m && m.sender !== 'system').length;
+            if (inboundCount > 0) {
+              return (
+                <span 
+                  className="shrink-0 text-[10px] font-black text-emerald-950 dark:text-emerald-300 bg-emerald-400 dark:bg-emerald-950/90 border border-emerald-500/50 dark:border-emerald-700/80 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs animate-pulse font-mono"
+                  title={`${inboundCount} candidate WhatsApp message${inboundCount > 1 ? 's' : ''} received (${totalMsgCount} total messages)`}
+                >
+                  <MessageSquare className="h-2.5 w-2.5 fill-current" />
+                  <span>{inboundCount}</span>
+                </span>
+              );
+            }
+            return null;
+          })()}
+        </div>
         <div className="flex items-center justify-between mt-1 pb-1.5 border-b border-slate-700">
-          <span className="text-[11px] text-slate-300 font-semibold font-mono tracking-wide">{lead.phone}</span>
+          <span className="text-[11px] text-slate-300 font-semibold font-mono tracking-wide">{lead.phone || 'N/A'}</span>
           <span className="text-[10px] bg-[#e2e8f0] dark:bg-slate-800 border border-[#cbd5e1] dark:border-slate-700 font-extrabold px-2.5 py-0.5 rounded-md text-[#0f172a] dark:text-slate-200 uppercase tracking-wider font-mono shadow-2xs">
             {(() => {
               const g = String(lead.gender || '').toUpperCase().trim();
@@ -427,7 +471,7 @@ export default function LeadBoard({
               "{latestRemarkValue}"
             </p>
           </div>
-        ) : lead.adminRemarks && lead.adminRemarks.trim() !== '' ? (
+        ) : adminR !== '' ? (
           <div className="bg-red-50 dark:bg-slate-900/90 p-2.5 rounded-lg border border-red-200 dark:border-red-900/60 text-[11px] text-left mt-2 shadow-2xs transition-all group/adminRemarks cursor-help hover:bg-red-100/80 dark:hover:bg-slate-800">
             <span className="text-[10px] uppercase font-black text-red-700 dark:text-red-400 block mb-1 tracking-wider flex justify-between items-center font-sans">
               <span className="flex items-center gap-1">
@@ -437,7 +481,7 @@ export default function LeadBoard({
               <span className="text-[8px] text-red-700/80 dark:text-slate-500 normal-case font-normal group-hover/adminRemarks:hidden">Hover for full</span>
             </span>
             <p className="text-red-950 dark:text-red-200 font-extrabold italic font-mono text-[11px] leading-snug truncate group-hover/adminRemarks:whitespace-normal group-hover/adminRemarks:break-words">
-              "{lead.adminRemarks}"
+              "{adminR}"
             </p>
           </div>
         ) : (
@@ -449,9 +493,9 @@ export default function LeadBoard({
         {/* Coordinator Badge */}
         <div className="text-[11px] mt-2 flex justify-between items-center border-t border-slate-200 dark:border-slate-800/80 pt-2 text-left">
           <span className="text-slate-600 dark:text-slate-300 font-extrabold">Coordinator:</span>
-          {lead.assignedTo && lead.assignedTo.trim() !== '' && lead.assignedTo.toLowerCase() !== 'unassigned' ? (
+          {assigned !== '' && assigned.toLowerCase() !== 'unassigned' ? (
             <span className="text-purple-800 dark:text-purple-300 font-black bg-purple-50 dark:bg-purple-950/80 border border-purple-300 dark:border-purple-500/60 px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider font-sans shadow-2xs">
-              👤 {lead.assignedTo}
+              👤 {assigned}
             </span>
           ) : (
             <span className="text-purple-800 dark:text-purple-300 font-black bg-purple-50 dark:bg-purple-950/80 border border-purple-300 dark:border-purple-500/60 px-2.5 py-1 rounded text-[10px] uppercase tracking-wider font-sans shadow-2xs">
@@ -482,7 +526,7 @@ export default function LeadBoard({
           </div>
 
           <span className="text-[9px] text-slate-500 font-bold font-mono">
-            {new Date(lead.updatedAt).toLocaleDateString(undefined, {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'})}
+            {formattedDate}
           </span>
 
           <div>
@@ -655,18 +699,27 @@ export default function LeadBoard({
         {viewMode === 'hub' ? (
           <div className="space-y-6 animate-fade-in">
             {/* Stage Selector Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
               {COLUMNS.map((col) => {
-                const colLeads = visibleLeads.filter(l => l.stage === col.id);
-                const isSelected = selectedStage === col.id;
+                const colLeads = visibleLeads.filter(l => {
+                  if (col.id === 'in_discussion') return l.stage === 'in_discussion' || l.stage === 'negotiating';
+                  if (col.id === 'office_visited') return l.stage === 'office_visited' || l.stage === 'proposal';
+                  if (col.id === 'cold_leads') return l.stage === 'cold_leads' || l.stage === 'rotations';
+                  return l.stage === col.id;
+                });
+                const isSelected = selectedStage === col.id || 
+                  (selectedStage === 'negotiating' && col.id === 'in_discussion') ||
+                  (selectedStage === 'proposal' && col.id === 'office_visited') ||
+                  (selectedStage === 'rotations' && col.id === 'cold_leads');
                 const isDraggedOver = draggedOverColumn === col.id;
                 
-                // Map icons dynamically
+                // Map icons dynamically for 7 stages
                 let IconComponent = Inbox;
-                if (col.id === 'negotiating') IconComponent = Briefcase;
-                else if (col.id === 'rotations') IconComponent = RotateCw;
-                else if (col.id === 'proposal') IconComponent = Calendar;
+                if (col.id === 'in_discussion' || col.id === 'negotiating') IconComponent = Briefcase;
+                else if (col.id === 'strong_opportunity') IconComponent = Zap;
+                else if (col.id === 'office_visited' || col.id === 'proposal') IconComponent = Calendar;
                 else if (col.id === 'won') IconComponent = ShieldCheck;
+                else if (col.id === 'cold_leads' || col.id === 'rotations') IconComponent = Snowflake;
                 else if (col.id === 'lost') IconComponent = X;
 
                 // Determine visual accent based on stage
@@ -679,16 +732,16 @@ export default function LeadBoard({
                   selectedClass = isSelected ? 'bg-sky-950/20 dark:bg-sky-950/80 border-2 border-sky-600 dark:border-sky-500 text-slate-100 shadow-md ring-2 ring-sky-500/20' : '';
                   badgeColor = isSelected ? 'bg-sky-500/20 text-sky-700 dark:text-sky-400 border-sky-500/30' : 'bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20';
                   if (isSelected) iconColor = 'text-sky-600 dark:text-sky-400';
-                } else if (col.id === 'negotiating') {
+                } else if (col.id === 'in_discussion' || col.id === 'negotiating') {
                   selectedClass = inDiscussionPctInfo.selectedClass;
                   badgeColor = inDiscussionPctInfo.badgeColor;
                   iconColor = inDiscussionPctInfo.iconColor;
                   unselectedClass = inDiscussionPctInfo.unselectedClass;
-                } else if (col.id === 'rotations') {
-                  selectedClass = isSelected ? 'bg-indigo-950/20 dark:bg-indigo-950/80 border-2 border-indigo-600 dark:border-indigo-500 text-slate-100 shadow-md ring-2 ring-indigo-500/20' : '';
-                  badgeColor = isSelected ? 'bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 border-indigo-500/30' : 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20';
-                  if (isSelected) iconColor = 'text-indigo-600 dark:text-indigo-400';
-                } else if (col.id === 'proposal') {
+                } else if (col.id === 'strong_opportunity') {
+                  selectedClass = isSelected ? 'bg-amber-950/25 dark:bg-amber-950/80 border-2 border-amber-500 text-slate-100 shadow-md ring-2 ring-amber-500/20' : '';
+                  badgeColor = isSelected ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20';
+                  if (isSelected) iconColor = 'text-amber-500 dark:text-amber-400';
+                } else if (col.id === 'office_visited' || col.id === 'proposal') {
                   selectedClass = isSelected ? 'bg-purple-950/20 dark:bg-purple-950/80 border-2 border-purple-600 dark:border-purple-500 text-slate-100 shadow-md ring-2 ring-purple-500/20' : '';
                   badgeColor = isSelected ? 'bg-purple-500/20 text-purple-700 dark:text-purple-400 border-purple-500/30' : 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/20';
                   if (isSelected) iconColor = 'text-purple-600 dark:text-purple-400';
@@ -696,6 +749,10 @@ export default function LeadBoard({
                   selectedClass = isSelected ? 'bg-emerald-950/20 dark:bg-emerald-950/80 border-2 border-emerald-600 dark:border-emerald-500 text-slate-100 shadow-md ring-2 ring-emerald-500/20' : '';
                   badgeColor = isSelected ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border-emerald-500/30' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20';
                   if (isSelected) iconColor = 'text-emerald-600 dark:text-emerald-400';
+                } else if (col.id === 'cold_leads' || col.id === 'rotations') {
+                  selectedClass = isSelected ? 'bg-blue-950/20 dark:bg-blue-950/80 border-2 border-blue-600 dark:border-blue-500 text-slate-100 shadow-md ring-2 ring-blue-500/20' : '';
+                  badgeColor = isSelected ? 'bg-blue-500/20 text-blue-700 dark:text-blue-400 border-blue-500/30' : 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20';
+                  if (isSelected) iconColor = 'text-blue-600 dark:text-blue-400';
                 } else if (col.id === 'lost') {
                   selectedClass = isSelected ? 'bg-rose-950/20 dark:bg-rose-950/80 border-2 border-rose-600 dark:border-rose-500 text-slate-100 shadow-md ring-2 ring-rose-500/20' : '';
                   badgeColor = isSelected ? 'bg-rose-500/20 text-rose-700 dark:text-rose-400 border-rose-500/30' : 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20';
@@ -720,7 +777,7 @@ export default function LeadBoard({
                         onUpdateStage(leadId, col.id);
                       }
                     }}
-                    className={`group p-2 px-3 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-[92px] relative overflow-hidden ${
+                    className={`group p-2 px-2.5 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-[96px] relative overflow-hidden ${
                       isDraggedOver
                         ? 'border-accent-purple bg-accent-purple/10 scale-[1.03] ring-2 ring-accent-purple/40 shadow-lg'
                         : isSelected
@@ -733,22 +790,22 @@ export default function LeadBoard({
                         <IconComponent className={`w-3.5 h-3.5 ${iconColor}`} />
                       </div>
                       <div className="flex flex-col items-end gap-0.5">
-                        <span className={`text-[11px] font-black px-2 py-0.5 rounded-md font-mono border ${badgeColor}`}>
+                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md font-mono border ${badgeColor}`}>
                           {colLeads.length} {colLeads.length === 1 ? 'Lead' : 'Leads'}
                         </span>
-                        {col.id === 'negotiating' && (
-                          <span className={`text-[9px] font-extrabold font-mono ${inDiscussionPctInfo.textColor}`} title={`In Discussion load: ${inDiscussionPctInfo.inDiscussionCount}/${inDiscussionPctInfo.totalAssignedLifetime} lifetime assigned leads (${inDiscussionPctInfo.percentage.toFixed(1)}%)`}>
-                            {inDiscussionPctInfo.percentage.toFixed(1)}% ratio
+                        {col.id === 'in_discussion' && (
+                          <span className={`text-[8.5px] font-extrabold font-mono ${inDiscussionPctInfo.textColor}`} title={`In Discussion load: ${inDiscussionPctInfo.inDiscussionCount}/${inDiscussionPctInfo.totalAssignedLifetime} lifetime assigned leads (${inDiscussionPctInfo.percentage.toFixed(1)}%)`}>
+                            {inDiscussionPctInfo.percentage.toFixed(1)}%
                           </span>
                         )}
                       </div>
                     </div>
                     
                     <div className="relative z-10 mt-1">
-                      <h3 className={`font-black text-[10px] tracking-wide uppercase leading-tight line-clamp-2 ${isSelected ? 'text-slate-100' : 'text-slate-200'}`}>
+                      <h3 className={`font-black text-[9.5px] tracking-wide uppercase leading-tight line-clamp-2 ${isSelected ? 'text-slate-100' : 'text-slate-200'}`}>
                         {col.title}
                       </h3>
-                      <p className={`text-[9px] font-bold mt-0.5 ${isSelected ? 'text-slate-100 opacity-90' : 'text-slate-400'}`}>
+                      <p className={`text-[8.5px] font-bold mt-0.5 ${isSelected ? 'text-slate-100 opacity-90' : 'text-slate-400'}`}>
                         {isSelected ? '● Selected' : 'Click to view'}
                       </p>
                     </div>
@@ -763,13 +820,18 @@ export default function LeadBoard({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-700 pb-4 gap-3">
                   <div>
                     <h3 className="text-sm font-black text-slate-100 uppercase tracking-wide flex items-center gap-2">
-                      📂 {COLUMNS.find(c => c.id === selectedStage)?.title} Candidates
+                      📂 {COLUMNS.find(c => c.id === selectedStage || (selectedStage === 'negotiating' && c.id === 'in_discussion') || (selectedStage === 'proposal' && c.id === 'office_visited') || (selectedStage === 'rotations' && c.id === 'cold_leads'))?.title} Candidates
                     </h3>
                     <p className="text-xs text-slate-500 font-bold">
-                      Showing {visibleLeads.filter(l => l.stage === selectedStage).length} active records in pipeline phase
+                      Showing {visibleLeads.filter(l => {
+                        if (selectedStage === 'in_discussion' || selectedStage === 'negotiating') return l.stage === 'in_discussion' || l.stage === 'negotiating';
+                        if (selectedStage === 'office_visited' || selectedStage === 'proposal') return l.stage === 'office_visited' || l.stage === 'proposal';
+                        if (selectedStage === 'cold_leads' || selectedStage === 'rotations') return l.stage === 'cold_leads' || l.stage === 'rotations';
+                        return l.stage === selectedStage;
+                      }).length} active records in pipeline phase
                     </p>
                   </div>
-                  {selectedStage === 'negotiating' ? (
+                  {selectedStage === 'in_discussion' || selectedStage === 'negotiating' ? (
                     <span className={`self-start sm:self-center text-[10px] uppercase font-black px-3 py-1.5 rounded-full font-mono border ${inDiscussionPctInfo.badgeColor}`}>
                       In Discussion Load: {inDiscussionPctInfo.percentage.toFixed(1)}% ({inDiscussionPctInfo.inDiscussionCount}/{inDiscussionPctInfo.totalAssignedLifetime} assigned)
                     </span>
@@ -782,8 +844,18 @@ export default function LeadBoard({
 
                 {/* Grid layout of lead cards under the selected stage */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 py-1">
-                  {visibleLeads.filter(l => l.stage === selectedStage).length > 0 ? (
-                    visibleLeads.filter(l => l.stage === selectedStage).map((lead) => renderLeadCard(lead))
+                  {visibleLeads.filter(l => {
+                    if (selectedStage === 'in_discussion' || selectedStage === 'negotiating') return l.stage === 'in_discussion' || l.stage === 'negotiating';
+                    if (selectedStage === 'office_visited' || selectedStage === 'proposal') return l.stage === 'office_visited' || l.stage === 'proposal';
+                    if (selectedStage === 'cold_leads' || selectedStage === 'rotations') return l.stage === 'cold_leads' || l.stage === 'rotations';
+                    return l.stage === selectedStage;
+                  }).length > 0 ? (
+                    visibleLeads.filter(l => {
+                      if (selectedStage === 'in_discussion' || selectedStage === 'negotiating') return l.stage === 'in_discussion' || l.stage === 'negotiating';
+                      if (selectedStage === 'office_visited' || selectedStage === 'proposal') return l.stage === 'office_visited' || l.stage === 'proposal';
+                      if (selectedStage === 'cold_leads' || selectedStage === 'rotations') return l.stage === 'cold_leads' || l.stage === 'rotations';
+                      return l.stage === selectedStage;
+                    }).map((lead) => renderLeadCard(lead))
                   ) : (
                     <div className="col-span-full border border-dashed border-slate-750 rounded-2xl flex flex-col items-center justify-center py-20 text-slate-500 space-y-2 bg-slate-900/20">
                       <Inbox className="h-10 w-10 opacity-30 text-slate-400" />
@@ -805,7 +877,12 @@ export default function LeadBoard({
             {/* Grid Columns */}
             <div className="flex gap-4 overflow-x-auto pb-4 w-full relative z-10 xl:justify-start" id="kanban-pipeline-columns">
               {COLUMNS.map(col => {
-                const colLeads = visibleLeads.filter(l => l.stage === col.id);
+                const colLeads = visibleLeads.filter(l => {
+                  if (col.id === 'in_discussion') return l.stage === 'in_discussion' || l.stage === 'negotiating';
+                  if (col.id === 'office_visited') return l.stage === 'office_visited' || l.stage === 'proposal';
+                  if (col.id === 'cold_leads') return l.stage === 'cold_leads' || l.stage === 'rotations';
+                  return l.stage === col.id;
+                });
                 const isDraggedOver = draggedOverColumn === col.id;
 
                 return (
@@ -833,7 +910,7 @@ export default function LeadBoard({
                     {/* Column Header */}
                     <div className="flex items-center justify-between mb-4 border-b border-slate-700 pb-2.5 min-h-[44px]">
                       <span className={`text-[9px] sm:text-[9.5px] font-black uppercase tracking-tight px-2 py-1 rounded-md leading-normal break-words inline-block ${col.headerColor}`}>
-                        {col.title} ({colLeads.length}{col.id === 'negotiating' ? ` • ${inDiscussionPctInfo.percentage.toFixed(1)}%` : ''})
+                        {col.title} ({colLeads.length}{col.id === 'in_discussion' ? ` • ${inDiscussionPctInfo.percentage.toFixed(1)}%` : ''})
                       </span>
                     </div>
 

@@ -1,0 +1,82 @@
+[
+  {
+    "password": "Bishwo@123",
+    "createdAt": "2026-07-29T11:47:18.077Z",
+    "id": "COORD_BISHWO",
+    "role": "agent",
+    "displayName": "Bishwo Rai",
+    "username": "bishwo"
+  },
+  {
+    "createdAt": "2026-07-02T06:47:36.906Z",
+    "password": "maryada321",
+    "displayName": "Maryada",
+    "username": "maryada",
+    "role": "agent",
+    "id": "COORD_MARYADA"
+  },
+  {
+    "username": "nishant",
+    "createdAt": "2026-08-03T11:07:00.859Z",
+    "id": "COORD_NISHANT",
+    "role": "agent",
+    "displayName": "Nishant",
+    "password": "nishant@123"
+  },
+  {
+    "id": "COORD_TEST",
+    "displayName": "test",
+    "password": "test123",
+    "role": "admin",
+    "createdAt": "2026-07-10T07:13:11.831Z",
+    "username": "test"
+  },
+  {
+    "username": "admin",
+    "displayName": "Master Admin",
+    "id": "coord_admin",
+    "role": "admin",
+    "password": "admin123",
+    "createdAt": "2026-06-26T11:31:48.386Z"
+  },
+  {
+    "password": "edenla123",
+    "displayName": "Edenla",
+    "createdAt": "2026-06-26T11:31:48.386Z",
+    "username": "edenla",
+    "id": "coord_edenla",
+    "role": "agent"
+  },
+  {
+    "createdAt": "2026-06-26T11:31:48.386Z",
+    "role": "agent",
+    "password": "joyce123",
+    "displayName": "Joyce",
+    "id": "coord_joyce",
+    "username": "joyce"
+  },
+  {
+    "username": "priya",
+    "displayName": "Priya",
+    "password": "priya123",
+    "createdAt": "2026-06-26T11:31:48.386Z",
+    "id": "coord_priya",
+    "role": "agent"
+  },
+  {
+    "displayName": "Sarina",
+    "password": "sarina123",
+    "username": "sarina",
+    "createdAt": "2026-06-26T11:31:48.386Z",
+    "role": "agent",
+    "id": "coord_sarina"
+  },
+  {
+    "username": "shreya",
+    "displayName": "Shreya",
+    "id": "coord_shreya",
+    "password": "shreya123",
+    "role": "agent",
+    "createdAt": "2026-06-26T11:31:48.386Z"
+  }
+]

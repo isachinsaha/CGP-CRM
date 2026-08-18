@@ -4,7 +4,7 @@
 @variant dark (.dark &);
 
 @theme {
-  --font-sans: "Inter", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", "Plus Jakarta Sans", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
@@ -63,97 +63,97 @@
 }
 
 :root, html.dark, .dark {
-  /* Ultra-sleek Pure AMOLED Black Dark Mode */
-  --slate-950: #000000; /* Pure AMOLED Pitch Black background */
-  --slate-900: #030303; /* Near pure black surface */
-  --slate-850: #080808; /* Deep AMOLED card background */
-  --slate-800: #121212; /* Dark control/button fill */
-  --slate-750: #1e1e1e; /* Crisp dark border */
-  --slate-700: #282828; /* Divider border */
-  --slate-600: #404040; /* Muted text */
-  --slate-500: #666666; /* Secondary text */
-  --slate-400: #8e8e8e; /* Muted label */
-  --slate-300: #c4c4c4;
-  --slate-200: #e2e2e2;
-  --slate-100: #f5f5f5; /* High-contrast white text */
+  /* Ergonomic Deep Midnight Slate Dark Mode */
+  --slate-950: #090d16; /* Midnight canvas */
+  --slate-900: #0f172a; /* Smooth card surface */
+  --slate-850: #151f32; /* Elevated card background */
+  --slate-800: #1e293b; /* Subtle control fill */
+  --slate-750: #2b394e; /* Clean border stroke */
+  --slate-700: #334155; /* Divider stroke */
+  --slate-600: #64748b; /* Muted text */
+  --slate-500: #94a3b8; /* Secondary text */
+  --slate-400: #cbd5e1; /* Readable label */
+  --slate-300: #e2e8f0; /* Crisp text */
+  --slate-200: #f1f5f9; /* High-readability text */
+  --slate-100: #f8fafc; /* Eye-safe off-white primary */
   --slate-50: #ffffff;
 
-  --accent-purple: #c084fc;
-  --accent-emerald: #34d399;
+  --accent-purple: #a855f7;
+  --accent-emerald: #10b981;
 
-  --purple-950: #2e1065;
-  --purple-900: #581c87;
+  --purple-950: #1e1138;
+  --purple-900: #3b1968;
   --purple-600: #9333ea;
   --purple-500: #a855f7;
   --purple-400: #c084fc;
 
-  --indigo-950: #1e1b4b;
-  --indigo-900: #312e81;
+  --indigo-950: #151833;
+  --indigo-900: #252b56;
   --indigo-600: #4f46e5;
   --indigo-500: #6366f1;
   --indigo-400: #818cf8;
 
-  --emerald-950: #022c22;
-  --emerald-900: #064e3b;
+  --emerald-950: #062b21;
+  --emerald-900: #0c4a3b;
   --emerald-600: #059669;
   --emerald-500: #10b981;
   --emerald-400: #34d399;
 
-  --amber-950: #451a03;
-  --amber-900: #78350f;
+  --amber-950: #331d04;
+  --amber-900: #5c3008;
   --amber-500: #f59e0b;
   --amber-400: #fbbf24;
 
-  --sky-950: #082f49;
-  --sky-900: #0c4a6e;
+  --sky-950: #0a253a;
+  --sky-900: #0f3d5e;
   --sky-500: #0ea5e9;
   --sky-400: #38bdf8;
 
-  --rose-950: #30020d;
-  --rose-900: #881337;
+  --rose-950: #330b16;
+  --rose-900: #631229;
   --rose-700: #be123c;
   --rose-600: #e11d48;
   --rose-500: #f43f5e;
   --rose-400: #f43f5e;
 
-  --teal-950: #083b38;
+  --teal-950: #072a27;
 
-  --update-bar-text: #06050b;
+  --update-bar-text: #f8fafc;
 
   color-scheme: dark;
-  background-color: #000000;
-  color: #f5f5f5;
+  background-color: #090d16;
+  color: #f1f5f9;
 }
 
 html.light, .light {
-  /* High-Contrast Crisp Light Mode */
-  --slate-950: #f0f4f8; /* Soft blue-gray canvas background */
-  --slate-900: #ffffff; /* Pure white card background */
-  --slate-850: #ffffff; /* Pure white card background */
-  --slate-800: #f1f5f9; /* Light gray pill/button background */
-  --slate-750: #1e293b; /* Sleek dark border for closed lead cards */
-  --slate-700: #cbd5e1; /* Gray border */
-  --slate-600: #94a3b8; /* Muted gray text */
-  --slate-500: #64748b; /* Secondary gray text */
-  --slate-400: #475569; /* Dark gray text */
-  --slate-300: #334155; /* Dark slate text */
-  --slate-200: #1e293b; /* Deep slate text */
-  --slate-100: #0f172a; /* Pure black / deep slate primary text */
-  --slate-50: #f8fafc; /* Crisp light hover background */
+  /* Warm Slate Ergonomic Light Mode */
+  --slate-950: #f1f5f9; /* Warm clean light canvas */
+  --slate-900: #ffffff; /* Crisp white card surface */
+  --slate-850: #f8fafc; /* Elevated light panel */
+  --slate-800: #f1f5f9; /* Light button / input fill */
+  --slate-750: #e2e8f0; /* Soft card border */
+  --slate-700: #cbd5e1; /* Clear divider border */
+  --slate-600: #64748b; /* Medium-muted text */
+  --slate-500: #475569; /* Balanced secondary text */
+  --slate-400: #334155; /* Readable dark-gray text */
+  --slate-300: #1e293b; /* Rich slate text */
+  --slate-200: #0f172a; /* Deep slate headings */
+  --slate-100: #0f172a; /* Primary black/slate text */
+  --slate-50: #f8fafc; /* Clean hover background */
 
   --accent-purple: #7c3aed;
   --accent-emerald: #059669;
 
-  --purple-950: #f3e8ff;
-  --purple-900: #e9d5ff;
+  --purple-950: #f5f3ff;
+  --purple-900: #ede9fe;
   --purple-600: #7c3aed;
   --purple-500: #8b5cf6;
   --purple-400: #7c3aed;
 
-  --indigo-950: #f3e8ff;
+  --indigo-950: #eef2ff;
   --indigo-900: #e0e7ff;
-  --indigo-600: #7c3aed;
-  --indigo-500: #8b5cf6;
+  --indigo-600: #4f46e5;
+  --indigo-500: #6366f1;
   --indigo-400: #6d28d9;
 
   --emerald-950: #ecfdf5;
@@ -176,10 +176,10 @@ html.light, .light {
   --teal-950: #f0fdfa;
   --sky-950: #f0f9ff;
 
-  --update-bar-text: #ffffff;
+  --update-bar-text: #0f172a;
 
   color-scheme: light;
-  background-color: #f0f4f8;
+  background-color: #f1f5f9;
   color: #0f172a;
 }
 
@@ -190,115 +190,16 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-}
-
-/* Scoped high-contrast black text and soft blended borders for Lead Modal in Light Mode (when .dark is not present) */
-html:not(.dark) #cgp-leads-modal,
-html.light #cgp-leads-modal,
-.light #cgp-leads-modal {
-  color: #000000 !important;
-  --slate-200: #e2e8f0;
-  --slate-300: #cbd5e1;
-  --slate-400: #cbd5e1;
-  --slate-500: #cbd5e1;
-  --slate-700: #e2e8f0;
-  --slate-750: #e2e8f0;
-  --slate-800: #e2e8f0;
-}
-
-/* Force soft blended light border colors in Light Mode for Lead Modal elements */
-html:not(.dark) #cgp-leads-modal [class*="border-slate-"],
-html:not(.dark) #cgp-leads-modal [class*="border-gray-"],
-html:not(.dark) #cgp-leads-modal [class*="border-zinc-"],
-html:not(.dark) #cgp-leads-modal [class*="border-neutral-"],
-html.light #cgp-leads-modal [class*="border-slate-"],
-html.light #cgp-leads-modal [class*="border-gray-"],
-html.light #cgp-leads-modal [class*="border-zinc-"],
-html.light #cgp-leads-modal [class*="border-neutral-"],
-.light #cgp-leads-modal [class*="border-slate-"],
-.light #cgp-leads-modal [class*="border-gray-"],
-.light #cgp-leads-modal [class*="border-zinc-"],
-.light #cgp-leads-modal [class*="border-neutral-"] {
-  border-color: #e2e8f0 !important;
-}
-
-/* Soft blended border fallback for modal containers, inputs, buttons, and dividers in light mode */
-html:not(.dark) #cgp-leads-modal input:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
-html:not(.dark) #cgp-leads-modal select:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
-html:not(.dark) #cgp-leads-modal textarea:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
-html.light #cgp-leads-modal input:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
-html.light #cgp-leads-modal select:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
-html.light #cgp-leads-modal textarea:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
-.light #cgp-leads-modal input:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
-.light #cgp-leads-modal select:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]),
-.light #cgp-leads-modal textarea:not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-purple"]):not([class*="border-indigo"]):not([class*="border-amber"]):not([class*="border-rose"]):not([class*="border-red"]):not([class*="border-violet"]):not([class*="border-teal"]):not([class*="border-blue"]) {
-  border-color: #e2e8f0 !important;
-}
-
-html:not(.dark) #cgp-leads-modal label,
-html.light #cgp-leads-modal label,
-.light #cgp-leads-modal label {
-  color: #000000 !important;
-  font-weight: 800 !important;
-}
-
-html:not(.dark) #cgp-leads-modal h3,
-html:not(.dark) #cgp-leads-modal h4,
-html:not(.dark) #cgp-leads-modal h5,
-html.light #cgp-leads-modal h3,
-html.light #cgp-leads-modal h4,
-html.light #cgp-leads-modal h5 {
-  color: #000000 !important;
-  font-weight: 900 !important;
-}
-
-html:not(.dark) #cgp-leads-modal span:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]),
-html:not(.dark) #cgp-leads-modal p:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]),
-html:not(.dark) #cgp-leads-modal strong:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]),
-html.light #cgp-leads-modal span:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]),
-html.light #cgp-leads-modal p:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]),
-html.light #cgp-leads-modal strong:not(.text-white):not([class*="text-emerald"]):not([class*="text-green"]):not([class*="text-purple"]):not([class*="text-indigo"]):not([class*="text-amber"]):not([class*="text-rose"]):not([class*="text-red"]) {
-  color: #000000;
-}
-
-html:not(.dark) #cgp-leads-modal input,
-html:not(.dark) #cgp-leads-modal select,
-html:not(.dark) #cgp-leads-modal textarea,
-html.light #cgp-leads-modal input,
-html.light #cgp-leads-modal select,
-html.light #cgp-leads-modal textarea,
-.light #cgp-leads-modal input,
-.light #cgp-leads-modal select,
-.light #cgp-leads-modal textarea {
-  color: #000000 !important;
-  font-weight: 700 !important;
-}
-
-html:not(.dark) #cgp-leads-modal ::placeholder,
-html.light #cgp-leads-modal ::placeholder,
-.light #cgp-leads-modal ::placeholder {
-  color: #334155 !important;
-  opacity: 1 !important;
-}
-
-html:not(.dark) #cgp-leads-modal .text-white,
-html:not(.dark) #cgp-leads-modal button.text-white,
-html:not(.dark) #cgp-leads-modal span.text-white,
-html.light #cgp-leads-modal .text-white,
-html.light #cgp-leads-modal button.text-white,
-html.light #cgp-leads-modal span.text-white {
-  color: #ffffff !important;
 }
 
 html.light body, .light body {
-  background-color: #f0f4f8;
+  background-color: #f1f5f9;
   color: #0f172a;
 }
 
 html.dark body, .dark body {
-  background-color: #000000;
-  color: #f5f5f5;
+  background-color: #090d16;
+  color: #f1f5f9;
 }
 
 /* Custom scrollbars */
@@ -307,7 +208,7 @@ html.dark body, .dark body {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--color-slate-950);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--color-slate-750);
@@ -332,7 +233,7 @@ html.dark body, .dark body {
   animation-play-state: paused;
 }
 
-/* CRM Card Gloss and Transition Utilities */
+/* CRM Card and Input Utilities */
 .crm-card {
   @apply transition-all duration-300 ease-out border border-slate-750 bg-slate-900 hover:border-indigo-500/40 hover:shadow-xl rounded-2xl;
 }
@@ -343,10 +244,6 @@ html.dark body, .dark body {
 
 .crm-btn {
   @apply px-4 py-2 text-xs font-bold rounded-xl transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer active:scale-95;
-}
-
-.glass-header {
-  @apply bg-slate-900/90 backdrop-blur-md border-b border-slate-750 sticky top-0 z-40;
 }
 
 .shadow-premium {

@@ -54,13 +54,16 @@ export function SearchableSelect({
     }
   }, [isOpen]);
 
-  const selectedOption = options.find((opt) => opt.value === value);
+  const selectedOption = (options || []).find((opt) => opt && opt.value === value);
 
   // Filter options based on search term
-  const filteredOptions = options.filter((opt) =>
-    opt.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    opt.value.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const term = (searchTerm || '').toLowerCase();
+  const filteredOptions = (options || []).filter((opt) => {
+    if (!opt) return false;
+    const l = String(opt.label || '').toLowerCase();
+    const v = String(opt.value || '').toLowerCase();
+    return l.includes(term) || v.includes(term);
+  });
 
   const isFullWidth = className.includes('w-full');
 

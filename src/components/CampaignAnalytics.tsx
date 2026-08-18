@@ -93,16 +93,22 @@ export default function CampaignAnalytics({
     // 1. Compute Pipeline Funnel Stages
     const pipelineStages: Record<string, number> = {
       new: 0,
-      negotiating: 0,
-      rotations: 0,
-      proposal: 0,
+      in_discussion: 0,
+      strong_opportunity: 0,
+      office_visited: 0,
       won: 0,
+      cold_leads: 0,
       lost: 0
     };
 
     filteredLeadsForCharts.forEach(l => {
-      if (pipelineStages[l.stage] !== undefined) {
-        pipelineStages[l.stage]++;
+      let stageKey = l.stage;
+      if (stageKey === 'negotiating') stageKey = 'in_discussion';
+      else if (stageKey === 'proposal') stageKey = 'office_visited';
+      else if (stageKey === 'rotations') stageKey = 'cold_leads';
+
+      if (pipelineStages[stageKey] !== undefined) {
+        pipelineStages[stageKey]++;
       }
     });
 
@@ -143,14 +149,17 @@ export default function CampaignAnalytics({
   // Helper to calculate the target achievement ratio for a single lead
   const calculateLeadTargetRatio = (lead: Lead): number => {
     if (lead.stage === 'new') return 0;
-    if (lead.stage === 'negotiating' || lead.stage === 'rotations') {
-      // Stage: In Discussion / In Rotations. If 3rd remarks is given by telecaller, achievement is 40%, otherwise 15%
+    if (lead.stage === 'in_discussion' || lead.stage === 'negotiating' || lead.stage === 'cold_leads' || lead.stage === 'rotations') {
+      // Stage: In Discussion / Cold Leads. If 3rd remarks is given by telecaller, achievement is 40%, otherwise 15%
       if (lead.remarks3 && lead.remarks3.trim().length > 0) {
         return 40;
       }
       return 15;
     }
-    if (lead.stage === 'proposal') {
+    if (lead.stage === 'strong_opportunity') {
+      return 50;
+    }
+    if (lead.stage === 'office_visited' || lead.stage === 'proposal') {
       // Stage: Office Visited/Interview Attended, achievement is 65%
       return 65;
     }
@@ -228,7 +237,7 @@ export default function CampaignAnalytics({
         : intervalLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase() || l.assignedTo === name);
       const total = agentLeads.length;
       const won = agentLeads.filter(l => l.stage === 'won').length;
-      const progress = agentLeads.filter(l => ['negotiating', 'proposal'].includes(l.stage)).length;
+      const progress = agentLeads.filter(l => ['in_discussion', 'negotiating', 'strong_opportunity', 'office_visited', 'proposal'].includes(l.stage)).length;
       const lost = agentLeads.filter(l => l.stage === 'lost').length;
       
       const conversionRate = total > 0 ? Math.round((won / total) * 100) : 0;
@@ -558,7 +567,7 @@ export default function CampaignAnalytics({
         : customLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase() || l.assignedTo === name);
       const total = agentLeads.length;
       const won = agentLeads.filter(l => l.stage === 'won').length;
-      const progress = agentLeads.filter(l => ['negotiating', 'proposal'].includes(l.stage)).length;
+      const progress = agentLeads.filter(l => ['in_discussion', 'negotiating', 'strong_opportunity', 'office_visited', 'proposal'].includes(l.stage)).length;
       const lost = agentLeads.filter(l => l.stage === 'lost').length;
       const assignedInPeriod = agentLeads.filter(l => isWithinRange(l.assignDate));
       const targetAchievementRatio = calculateAverageTargetRatio(agentLeads);
@@ -1777,12 +1786,13 @@ export default function CampaignAnalytics({
             {pipelineChartType === 'funnel' ? (
               <div className="space-y-2.5">
                 {[
-                  { label: 'New Lead Inbound', key: 'new', color: 'bg-slate-600 hover:bg-slate-500' },
-                  { label: 'In Discussion', key: 'negotiating', color: 'bg-amber-600 hover:bg-amber-500' },
-                  { label: 'In Rotations', key: 'rotations', color: 'bg-indigo-600 hover:bg-indigo-500' },
-                  { label: 'Office Visited/Interview attendant', key: 'proposal', color: 'bg-purple-650 hover:bg-purple-605' },
-                  { label: 'Closed Converted', key: 'won', color: 'bg-accent-emerald hover:bg-emerald-500' },
-                  { label: 'Unqualified / Lost', key: 'lost', color: 'bg-slate-700 hover:bg-slate-650' }
+                  { label: '1. New Inbound', key: 'new', color: 'bg-slate-600 hover:bg-slate-500' },
+                  { label: '2. In Discussion', key: 'in_discussion', color: 'bg-amber-600 hover:bg-amber-500' },
+                  { label: '3. Strong Opportunity', key: 'strong_opportunity', color: 'bg-sky-600 hover:bg-sky-500' },
+                  { label: '4. Office Visited / Interview', key: 'office_visited', color: 'bg-purple-650 hover:bg-purple-605' },
+                  { label: '5. Won', key: 'won', color: 'bg-accent-emerald hover:bg-emerald-500' },
+                  { label: '6. Cold Leads', key: 'cold_leads', color: 'bg-blue-600 hover:bg-blue-500' },
+                  { label: '7. Lost', key: 'lost', color: 'bg-slate-700 hover:bg-slate-650' }
                 ].map((funnel, idx) => {
                   const count = pipelineStagesFiltered[funnel.key as any] || 0;
                   const maxVal = Math.max(...(Object.values(pipelineStagesFiltered) as number[]), 1);
@@ -1816,12 +1826,13 @@ export default function CampaignAnalytics({
               <div className="h-[280px] w-full mt-2 flex items-center justify-center">
                 {(() => {
                   const pieData = [
-                    { name: 'New Inbound', value: pipelineStagesFiltered.new || 0, color: '#475569' },
-                    { name: 'In Discussion', value: pipelineStagesFiltered.negotiating || 0, color: '#d97706' },
-                    { name: 'In Rotations', value: pipelineStagesFiltered.rotations || 0, color: '#2563eb' },
-                    { name: 'Office Visited/Interview', value: pipelineStagesFiltered.proposal || 0, color: '#7c3aed' },
-                    { name: 'Closed Converted', value: pipelineStagesFiltered.won || 0, color: '#10b981' },
-                    { name: 'Unqualified / Lost', value: pipelineStagesFiltered.lost || 0, color: '#334155' }
+                    { name: '1. New Inbound', value: pipelineStagesFiltered.new || 0, color: '#475569' },
+                    { name: '2. In Discussion', value: pipelineStagesFiltered.in_discussion || 0, color: '#d97706' },
+                    { name: '3. Strong Opportunity', value: pipelineStagesFiltered.strong_opportunity || 0, color: '#0284c7' },
+                    { name: '4. Office Visited / Interview', value: pipelineStagesFiltered.office_visited || 0, color: '#7c3aed' },
+                    { name: '5. Won', value: pipelineStagesFiltered.won || 0, color: '#10b981' },
+                    { name: '6. Cold Leads', value: pipelineStagesFiltered.cold_leads || 0, color: '#2563eb' },
+                    { name: '7. Lost', value: pipelineStagesFiltered.lost || 0, color: '#334155' }
                   ].filter(item => item.value > 0);
 
                   if (pieData.length === 0) {

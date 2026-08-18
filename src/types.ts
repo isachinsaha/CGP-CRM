@@ -1,4 +1,15 @@
-export type LeadStage = 'new' | 'negotiating' | 'proposal' | 'rotations' | 'won' | 'lost';
+export type LeadStage = 
+  | 'new' 
+  | 'in_discussion' 
+  | 'strong_opportunity' 
+  | 'office_visited' 
+  | 'won' 
+  | 'cold_leads' 
+  | 'lost'
+  // Legacy aliases for backwards compatibility with existing documents
+  | 'negotiating'
+  | 'proposal'
+  | 'rotations';
 
 export type FitScore = 'high' | 'medium' | 'low' | 'unqualified';
 
@@ -7,6 +18,18 @@ export interface Message {
   sender: 'user' | 'lead' | 'system';
   text: string;
   timestamp: string;
+  senderName?: string;
+  status?: 'sent' | 'delivered' | 'read' | 'failed';
+  templateName?: string;
+  channel?: 'whatsapp' | 'sms' | 'system';
+}
+
+export interface WhatsAppTemplate {
+  id: string;
+  title: string;
+  category: 'onboarding' | 'interview' | 'documentation' | 'status' | 'offer';
+  description: string;
+  text: string;
 }
 
 export interface Lead {
@@ -61,7 +84,7 @@ export interface Lead {
   }[];
   timeline?: {
     id: string;
-    type: 'status' | 'remark' | 'assignment' | 'task' | 'creation' | 'system';
+    type: 'status' | 'remark' | 'assignment' | 'task' | 'creation' | 'system' | 'message';
     text: string;
     actor: string;
     timestamp: string;

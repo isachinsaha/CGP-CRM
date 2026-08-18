@@ -61,7 +61,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
   const [walletSuccess, setWalletSuccess] = useState<string | null>(null);
   const [walletSubmitting, setWalletSubmitting] = useState(false);
 
-  const fetchWalletData = async () => {
+  const fetchWalletData = React.useCallback(async () => {
     setWalletLoading(true);
     setWalletError(null);
     try {
@@ -72,10 +72,12 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
         setWallets(data);
         
         if (data.length > 0) {
-          const defaultUser = activeWalletUsername || data[0].username;
-          setActiveWalletUsername(defaultUser);
-          const found = data.find((w: Wallet) => w.username === defaultUser);
-          setSelectedWallet(found || data[0]);
+          setActiveWalletUsername(prev => {
+            const current = prev || data[0].username;
+            const found = data.find((w: Wallet) => w.username === current);
+            setSelectedWallet(found || data[0]);
+            return current;
+          });
         }
       } else if (currentUser?.username) {
         const res = await fetch(`/api/wallets/${currentUser.username}`);
@@ -89,13 +91,22 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     } finally {
       setWalletLoading(false);
     }
-  };
+  }, [currentUser?.role, currentUser?.username]);
 
   useEffect(() => {
     if (subTab === 'wallet') {
       fetchWalletData();
     }
-  }, [subTab, activeWalletUsername, currentUser]);
+  }, [subTab, fetchWalletData]);
+
+  // When activeWalletUsername changes and wallets are already loaded, update selectedWallet
+  const handleSelectWalletUser = (username: string) => {
+    setActiveWalletUsername(username);
+    const found = wallets.find(w => w.username === username);
+    if (found) {
+      setSelectedWallet(found);
+    }
+  };
 
   const handleWalletAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -248,7 +259,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     if (currentUser?.role === 'admin') {
       fetchUpdates();
     }
-  }, [currentUser]);
+  }, [currentUser?.role]);
 
 
   // Handle open form for creating new job

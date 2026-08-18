@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { 
-  X, Plus, Edit2, Trash2, Check, Tags, Briefcase, Globe, UserCheck, Folder 
+  X, Plus, Edit2, Trash2, Check, Tags, Briefcase, Globe, UserCheck, Folder, Lock 
 } from 'lucide-react';
 
 interface MetadataManagerProps {

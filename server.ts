@@ -1,16 +1,47 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
+import * as XLSX from 'xlsx';
+import cron from 'node-cron';
 
 // Load environment variables
 dotenv.config();
 
 // Load local database helper
-import { getLeads, addLead, saveLeads, getStats, getLeadById, getCoordinators, saveCoordinators, initializeCoordinatorsDatabase, getJobs, saveJobs, getUpdates, saveUpdates, getMetadata, saveMetadata, getWallets, saveWallets, getWalletByUsername, addWalletTransaction, getIncentiveRules, saveIncentiveRules } from './src/server/db.ts';
-import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule } from './src/types.ts';
+import { 
+  getLeads, 
+  addLead, 
+  saveLeads, 
+  getStats, 
+  getLeadById, 
+  getCoordinators, 
+  saveCoordinators, 
+  initializeCoordinatorsDatabase, 
+  getJobs, 
+  saveJobs, 
+  getUpdates, 
+  saveUpdates, 
+  getMetadata, 
+  saveMetadata, 
+  getWallets, 
+  saveWallets, 
+  getWalletByUsername, 
+  addWalletTransaction, 
+  getIncentiveRules, 
+  saveIncentiveRules,
+  createFullDatabaseBackup,
+  generateFullXLSXBuffer,
+  executeScheduledFullBackup,
+  restoreDatabaseFromBackup,
+  listAvailableBackups,
+  FullDatabaseBackup
+} from './src/server/db.ts';
+import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate } from './src/types.ts';
 import { isDefaultExperience, getEffectiveExperience } from './src/utils.ts';
+import { DEFAULT_WHATSAPP_TEMPLATES, sendWhatsAppMessage, replaceTemplatePlaceholders, formatPhoneForWhatsApp } from './src/server/whatsapp.ts';
 
 const app = express();
 const PORT = 3000;
@@ -105,6 +136,96 @@ app.get('/api/health', (req, res) => {
     aiMode: hasKey ? 'live' : 'simulation',
     hasApiKey: hasKey
   });
+});
+
+// GET /api/backup/full-xlsx - Complete Master Database XLSX Backup Download (Zero limitations, 100% of all data)
+app.get('/api/backup/full-xlsx', async (req, res) => {
+  try {
+    const wbBuffer = await generateFullXLSXBuffer();
+    const todayStr = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="CGP_CRM_COMPLETE_MASTER_BACKUP_${todayStr}.xlsx"`);
+    res.send(wbBuffer);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /api/backup/full-db - Download complete JSON Database Backup file (suitable for full 1-click restore)
+app.get('/api/backup/full-db', async (req, res) => {
+  try {
+    const backup = await createFullDatabaseBackup('Manual Download via API');
+    const todayStr = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="CGP_CRM_DATABASE_BACKUP_${todayStr}.json"`);
+    res.send(JSON.stringify(backup, null, 2));
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /api/backup/list - Get list of all automatic and manual backups on disk
+app.get('/api/backup/list', (req, res) => {
+  try {
+    const backups = listAvailableBackups();
+    res.json({ backups });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /api/backup/trigger - Immediately trigger a full automated backup of both DB and XLSX right now
+app.post('/api/backup/trigger', async (req, res) => {
+  try {
+    const isMonday = req.body?.isMonday === true;
+    const result = await executeScheduledFullBackup(isMonday);
+    res.json({
+      success: true,
+      message: 'Automatic full backup executed immediately for both Database JSON and Master XLSX.',
+      result
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /api/backup/restore - Restore DB from uploaded JSON backup payload
+app.post('/api/backup/restore', async (req, res) => {
+  try {
+    const backupData: FullDatabaseBackup = req.body;
+    if (!backupData || !backupData.data || !Array.isArray(backupData.data.leads)) {
+      return res.status(400).json({ error: 'Invalid backup file structure: missing data.leads array.' });
+    }
+    const restoreResult = await restoreDatabaseFromBackup(backupData);
+    res.json(restoreResult);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /api/backup/download-file - Download a specific backup file by filename from the backup repository
+app.get('/api/backup/download-file', (req, res) => {
+  try {
+    const fileName = req.query.file as string;
+    if (!fileName || fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
+      return res.status(400).json({ error: 'Invalid or unsafe file name parameter.' });
+    }
+    const backupDir = path.join(process.cwd(), 'data', 'backups', 'scheduled');
+    const filePath = path.join(backupDir, fileName);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Backup file not found.' });
+    }
+
+    if (fileName.endsWith('.xlsx')) {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    } else {
+      res.setHeader('Content-Type', 'application/json');
+    }
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.sendFile(filePath);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
 
 // GET all leads with server-side pagination, searching, and filtering
@@ -434,14 +555,7 @@ app.post('/api/leads', async (req, res) => {
       tags: tags || [],
       source: source || 'Organic',
       project: project || 'General',
-      messages: [
-        {
-          id: `m_init_${Date.now()}`,
-          sender: 'system' as const,
-          text: `Lead enrolled manually in CGP system database. Assigned coordinator is ${assignedTo || 'Pending'}.`,
-          timestamp: new Date().toISOString()
-        }
-      ],
+      messages: [],
       tasks: [],
       timeline: [
         {
@@ -1255,11 +1369,61 @@ app.put('/api/leads/:id', async (req, res) => {
   }
 });
 
-// POST send manual WhatsApp message (simulation)
+// ---------------- DIRECT META WHATSAPP CLOUD API ENDPOINTS ----------------
+
+// GET WhatsApp service configuration & active status
+app.get('/api/whatsapp/config', (req, res) => {
+  const hasMetaKey = (!!process.env.WHATSAPP_API_KEY && process.env.WHATSAPP_API_KEY !== 'MY_WHATSAPP_API_KEY' && process.env.WHATSAPP_API_KEY.trim().length > 0) ||
+                     (!!process.env.META_WA_ACCESS_TOKEN && process.env.META_WA_ACCESS_TOKEN.trim().length > 0);
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_PHONE_NUMBER_ID || '';
+  
+  const isDirectMetaLive = hasMetaKey && phoneNumberId.trim().length > 0;
+
+  res.json({
+    status: 'ok',
+    mode: isDirectMetaLive ? 'live_meta_cloud' : 'sandbox_simulation',
+    hasApiKey: isDirectMetaLive,
+    provider: isDirectMetaLive 
+      ? 'Direct Meta WhatsApp Cloud API' 
+      : 'Direct Meta WhatsApp Cloud API (Sandbox Simulator)',
+    phoneNumberId: phoneNumberId ? `${phoneNumberId.substring(0, 4)}••••${phoneNumberId.substring(phoneNumberId.length - 4)}` : null,
+    costModel: 'Direct Meta Cloud API (Zero monthly platform fees • 1,000 free service conversations/mo)'
+  });
+});
+
+// Meta Webhook Verification (GET endpoint required for Meta Developer Portal Webhook validation)
+app.get('/api/whatsapp/webhook', (req, res) => {
+  const mode = req.query['hub.mode'] || req.query['hub_mode'] || req.query['mode'];
+  const token = req.query['hub.verify_token'] || req.query['hub_verify_token'] || req.query['verify_token'];
+  const challenge = req.query['hub.challenge'] || req.query['hub_challenge'] || req.query['challenge'];
+
+  const expectedToken = (process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || 'cgp_placement_crm_webhook').trim();
+
+  console.log(`[Meta Webhook GET] mode=${mode}, token=${token}, challenge=${challenge}`);
+
+  // If token matches or mode is subscribe
+  if (token === expectedToken || (!token && mode === 'subscribe')) {
+    console.log('Meta WhatsApp Webhook successfully verified by Facebook servers. Challenge:', challenge);
+    res.setHeader('Content-Type', 'text/plain');
+    res.status(200).send(String(challenge || 'SUCCESS'));
+  } else {
+    console.warn(`[Meta Webhook GET] Token mismatch: received "${token}", expected "${expectedToken}"`);
+    res.status(403).send('Forbidden: Token mismatch');
+  }
+});
+
+// GET preconfigured WhatsApp recruitment templates
+app.get('/api/whatsapp/templates', (req, res) => {
+  res.json({
+    templates: DEFAULT_WHATSAPP_TEMPLATES
+  });
+});
+
+// POST send WhatsApp message to a lead (Outbound via Meta Cloud API)
 app.post('/api/leads/:id/messages', async (req, res) => {
   try {
-    const { text, sender } = req.body;
-    if (!text) {
+    const { text, sender, senderName, templateName, channel } = req.body;
+    if (!text || !text.trim()) {
       res.status(400).json({ error: 'Message text is required' });
       return;
     }
@@ -1272,23 +1436,204 @@ app.post('/api/leads/:id/messages', async (req, res) => {
     }
 
     const lead = leads[idx];
+    const userRole = req.headers['x-user-role'] || 'user';
+    const agentId = (req.headers['x-agent-id'] as string) || senderName || 'Coordinator';
+
+    // Dispatch directly via Meta Cloud API or Sandbox Engine
+    const isOutbound = sender !== 'lead';
+    let deliveryResult: { success: boolean; channel: string; status: 'sent' | 'delivered' | 'read'; messageId?: string; details?: any } = {
+      success: true,
+      channel: 'simulation',
+      status: 'delivered'
+    };
+    if (isOutbound && lead.phone) {
+      deliveryResult = await sendWhatsAppMessage(
+        lead.phone,
+        text.trim(),
+        lead.name,
+        templateName
+      );
+    }
+
     const newMessage: Message = {
-      id: `m_${Date.now()}`,
+      id: `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       sender: sender || 'user',
-      text,
-      timestamp: new Date().toISOString()
+      senderName: senderName || (sender === 'lead' ? lead.name : (agentId === 'admin' ? 'Administrator' : agentId)),
+      text: text.trim(),
+      timestamp: new Date().toISOString(),
+      status: deliveryResult.status || 'delivered',
+      templateName: templateName || undefined,
+      channel: channel || 'whatsapp'
     };
 
+    if (!Array.isArray(lead.messages)) {
+      lead.messages = [];
+    }
     lead.messages.push(newMessage);
+
+    // Auto-record message activity into lead timeline
+    if (!Array.isArray(lead.timeline)) {
+      lead.timeline = [];
+    }
+
+    const timelineSnippet = text.length > 80 ? text.substring(0, 77) + '...' : text;
+    lead.timeline.push({
+      id: `tl_${Date.now()}_msg`,
+      type: 'message',
+      text: isOutbound
+        ? `Sent WhatsApp message${templateName ? ` [Template: ${templateName}]` : ''}: "${timelineSnippet}"`
+        : `Received WhatsApp reply: "${timelineSnippet}"`,
+      actor: newMessage.senderName || 'System',
+      timestamp: new Date().toISOString()
+    });
+
     lead.updatedAt = new Date().toISOString();
     leads[idx] = lead;
     await saveLeads(leads);
 
-    res.json({ lead, message: newMessage });
+    res.json({ 
+      success: true, 
+      lead, 
+      message: newMessage,
+      deliveryResult
+    });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
+// POST simulate candidate incoming WhatsApp reply (Inbound)
+app.post('/api/leads/:id/simulate-reply', async (req, res) => {
+  try {
+    const { text, customName } = req.body;
+    const leads = await getLeads();
+    const idx = leads.findIndex(l => l.id === req.params.id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Lead not found' });
+      return;
+    }
+
+    const lead = leads[idx];
+    const candidateName = customName || lead.name || 'Candidate';
+    const replyText = text && text.trim() 
+      ? text.trim() 
+      : `Hello! I have received your message. I am sending my passport and CV for the ${lead.position || 'job'} opening in ${lead.country || 'abroad'}. Please let me know the interview timing.`;
+
+    const incomingMessage: Message = {
+      id: `m_in_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      sender: 'lead',
+      senderName: candidateName,
+      text: replyText,
+      timestamp: new Date().toISOString(),
+      status: 'read',
+      channel: 'whatsapp'
+    };
+
+    if (!Array.isArray(lead.messages)) {
+      lead.messages = [];
+    }
+    lead.messages.push(incomingMessage);
+
+    if (!Array.isArray(lead.timeline)) {
+      lead.timeline = [];
+    }
+    lead.timeline.push({
+      id: `tl_${Date.now()}_inbound`,
+      type: 'message',
+      text: `Received candidate WhatsApp reply: "${replyText.length > 80 ? replyText.substring(0, 77) + '...' : replyText}"`,
+      actor: candidateName,
+      timestamp: new Date().toISOString()
+    });
+
+    lead.updatedAt = new Date().toISOString();
+    leads[idx] = lead;
+    await saveLeads(leads);
+
+    res.json({
+      success: true,
+      lead,
+      message: incomingMessage
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST webhook listener for incoming Meta WhatsApp Cloud API / Webhook events
+app.post('/api/whatsapp/webhook', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    let fromNumber = payload.destination || payload.from || payload.phone;
+    let messageBody = payload.text || payload.message || payload.body;
+
+    // Support standard Meta WhatsApp Cloud API Webhook JSON structure
+    // entry[0].changes[0].value.messages[0]
+    if (payload.entry && Array.isArray(payload.entry)) {
+      for (const entry of payload.entry) {
+        if (entry.changes && Array.isArray(entry.changes)) {
+          for (const change of entry.changes) {
+            const val = change.value;
+            if (val && val.messages && Array.isArray(val.messages)) {
+              for (const m of val.messages) {
+                fromNumber = m.from;
+                if (m.type === 'text' && m.text) {
+                  messageBody = m.text.body;
+                } else if (m.type === 'button') {
+                  messageBody = m.button?.text || m.button?.payload;
+                } else if (m.type === 'interactive') {
+                  messageBody = m.interactive?.button_reply?.title || m.interactive?.list_reply?.title || 'Interactive response';
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (fromNumber && messageBody) {
+      const cleanPhone = String(fromNumber).replace(/\D/g, '');
+      const leads = await getLeads();
+      const matchIdx = leads.findIndex(l => {
+        const leadDigits = String(l.phone || '').replace(/\D/g, '');
+        return leadDigits.includes(cleanPhone) || cleanPhone.includes(leadDigits);
+      });
+
+      if (matchIdx !== -1) {
+        const lead = leads[matchIdx];
+        const incomingMsg: Message = {
+          id: `m_hook_${Date.now()}`,
+          sender: 'lead',
+          senderName: lead.name,
+          text: String(messageBody),
+          timestamp: new Date().toISOString(),
+          status: 'read',
+          channel: 'whatsapp'
+        };
+
+        if (!Array.isArray(lead.messages)) lead.messages = [];
+        lead.messages.push(incomingMsg);
+
+        if (!Array.isArray(lead.timeline)) lead.timeline = [];
+        lead.timeline.push({
+          id: `tl_${Date.now()}_hook`,
+          type: 'message',
+          text: `Inbound Meta WhatsApp received: "${String(messageBody).substring(0, 75)}"`,
+          actor: lead.name,
+          timestamp: new Date().toISOString()
+        });
+
+        lead.updatedAt = new Date().toISOString();
+        leads[matchIdx] = lead;
+        await saveLeads(leads);
+      }
+    }
+
+    res.status(200).json({ success: true, received: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 
 // DELETE a lead
 app.delete('/api/leads/:id', async (req, res) => {
@@ -2482,6 +2827,31 @@ ${JSON.stringify(geminiCandidates.map(c => ({
 });
 
 async function startServer() {
+  // Set up Automatic Full Backup Cron Job every Monday at 00:00 (Midnight)
+  // Runs automatically without any manual permission or intervention
+  cron.schedule('0 0 * * 1', async () => {
+    console.log('[AutoBackup Cron] ⏰ Monday Scheduled Full Backup Triggered automatically...');
+    try {
+      const backupResult = await executeScheduledFullBackup(true);
+      console.log(`[AutoBackup Cron] ✅ Monday Auto Backup succeeded: DB (${backupResult.summary.totalLeads} leads) & XLSX saved.`);
+    } catch (cronErr) {
+      console.error('[AutoBackup Cron] ❌ Monday Auto Backup failed:', cronErr);
+    }
+  });
+
+  // Also check on server startup: if no backups exist at all, take an initial snapshot right away
+  setTimeout(async () => {
+    try {
+      const existing = listAvailableBackups();
+      if (existing.length === 0) {
+        console.log('[AutoBackup] Initializing baseline full backup snapshot on server start...');
+        await executeScheduledFullBackup(false);
+      }
+    } catch (initErr) {
+      console.warn('[AutoBackup] Initial baseline backup notice:', initErr);
+    }
+  }, 5000);
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -2500,6 +2870,7 @@ async function startServer() {
     console.log(`-----------------------------------------`);
     console.log(`🚀 CRM server booting successfully!`);
     console.log(`🌐 Port Bind: http://localhost:${PORT}`);
+    console.log(`⏰ Monday Automatic Full Backup Cron: ACTIVE`);
     console.log(`-----------------------------------------`);
   });
 }
