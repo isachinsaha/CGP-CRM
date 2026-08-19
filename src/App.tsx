@@ -309,7 +309,7 @@ export default function App() {
   }, [fetchAppMetadata]);
 
   // Synchronize data from Express REST API
-  const pullCrmData = async (silent = false) => {
+  const pullCrmData = async (silent = false, forceRefresh = false) => {
     if (!silent) setIsRefreshing(true);
     try {
       // 1. Fetch active job leads list with server-side queries & pagination parameters
@@ -333,6 +333,10 @@ export default function App() {
         gender: filters.gender || 'All',
         remarksFilter: filters.remarksFilter || 'All'
       });
+
+      if (forceRefresh) {
+        params.append('forceRefresh', 'true');
+      }
 
       const [leadsRes, statsRes] = await Promise.all([
         fetch(`/api/leads?${params.toString()}`),
@@ -380,6 +384,16 @@ export default function App() {
 
   useEffect(() => {
     pullCrmData();
+  }, [currentPage, filterKey, activeTab]);
+
+  // Set up background polling to fetch new WhatsApp replies or lead modifications every 5 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      // Pass silent = true, forceRefresh = true to bypass memory cache on the server
+      pullCrmData(true, true);
+    }, 5000);
+
+    return () => clearInterval(timer);
   }, [currentPage, filterKey, activeTab]);
 
   // Update lead stage pipeline state

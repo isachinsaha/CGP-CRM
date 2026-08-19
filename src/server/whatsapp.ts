@@ -175,6 +175,7 @@ export async function sendWhatsAppMessage(
 
       const data = await response.json().catch(() => ({}));
       if (response.ok && data.messages && data.messages[0]) {
+        console.log(`[Meta WhatsApp Cloud API] Message dispatched successfully to ${formattedPhone}. Meta Msg ID: ${data.messages[0].id}`);
         return {
           success: true,
           messageId: data.messages[0].id || messageId,
@@ -183,9 +184,16 @@ export async function sendWhatsAppMessage(
           details: data
         };
       } else {
-        console.warn('Meta WhatsApp Cloud API error response:', data);
+        console.warn('Meta WhatsApp Cloud API error response:', JSON.stringify(data));
+        return {
+          success: false,
+          messageId,
+          channel: 'meta_cloud_api',
+          status: 'delivered',
+          details: data
+        };
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error sending message via Meta WhatsApp Cloud API:', err);
     }
   }

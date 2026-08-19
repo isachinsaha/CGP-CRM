@@ -65,6 +65,16 @@ export default function MessagingCenter({
   const [showSimulatorModal, setShowSimulatorModal] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
 
+  // Start New Chat States
+  const [showStartChatModal, setShowStartChatModal] = useState(false);
+  const [isStartingChat, setIsStartingChat] = useState(false);
+  const [startChatPhone, setStartChatPhone] = useState('');
+  const [startChatName, setStartChatName] = useState('');
+  const [startChatInitialMessage, setStartChatInitialMessage] = useState('Hello! Welcome to Career Growth Placement. We received your request. Let\'s connect here on WhatsApp.');
+  const [startChatPosition, setStartChatPosition] = useState('General openings');
+  const [startChatCountry, setStartChatCountry] = useState('Kuwait');
+  const [startChatError, setStartChatError] = useState<string | null>(null);
+
   // Quick inline add toggles for country, position, and project
   const [isAddingCountry, setIsAddingCountry] = useState(false);
   const [newCountryInput, setNewCountryInput] = useState('');
@@ -380,6 +390,70 @@ export default function MessagingCenter({
     }
   };
 
+  // Start a brand new WhatsApp Conversation
+  const handleStartWhatsAppChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStartChatError(null);
+
+    const trimmedPhone = startChatPhone.replace(/\s+/g, '');
+    if (!trimmedPhone) {
+      setStartChatError('Please enter a valid WhatsApp phone number.');
+      return;
+    }
+
+    setIsStartingChat(true);
+
+    try {
+      const res = await fetch('/api/whatsapp/start-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId
+        },
+        body: JSON.stringify({
+          phone: trimmedPhone,
+          name: startChatName.trim() || undefined,
+          initialMessage: startChatInitialMessage.trim() || undefined,
+          position: startChatPosition,
+          country: startChatCountry,
+          assignedTo: currentAgentId
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        
+        // Close modal and reset fields
+        setShowStartChatModal(false);
+        setStartChatPhone('');
+        setStartChatName('');
+        setStartChatInitialMessage('Hello! Welcome to Career Growth Placement. We received your request. Let\'s connect here on WhatsApp.');
+        
+        // Refresh all local data so the new lead is pulled in
+        if (onRefreshData) {
+          onRefreshData();
+        }
+
+        // Set to coordinator's active tab so they see it instantly
+        setFilterType(userRole === 'admin' ? 'requesting' : 'my');
+        
+        // Auto select the newly created or loaded active lead
+        if (data.lead && data.lead.id) {
+          setSelectedLeadId(data.lead.id);
+        }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setStartChatError(errData.error || errData.message || 'Failed to start WhatsApp conversation. Please check your token or phone number structure.');
+      }
+    } catch (err: any) {
+      console.error('Error starting WhatsApp chat:', err);
+      setStartChatError(err?.message || 'Server network error occurred.');
+    } finally {
+      setIsStartingChat(false);
+    }
+  };
+
   // Helper to format relative or short time
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
@@ -433,6 +507,16 @@ export default function MessagingCenter({
           </div>
           
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Start New Chat button */}
+            <button
+              onClick={() => setShowStartChatModal(true)}
+              className="px-2.5 py-1.5 rounded-lg text-white bg-emerald-600 hover:bg-emerald-500 font-bold text-xs flex items-center gap-1 shadow-2xs border border-emerald-700 transition-all cursor-pointer uppercase tracking-wider"
+              title="Start New Chat"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Start Chat</span>
+            </button>
+
             {/* Simulator button for testing inbound flow (Admin only) */}
             {userRole === 'admin' && (
               <button
@@ -1496,6 +1580,148 @@ export default function MessagingCenter({
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Start New Chat Modal */}
+      {showStartChatModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 text-left">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                  Start New WhatsApp Chat
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowStartChatModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleStartWhatsAppChat} className="space-y-4">
+              {startChatError && (
+                <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/80 rounded-xl flex items-start gap-2 text-xs text-red-800 dark:text-red-300">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
+                  <div>
+                    <strong className="font-bold">Error starting chat:</strong>
+                    <p className="mt-0.5 font-mono">{startChatError}</p>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Enter the candidate's phone number and information. If the candidate already exists, this will load their chat conversation. If they do not exist, a new lead profile will automatically enroll.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Phone Number */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">
+                    Phone Number * (With country code, e.g. +918967389503)
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="e.g. +919876543210"
+                    value={startChatPhone}
+                    onChange={(e) => setStartChatPhone(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
+                  />
+                </div>
+
+                {/* Candidate Name */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">
+                    Candidate Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Rajesh Kumar"
+                    value={startChatName}
+                    onChange={(e) => setStartChatName(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
+                  />
+                </div>
+
+                {/* Candidate Country */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">
+                    Target Job Country
+                  </label>
+                  <select
+                    value={startChatCountry}
+                    onChange={(e) => setStartChatCountry(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
+                  >
+                    {countries.map((c, idx) => (
+                      <option key={idx} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Candidate Position */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">
+                    Target Job Position
+                  </label>
+                  <select
+                    value={startChatPosition}
+                    onChange={(e) => setStartChatPosition(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
+                  >
+                    {positions.map((p, idx) => (
+                      <option key={idx} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Initial Outreach Message */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">
+                  Initial Message (Optional - Leave blank to start empty)
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Type an introductory message to dispatch automatically..."
+                  value={startChatInitialMessage}
+                  onChange={(e) => setStartChatInitialMessage(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-slate-200 dark:border-slate-800 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowStartChatModal(false)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isStartingChat}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800/80 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+                >
+                  {isStartingChat ? (
+                    <>
+                      <RefreshCw className="h-3 w-3 animate-spin" />
+                      <span>Opening Conversation...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-3 w-3" />
+                      <span>Start Conversation</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -201,7 +201,7 @@ let dbVerified = false;
 let dbVerifying = false;
 
 // Helper to enforce timeouts on async Firestore promises so they never hang the server
-function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 3000): Promise<T> {
+function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 8000): Promise<T> {
   const actualTimeout = timeoutMs;
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -235,7 +235,7 @@ async function verifyDatabaseAccess(): Promise<boolean> {
   try {
     console.log(`[Firestore Client] Verifying connectivity to database: "${currentDbId}"...`);
     const testRef = doc(db, 'metadata', 'test_connection');
-    await runWithTimeout(getDoc(testRef), 2500);
+    await runWithTimeout(getDoc(testRef), 8000);
     dbVerified = true;
     cloudSyncEnabled = true;
     cloudErrorCount = 0;
@@ -301,6 +301,16 @@ function checkCloudStatus(): boolean {
       dbVerified = false;
     } else {
       return false;
+    }
+  }
+
+  if (!dbVerified && !dbVerifying) {
+    const now = Date.now();
+    if (now - lastCloudErrorTime > 15000) {
+      console.log('[Firestore Client] Cloud connection not verified. Attempting background verification retry...');
+      verifyDatabaseAccess().catch(err => {
+        console.error('[Firestore Client] Background database verification failed:', err);
+      });
     }
   }
 
@@ -454,7 +464,7 @@ export async function initializeCoordinatorsDatabase() {
   if (checkCloudStatus()) {
     try {
       const q = query(collection(db, 'coordinators'), limit(1));
-      const snapshot = await runWithTimeout(getDocs(q), 2000);
+      const snapshot = await runWithTimeout(getDocs(q), 8000);
       if (snapshot.empty) {
         console.log('[Firestore Client] Seeding default coordinators to cloud...');
         const batch = writeBatch(db);
@@ -462,7 +472,7 @@ export async function initializeCoordinatorsDatabase() {
           const docRef = doc(db, 'coordinators', c.id);
           batch.set(docRef, cleanForFirestore(c));
         });
-        await runWithTimeout(batch.commit(), 2000);
+        await runWithTimeout(batch.commit(), 8000);
         console.log('[Firestore Client] Seeded coordinators successfully.');
       }
     } catch (err: any) {
@@ -483,7 +493,7 @@ export async function getCoordinators(): Promise<Coordinator[]> {
 
   if (checkCloudStatus()) {
     try {
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 2000);
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 8000);
       const coords: Coordinator[] = [];
       snapshot.forEach(docSnap => {
         coords.push(docSnap.data() as Coordinator);
@@ -524,10 +534,10 @@ export async function saveCoordinators(coordinators: Coordinator[]): Promise<voi
         const docRef = doc(db, 'coordinators', c.id);
         batch.set(docRef, cleanForFirestore(c));
       });
-      await runWithTimeout(batch.commit(), 2000);
+      await runWithTimeout(batch.commit(), 8000);
 
       // Delete any removed coordinators
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 2000);
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 8000);
       const deleteBatch = writeBatch(db);
       let hasDeletes = false;
       snapshot.forEach(docSnap => {
@@ -537,7 +547,7 @@ export async function saveCoordinators(coordinators: Coordinator[]): Promise<voi
         }
       });
       if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 2000);
+        await runWithTimeout(deleteBatch.commit(), 8000);
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save coordinators to cloud:', err);
@@ -828,7 +838,7 @@ async function initializeDatabase() {
   if (checkCloudStatus()) {
     try {
       const q = query(collection(db, 'leads'), limit(1));
-      const snapshot = await runWithTimeout(getDocs(q), 2000);
+      const snapshot = await runWithTimeout(getDocs(q), 8000);
       if (snapshot.empty) {
         console.log('[Firestore Client] Seeding default leads to cloud...');
         const batch = writeBatch(db);
@@ -836,7 +846,7 @@ async function initializeDatabase() {
           const docRef = doc(db, 'leads', l.id);
           batch.set(docRef, cleanForFirestore(l));
         });
-        await runWithTimeout(batch.commit(), 2000);
+        await runWithTimeout(batch.commit(), 8000);
         console.log('[Firestore Client] Seeded leads successfully.');
       }
     } catch (err: any) {
@@ -959,11 +969,11 @@ export async function getLeadById(id: string): Promise<Lead | undefined> {
 }
 
 // Read database with bidirectional sync
-async function getLeadsInternal(): Promise<Lead[]> {
+async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
   await initializeDatabase();
 
   // Check in-memory cache first
-  if (dbCache.leads && (Date.now() - dbCache.leads.timestamp < CACHE_TTL_MS)) {
+  if (!forceBypassCache && dbCache.leads && (Date.now() - dbCache.leads.timestamp < CACHE_TTL_MS)) {
     return dbCache.leads.data;
   }
 
@@ -973,9 +983,9 @@ async function getLeadsInternal(): Promise<Lead[]> {
   // 2. Read last successfully synced leads safely
   let lastSyncedLeads: Lead[] = [];
   if (fs.existsSync(DATA_FILE_SYNCED)) {
-    lastSyncedLeads = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, [...localLeads]);
+    lastSyncedLeads = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, []);
   } else {
-    lastSyncedLeads = [...localLeads];
+    lastSyncedLeads = [];
     safeWriteJsonSync(DATA_FILE_SYNCED, lastSyncedLeads);
   }
 
@@ -1223,8 +1233,13 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
   }
 }
 
-export async function getLeads(): Promise<Lead[]> {
-  return dbMutex.run(() => getLeadsInternal());
+export async function getLeads(forceRefresh = false): Promise<Lead[]> {
+  return dbMutex.run(() => getLeadsInternal(forceRefresh));
+}
+
+export function clearLeadsCache(): void {
+  dbCache.leads = null;
+  lastFullLeadsSyncTime = 0;
 }
 
 export async function saveLeads(leads: Lead[]): Promise<void> {

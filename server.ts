@@ -37,7 +37,8 @@ import {
   executeScheduledFullBackup,
   restoreDatabaseFromBackup,
   listAvailableBackups,
-  FullDatabaseBackup
+  FullDatabaseBackup,
+  clearLeadsCache
 } from './src/server/db.ts';
 import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate } from './src/types.ts';
 import { isDefaultExperience, getEffectiveExperience } from './src/utils.ts';
@@ -231,7 +232,8 @@ app.get('/api/backup/download-file', (req, res) => {
 // GET all leads with server-side pagination, searching, and filtering
 app.get('/api/leads', async (req, res) => {
   try {
-    const rawLeads = await getLeads();
+    const forceRefresh = req.query.forceRefresh === 'true';
+    const rawLeads = await getLeads(forceRefresh);
 
     // 1. Compute dynamic metadata from all unfiltered leads
     const countriesMap = new Map<string, string>(); // lowercase -> original casing
@@ -1391,6 +1393,222 @@ app.get('/api/whatsapp/config', (req, res) => {
   });
 });
 
+// POST test WhatsApp API connection directly using current token & phone ID
+app.post('/api/whatsapp/test-connection', async (req, res) => {
+  try {
+    const metaToken = (process.env.WHATSAPP_API_KEY || process.env.META_WA_ACCESS_TOKEN || '').trim();
+    const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_PHONE_NUMBER_ID || '').trim();
+    const { testPhone } = req.body || {};
+
+    if (!metaToken || metaToken === 'MY_WHATSAPP_API_KEY') {
+      res.status(400).json({
+        success: false,
+        error: 'WHATSAPP_API_KEY is not set or is empty in the environment settings.'
+      });
+      return;
+    }
+
+    if (!phoneNumberId) {
+      res.status(400).json({
+        success: false,
+        error: 'WHATSAPP_PHONE_NUMBER_ID is not configured in environment settings.'
+      });
+      return;
+    }
+
+    // Call Meta Graph API to verify Phone Number ID and Token permissions
+    const infoUrl = `https://graph.facebook.com/v20.0/${phoneNumberId}?fields=verified_name,display_phone_number,quality_rating,code_verification_status`;
+    const metaInfoRes = await fetch(infoUrl, {
+      headers: {
+        'Authorization': `Bearer ${metaToken}`
+      }
+    });
+
+    const metaInfo = await metaInfoRes.json().catch(() => ({}));
+
+    if (!metaInfoRes.ok) {
+      res.status(400).json({
+        success: false,
+        error: metaInfo?.error?.message || 'Meta API returned an error verifying token.',
+        details: metaInfo
+      });
+      return;
+    }
+
+    // If a test phone number is provided, try sending a lightweight hello/test message
+    let testSendResult = null;
+    if (testPhone && String(testPhone).trim()) {
+      testSendResult = await sendWhatsAppMessage(
+        String(testPhone).trim(),
+        'Hello! This is a test message from your Career Growth Placement CRM to verify your WhatsApp Cloud API connection.'
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'WhatsApp Cloud API connection is ACTIVE and verified!',
+      phoneInfo: metaInfo,
+      testSendResult
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to verify WhatsApp Cloud API connection.'
+    });
+  }
+});
+
+// POST /api/whatsapp/start-chat - Start a new WhatsApp chat with any phone number
+app.post('/api/whatsapp/start-chat', async (req, res) => {
+  try {
+    const { phone, name, initialMessage, position, country, assignedTo } = req.body;
+    if (!phone || !String(phone).trim()) {
+      res.status(400).json({ error: 'Phone number is required to start a chat.' });
+      return;
+    }
+
+    const cleanPhone = String(phone).trim();
+    const userRole = (req.headers['x-user-role'] as string) || 'user';
+    const agentId = (req.headers['x-agent-id'] as string) || 'Coordinator';
+
+    const leads = await getLeads();
+
+    // Check if a lead with this phone already exists (normalizing digits)
+    const rawTargetDigits = cleanPhone.replace(/[^0-9]/g, '').slice(-10);
+    let existingIndex = -1;
+    if (rawTargetDigits.length >= 7) {
+      existingIndex = leads.findIndex(l => {
+        const leadDigits = (l.phone || '').replace(/[^0-9]/g, '').slice(-10);
+        return leadDigits === rawTargetDigits;
+      });
+    }
+
+    let targetLead: Lead;
+    const nowIso = new Date().toISOString();
+    const isNewLead = existingIndex === -1;
+
+    if (existingIndex !== -1) {
+      targetLead = leads[existingIndex];
+      // Update name if provided and existing is generic
+      if (name && name.trim() && (!targetLead.name || targetLead.name === 'Unnamed Candidate' || targetLead.name === 'WhatsApp Contact')) {
+        targetLead.name = formatCandidateNameBackend(name.trim());
+      }
+    } else {
+      // Create new lead for this chat
+      const candidateName = name && name.trim() ? formatCandidateNameBackend(name.trim()) : 'WhatsApp Contact';
+      const cleanNameId = String(candidateName).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
+      const sequence = leads.length + 1;
+      const serialNo = `WA-${1000 + sequence}`;
+
+      const assignedCoordinator = assignedTo || (userRole === 'agent' ? agentId : '');
+
+      targetLead = {
+        id: generateUniqueLeadId(leads, cleanNameId),
+        serialNo,
+        entryDate: nowIso.split('T')[0],
+        assignDate: assignedCoordinator ? nowIso.split('T')[0] : '',
+        name: candidateName,
+        phone: cleanPhone,
+        alternateNo: '',
+        email: '',
+        gender: 'M',
+        age: 25,
+        origin: '',
+        country: country || 'Kuwait',
+        position: position || 'General openings',
+        experience: 'Fresh criteria',
+        qualification: '10th Pass',
+        adminRemarks: 'Direct WhatsApp conversation started',
+        notes: '',
+        assignedTo: assignedCoordinator,
+        importance: 3,
+        remarks1: '',
+        remarks2: '',
+        remarks3: '',
+        stage: 'new' as LeadStage,
+        fitScore: 'high' as any,
+        budget: 1500,
+        budgetRaw: 'Direct WhatsApp Lead',
+        campaign: 'Direct WhatsApp Outreach',
+        summary: `Direct WhatsApp conversation started with ${candidateName} (${cleanPhone}).`,
+        requirements: [position || 'General openings', country || 'Kuwait'].filter(Boolean),
+        nextAction: 'Continue WhatsApp dialogue and collect documents.',
+        tags: ['Direct WhatsApp', 'New Outreach'],
+        source: 'WhatsApp Direct',
+        project: 'General',
+        messages: [],
+        tasks: [],
+        timeline: [
+          {
+            id: `tl_init_${Date.now()}`,
+            type: 'creation' as const,
+            text: `Started direct WhatsApp conversation from CRM. Assigned: ${assignedCoordinator || 'Unassigned'}.`,
+            actor: userRole === 'admin' ? 'Administrator' : `Coordinator (${agentId})`,
+            timestamp: nowIso
+          }
+        ],
+        createdAt: nowIso,
+        updatedAt: nowIso
+      };
+
+      leads.unshift(targetLead);
+    }
+
+    // If an initial message is provided, send it immediately
+    let deliveryResult = null;
+    if (initialMessage && String(initialMessage).trim()) {
+      const msgText = String(initialMessage).trim();
+      deliveryResult = await sendWhatsAppMessage(
+        targetLead.phone,
+        msgText,
+        targetLead.name
+      );
+
+      const senderName = userRole === 'admin' ? 'Administrator' : `Coordinator (${agentId})`;
+      const newMessage: Message = {
+        id: `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        sender: 'user',
+        senderName,
+        text: msgText,
+        timestamp: nowIso,
+        status: deliveryResult.status || 'delivered',
+        channel: 'whatsapp'
+      };
+
+      if (!Array.isArray(targetLead.messages)) {
+        targetLead.messages = [];
+      }
+      targetLead.messages.push(newMessage);
+
+      if (!Array.isArray(targetLead.timeline)) {
+        targetLead.timeline = [];
+      }
+      targetLead.timeline.push({
+        id: `tl_${Date.now()}_startmsg`,
+        type: 'message',
+        text: `Sent initial WhatsApp message: "${msgText.length > 80 ? msgText.substring(0, 77) + '...' : msgText}"`,
+        actor: senderName,
+        timestamp: nowIso
+      });
+    }
+
+    targetLead.updatedAt = nowIso;
+    if (existingIndex !== -1) {
+      leads[existingIndex] = targetLead;
+    }
+    await saveLeads(leads);
+
+    res.status(200).json({
+      success: true,
+      lead: targetLead,
+      isNewLead,
+      deliveryResult
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to start WhatsApp chat.' });
+  }
+});
+
 // Meta Webhook Verification (GET endpoint required for Meta Developer Portal Webhook validation)
 app.get('/api/whatsapp/webhook', (req, res) => {
   const mode = req.query['hub.mode'] || req.query['hub_mode'] || req.query['mode'];
@@ -1563,6 +1781,8 @@ app.post('/api/leads/:id/simulate-reply', async (req, res) => {
 app.post('/api/whatsapp/webhook', async (req, res) => {
   try {
     const payload = req.body || {};
+    console.log(`[Meta Webhook POST] Received payload:`, JSON.stringify(payload, null, 2));
+
     let fromNumber = payload.destination || payload.from || payload.phone;
     let messageBody = payload.text || payload.message || payload.body;
 
@@ -1592,14 +1812,24 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
     if (fromNumber && messageBody) {
       const cleanPhone = String(fromNumber).replace(/\D/g, '');
+      console.log(`[Meta Webhook POST] Parsing inbound message. Raw phone="${fromNumber}", Clean phone="${cleanPhone}", Message="${messageBody}"`);
+
       const leads = await getLeads();
       const matchIdx = leads.findIndex(l => {
         const leadDigits = String(l.phone || '').replace(/\D/g, '');
-        return leadDigits.includes(cleanPhone) || cleanPhone.includes(leadDigits);
+        if (!leadDigits || !cleanPhone) return false;
+        
+        // Exact match of digits or suffix overlap (e.g. 10 digits suffix matching)
+        const match = leadDigits.includes(cleanPhone) || cleanPhone.includes(leadDigits) ||
+          (leadDigits.length >= 10 && cleanPhone.endsWith(leadDigits.slice(-10))) ||
+          (cleanPhone.length >= 10 && leadDigits.endsWith(cleanPhone.slice(-10)));
+        return match;
       });
 
       if (matchIdx !== -1) {
         const lead = leads[matchIdx];
+        console.log(`[Meta Webhook POST] Match successful! Associated candidate: ID="${lead.id}", Name="${lead.name}"`);
+
         const incomingMsg: Message = {
           id: `m_hook_${Date.now()}`,
           sender: 'lead',
@@ -1624,8 +1854,66 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
         lead.updatedAt = new Date().toISOString();
         leads[matchIdx] = lead;
+        clearLeadsCache();
         await saveLeads(leads);
+        console.log(`[Meta Webhook POST] Saved inbound message to candidate database and cleared memory cache.`);
+      } else {
+        console.warn(`[Meta Webhook POST] Candidate match not found for phone "${cleanPhone}". Adding as new conversion inquiry.`);
+        // Fallback: If candidate doesn't exist, create a new Inquiry automatically!
+        const sequence = leads.length + 1;
+        const serialNo = `INQ-${1000 + sequence}`;
+        const cleanNameId = `CONTACT_${cleanPhone.slice(-10)}`;
+        const newLeadId = generateUniqueLeadId(leads, cleanNameId);
+        
+        const newLead: Lead = {
+          id: newLeadId,
+          serialNo,
+          entryDate: new Date().toISOString().split('T')[0],
+          assignDate: '',
+          name: `WhatsApp Lead ${cleanPhone.slice(-10)}`,
+          phone: `+${cleanPhone}`,
+          gender: 'M',
+          age: 24,
+          origin: 'Inbound Message',
+          country: 'Kuwait',
+          position: 'General openings',
+          experience: 'Verification pending',
+          adminRemarks: 'INBOUND WHATSAPP CONVERSION',
+          notes: 'Auto-enrolled from direct WhatsApp conversation reply.',
+          assignedTo: 'unassigned',
+          importance: 3,
+          remarks1: '',
+          remarks2: '',
+          remarks3: '',
+          stage: 'new',
+          budget: 0,
+          budgetRaw: 'N/A',
+          summary: `Inbound WhatsApp message received: "${messageBody}"`,
+          requirements: ['WhatsApp Inbound'],
+          fitScore: 'medium',
+          nextAction: 'Qualify credentials and documents.',
+          campaign: 'Direct WhatsApp',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messages: [
+            {
+              id: `msg_inbound_${Date.now()}`,
+              sender: 'lead',
+              senderName: `WhatsApp Lead ${cleanPhone.slice(-10)}`,
+              text: String(messageBody),
+              timestamp: new Date().toISOString(),
+              status: 'read',
+              channel: 'whatsapp'
+            }
+          ]
+        };
+
+        clearLeadsCache();
+        await addLead(newLead);
+        console.log(`[Meta Webhook POST] Created new active lead ID="${newLeadId}" for inbound message and cleared memory cache.`);
       }
+    } else {
+      console.warn(`[Meta Webhook POST] Ignored webhook payload. Missing fromNumber ("${fromNumber}") or messageBody ("${messageBody}")`);
     }
 
     res.status(200).json({ success: true, received: true });
