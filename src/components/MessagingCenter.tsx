@@ -53,8 +53,8 @@ export default function MessagingCenter({
   onLeadUpdated
 }: MessagingCenterProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<'requesting' | 'my' | 'replies' | 'history'>(
-    userRole === 'admin' ? 'requesting' : 'my'
+  const [filterType, setFilterType] = useState<'requesting' | 'active' | 'history'>(
+    userRole === 'admin' ? 'requesting' : 'active'
   );
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
@@ -148,27 +148,26 @@ export default function MessagingCenter({
     }).length;
   }, [activeChatLeads]);
 
-  const adminHistoryCount = useMemo(() => {
-    return activeChatLeads.filter(l => isOlderThan24Hours(l)).length;
-  }, [activeChatLeads]);
+  const activeLeadsCount = useMemo(() => {
+    return activeChatLeads.filter(l => {
+      const isUnassigned = !l.assignedTo || 
+        l.assignedTo.toLowerCase() === 'unassigned' || 
+        l.assignedTo.toLowerCase() === 'all' ||
+        l.assignedTo.trim() === '';
+      const isMine = isAssignedToAgent(l, currentAgentId);
+      
+      if (userRole === 'admin') return !isUnassigned && !isOlderThan24Hours(l);
+      return isMine && !isOlderThan24Hours(l);
+    }).length;
+  }, [activeChatLeads, currentAgentId, userRole]);
 
-  // Coordinator Counts
-  const myActiveCount = useMemo(() => {
-    return activeChatLeads.filter(l => isAssignedToAgent(l, currentAgentId) && !isOlderThan24Hours(l)).length;
-  }, [activeChatLeads, currentAgentId]);
-
-  const myRepliesCount = useMemo(() => {
+  const historyLeadsCount = useMemo(() => {
     return activeChatLeads.filter(l => {
       const isMine = isAssignedToAgent(l, currentAgentId);
-      const notExpired = !isOlderThan24Hours(l);
-      const hasInbound = (l.messages || []).some(m => m.sender === 'lead');
-      return isMine && notExpired && hasInbound;
+      if (userRole === 'admin') return isOlderThan24Hours(l);
+      return isMine && isOlderThan24Hours(l);
     }).length;
-  }, [activeChatLeads, currentAgentId]);
-
-  const coordinatorHistoryCount = useMemo(() => {
-    return activeChatLeads.filter(l => isAssignedToAgent(l, currentAgentId) && isOlderThan24Hours(l)).length;
-  }, [activeChatLeads, currentAgentId]);
+  }, [activeChatLeads, currentAgentId, userRole]);
 
   // Filtered leads based on RBAC (Admin vs Coordinator) and active filter
   const filteredChatLeads = useMemo(() => {
@@ -180,30 +179,19 @@ export default function MessagingCenter({
       const olderThan24h = isOlderThan24Hours(lead);
       const assignedToMe = isAssignedToAgent(lead, currentAgentId);
 
-      // Admin logic: only sees Requesting chats (active unassigned) and History (older than 24h)
-      if (userRole === 'admin') {
-        if (filterType === 'requesting') {
-          if (olderThan24h || !isUnassigned) return false;
-        } else if (filterType === 'history') {
-          if (!olderThan24h) return false;
-        } else {
-          if (olderThan24h || !isUnassigned) return false;
-        }
-      } else {
-        // Coordinator logic: only sees chats assigned to them
-        if (!assignedToMe) return false;
-
-        if (filterType === 'my') {
-          if (olderThan24h) return false;
-        } else if (filterType === 'replies') {
-          if (olderThan24h) return false;
-          const hasInbound = (lead.messages || []).some(m => m.sender === 'lead');
-          if (!hasInbound) return false;
-        } else if (filterType === 'history') {
-          if (!olderThan24h) return false;
-        } else {
-          if (olderThan24h) return false;
-        }
+      // Requesting: Always unassigned
+      if (filterType === 'requesting') {
+        if (olderThan24h || !isUnassigned) return false;
+      } 
+      // Active: Assigned (All for admin, Me for coordinator), not older than 24h
+      else if (filterType === 'active') {
+        if (olderThan24h || isUnassigned) return false;
+        if (userRole !== 'admin' && !assignedToMe) return false;
+      }
+      // History: Older than 24h
+      else if (filterType === 'history') {
+        if (!olderThan24h) return false;
+        if (userRole !== 'admin' && !assignedToMe) return false;
       }
 
       // Search query
@@ -436,7 +424,7 @@ export default function MessagingCenter({
         }
 
         // Set to coordinator's active tab so they see it instantly
-        setFilterType(userRole === 'admin' ? 'requesting' : 'my');
+        setFilterType(userRole === 'admin' ? 'requesting' : 'active');
         
         // Auto select the newly created or loaded active lead
         if (data.lead && data.lead.id) {
@@ -497,11 +485,7 @@ export default function MessagingCenter({
                 WhatsApp Chats
               </h3>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
-                {userRole === 'admin' ? (
-                  <span><strong>{requestingLeadsCount}</strong> requesting • <strong>{adminHistoryCount}</strong> in history</span>
-                ) : (
-                  <span><strong>{myActiveCount}</strong> active • <strong>{myRepliesCount}</strong> replies</span>
-                )}
+                <span><strong>{requestingLeadsCount}</strong> requesting • <strong>{activeLeadsCount}</strong> active • <strong>{historyLeadsCount}</strong> in history</span>
               </p>
             </div>
           </div>
@@ -555,110 +539,64 @@ export default function MessagingCenter({
 
           {/* Filter Buttons: Single Line, No-Wrap */}
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-nowrap w-full py-0.5">
-            {userRole === 'admin' ? (
-              <>
-                {/* Admin Tab 1: Requesting */}
-                <button
-                  onClick={() => setFilterType('requesting')}
-                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                    filterType === 'requesting'
-                      ? 'bg-amber-500 text-white border-amber-500 shadow-2xs font-black'
-                      : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 hover:bg-amber-100'
-                  }`}
-                >
-                  <span>📥 Requesting</span>
-                  {requestingLeadsCount > 0 && (
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
-                      filterType === 'requesting' ? 'bg-white text-amber-700' : 'bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200'
-                    }`}>
-                      {requestingLeadsCount}
-                    </span>
-                  )}
-                </button>
+            {/* Tab 1: Requesting */}
+            <button
+              onClick={() => setFilterType('requesting')}
+              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                filterType === 'requesting'
+                  ? 'bg-amber-500 text-white border-amber-500 shadow-2xs font-black'
+                  : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 hover:bg-amber-100'
+              }`}
+            >
+              <span>📥 Requesting</span>
+              {requestingLeadsCount > 0 && (
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
+                  filterType === 'requesting' ? 'bg-white text-amber-700' : 'bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200'
+                }`}>
+                  {requestingLeadsCount}
+                </span>
+              )}
+            </button>
 
-                {/* Admin Tab 2: History (>24 Hours) */}
-                <button
-                  onClick={() => setFilterType('history')}
-                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                    filterType === 'history'
-                      ? 'bg-slate-800 dark:bg-slate-700 text-white border-slate-800 shadow-2xs font-black'
-                      : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  <Clock className="h-3 w-3" />
-                  <span>History (&gt;24h)</span>
-                  {adminHistoryCount > 0 && (
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
-                      filterType === 'history' ? 'bg-white text-slate-900' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-                    }`}>
-                      {adminHistoryCount}
-                    </span>
-                  )}
-                </button>
-              </>
-            ) : (
-              <>
-                {/* Coordinator Tab 1: My Chats */}
-                <button
-                  onClick={() => setFilterType('my')}
-                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                    filterType === 'my'
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs font-black'
-                      : 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-900/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100'
-                  }`}
-                >
-                  <MessageSquare className="h-3 w-3" />
-                  <span>My Chats</span>
-                  {myActiveCount > 0 && (
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
-                      filterType === 'my' ? 'bg-white text-indigo-700' : 'bg-indigo-200 dark:bg-indigo-900 text-indigo-900 dark:text-indigo-200'
-                    }`}>
-                      {myActiveCount}
-                    </span>
-                  )}
-                </button>
+            {/* Tab 2: Active Chats */}
+            <button
+              onClick={() => setFilterType('active')}
+              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                filterType === 'active'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs font-black'
+                  : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
+              }`}
+            >
+              <MessageSquare className="h-3 w-3" />
+              <span>Active Chats</span>
+              {activeLeadsCount > 0 && (
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
+                  filterType === 'active' ? 'bg-white text-emerald-700' : 'bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-200'
+                }`}>
+                  {activeLeadsCount}
+                </span>
+              )}
+            </button>
 
-                {/* Coordinator Tab 2: Replies */}
-                <button
-                  onClick={() => setFilterType('replies')}
-                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                    filterType === 'replies'
-                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs font-black'
-                      : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
-                  }`}
-                >
-                  <Send className="h-3 w-3" />
-                  <span>Replies</span>
-                  {myRepliesCount > 0 && (
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
-                      filterType === 'replies' ? 'bg-white text-emerald-700' : 'bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-200'
-                    }`}>
-                      {myRepliesCount}
-                    </span>
-                  )}
-                </button>
-
-                {/* Coordinator Tab 3: History */}
-                <button
-                  onClick={() => setFilterType('history')}
-                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                    filterType === 'history'
-                      ? 'bg-slate-800 dark:bg-slate-700 text-white border-slate-800 shadow-2xs font-black'
-                      : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  <Clock className="h-3 w-3" />
-                  <span>History (&gt;24h)</span>
-                  {coordinatorHistoryCount > 0 && (
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
-                      filterType === 'history' ? 'bg-white text-slate-900' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-                    }`}>
-                      {coordinatorHistoryCount}
-                    </span>
-                  )}
-                </button>
-              </>
-            )}
+            {/* Tab 3: History */}
+            <button
+              onClick={() => setFilterType('history')}
+              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                filterType === 'history'
+                  ? 'bg-slate-800 dark:bg-slate-700 text-white border-slate-800 shadow-2xs font-black'
+                  : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              <Clock className="h-3 w-3" />
+              <span>History (&gt;24h)</span>
+              {historyLeadsCount > 0 && (
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
+                  filterType === 'history' ? 'bg-white text-slate-900' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                }`}>
+                  {historyLeadsCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
 

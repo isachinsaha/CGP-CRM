@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Lead, LeadStage, StatSummary, Coordinator } from './types.ts';
+import { Lead, LeadStage, StatSummary, Coordinator, WhatsAppTemplate } from './types.ts';
 import { 
   LayoutGrid, Table, BarChart3, Briefcase, ShieldAlert, Sparkles, 
   RefreshCw, MessageSquare, Plus, HelpCircle, Layers, Lock, User, Check, X, Shield,
@@ -24,6 +24,7 @@ import CoordinatorsManager from './components/CoordinatorsManager.tsx';
 import MetadataManager from './components/MetadataManager.tsx';
 import IncentiveRulesManager from './components/IncentiveRulesManager.tsx';
 import MessagingCenter from './components/MessagingCenter.tsx';
+import TemplateManagerModal from './components/TemplateManagerModal.tsx';
 import CGPLogo from './components/CGPLogo.tsx';
 import ImportantUpdatesBar from './components/ImportantUpdatesBar.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
@@ -39,7 +40,9 @@ export default function App() {
   
   // Dynamic coordinators list loaded from server
   const [coordinatorsList, setCoordinatorsList] = useState<Coordinator[]>([]);
+  const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]); // Add state
   const [isCoordManagerOpen, setIsCoordManagerOpen] = useState(false);
+  const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false); // Add this
   const [isMetadataManagerOpen, setIsMetadataManagerOpen] = useState(false);
   const [isIncentiveRulesOpen, setIsIncentiveRulesOpen] = useState(false);
   const [isBackupManagerOpen, setIsBackupManagerOpen] = useState(false);
@@ -307,6 +310,13 @@ export default function App() {
   useEffect(() => {
     fetchAppMetadata();
   }, [fetchAppMetadata]);
+
+  useEffect(() => {
+    fetch('/api/whatsapp/templates')
+      .then(res => res.json())
+      .then(data => setTemplates(data.templates || []))
+      .catch(console.error);
+  }, []);
 
   // Synchronize data from Express REST API
   const pullCrmData = async (silent = false, forceRefresh = false) => {
@@ -614,6 +624,13 @@ export default function App() {
                         >
                           <Layers className="h-4 w-4 text-indigo-500 shrink-0" />
                           <span>Manage Options & Tags</span>
+                        </button>
+                        <button
+                          onClick={() => { setIsTemplateManagerOpen(true); setIsAdminMenuOpen(false); }}
+                          className="w-full px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition text-left cursor-pointer"
+                        >
+                          <MessageSquare className="h-4 w-4 text-emerald-500 shrink-0" />
+                          <span>Manage Templates</span>
                         </button>
                         <button
                           onClick={() => { setIsIncentiveRulesOpen(true); setIsAdminMenuOpen(false); }}
@@ -1385,6 +1402,21 @@ export default function App() {
           onUpdateProjects={handleUpdateProjects}
           onUpdateCountries={handleUpdateCountries}
           onUpdatePositions={handleUpdatePositions}
+        />
+      )}
+
+      {/* WhatsApp Template Manager */}
+      {isTemplateManagerOpen && (
+        <TemplateManagerModal
+          isOpen={isTemplateManagerOpen}
+          onClose={() => setIsTemplateManagerOpen(false)}
+          templates={templates}
+          onRefresh={() => {
+            fetch('/api/whatsapp/templates')
+              .then(res => res.json())
+              .then(data => setTemplates(data.templates || []))
+              .catch(console.error);
+          }}
         />
       )}
 

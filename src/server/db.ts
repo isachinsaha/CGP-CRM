@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import * as XLSX from 'xlsx';
+import { DEFAULT_WHATSAPP_TEMPLATES } from './whatsapp.ts';
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, 
@@ -17,7 +18,7 @@ import {
   writeBatch,
   setLogLevel
 } from 'firebase/firestore';
-import { Lead, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule } from '../types.ts';
+import { Lead, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate } from '../types.ts';
 
 // Configure Firebase SDK to only log errors, suppressing gRPC connection warnings
 setLogLevel('error');
@@ -34,6 +35,7 @@ const UPDATES_FILE = path.join(DATA_DIR, 'updates.json');
 const METADATA_FILE = path.join(DATA_DIR, 'metadata.json');
 const WALLETS_FILE = path.join(DATA_DIR, 'wallets.json');
 const INCENTIVE_RULES_FILE = path.join(DATA_DIR, 'incentive_rules.json');
+const TEMPLATES_FILE = path.join(DATA_DIR, 'whatsapp_templates.json');
 
 // --- SAFE ATOMIC JSON READ / WRITE / RECOVERY HELPERS ---
 
@@ -412,6 +414,7 @@ const dbCache = {
   metadata: null as CacheEntry<CgpMetadata> | null,
   wallets: null as CacheEntry<Wallet[]> | null,
   incentive_rules: null as CacheEntry<IncentiveRule[]> | null,
+  templates: null as CacheEntry<WhatsAppTemplate[]> | null,
 };
 
 let lastFullLeadsSyncTime = 0;
@@ -2682,6 +2685,118 @@ export function listAvailableBackups(): BackupFileInfo[] {
   }
 
   return backups.sort((a, b) => b.timestamp - a.timestamp);
+}
+
+// Retrieve custom + default WhatsApp templates
+export async function getWhatsAppTemplates(): Promise<WhatsAppTemplate[]> {
+  await initializeDatabase();
+
+  if (dbCache.templates && (Date.now() - dbCache.templates.timestamp < CACHE_TTL_MS)) {
+    return dbCache.templates.data;
+  }
+
+  let customTemplates: WhatsAppTemplate[] = [];
+
+  if (checkCloudStatus()) {
+    try {
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'whatsapp_templates')), 8000);
+      snapshot.forEach(docSnap => {
+        customTemplates.push(docSnap.data() as WhatsAppTemplate);
+      });
+      // Update local file with latest from cloud
+      safeWriteJsonSync(TEMPLATES_FILE, customTemplates);
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to fetch custom templates from cloud, falling back to local files:', err);
+      customTemplates = safeReadJsonSync<WhatsAppTemplate[]>(TEMPLATES_FILE, []);
+    }
+  } else {
+    customTemplates = safeReadJsonSync<WhatsAppTemplate[]>(TEMPLATES_FILE, []);
+  }
+
+  // Merge default templates with custom templates. Ensure unique by ID
+  const mergedTemplatesMap = new Map<string, WhatsAppTemplate>();
+  
+  // Load default templates
+  DEFAULT_WHATSAPP_TEMPLATES.forEach(t => {
+    mergedTemplatesMap.set(t.id, t);
+  });
+
+  // Load custom templates (override defaults if IDs match)
+  customTemplates.forEach(t => {
+    console.log(`[Templates] Loading template: ${t.id}, type: ${t.type}`);
+    mergedTemplatesMap.set(t.id, t);
+  });
+
+  const finalTemplates = Array.from(mergedTemplatesMap.values());
+  console.log(`[Templates] Final count: ${finalTemplates.length}`);
+  dbCache.templates = { data: finalTemplates, timestamp: Date.now() };
+  return finalTemplates;
+}
+
+// Persist a custom WhatsApp template
+export async function saveWhatsAppTemplate(template: WhatsAppTemplate): Promise<void> {
+  await initializeDatabase();
+  console.log(`[Templates] Saving template: ${template.id}, type: ${template.type}`);
+
+  // Read current custom templates
+  const customTemplates = safeReadJsonSync<WhatsAppTemplate[]>(TEMPLATES_FILE, []);
+  const idx = customTemplates.findIndex(t => t.id === template.id);
+  if (idx !== -1) {
+    customTemplates[idx] = template;
+  } else {
+    customTemplates.push(template);
+  }
+
+  // Write local copy immediately
+  safeWriteJsonSync(TEMPLATES_FILE, customTemplates);
+
+  // Clear templates cache
+  dbCache.templates = null;
+
+  if (checkCloudStatus()) {
+    try {
+      const docRef = doc(db, 'whatsapp_templates', template.id);
+      await runWithTimeout(setDoc(docRef, cleanForFirestore(template)), 8000);
+      console.log(`[Firestore Client] Saved WhatsApp template to cloud: ${template.title}`);
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to sync WhatsApp template to cloud:', err);
+      handleCloudError('Save WhatsApp Template', err);
+    }
+  }
+}
+
+// Delete a custom WhatsApp template
+export async function deleteWhatsAppTemplate(templateId: string): Promise<void> {
+  await initializeDatabase();
+
+  // Read current custom templates
+  let customTemplates = safeReadJsonSync<WhatsAppTemplate[]>(TEMPLATES_FILE, []);
+  
+  // Update local copy
+  customTemplates = customTemplates.filter(t => t.id !== templateId);
+  safeWriteJsonSync(TEMPLATES_FILE, customTemplates);
+
+  // Clear templates cache
+  dbCache.templates = null;
+
+  if (checkCloudStatus()) {
+    try {
+      console.log(`[Firestore Client] Attempting to delete template from cloud: ${templateId}`);
+      const docRef = doc(db, 'whatsapp_templates', templateId);
+      await runWithTimeout(deleteDoc(docRef), 8000);
+      console.log(`[Firestore Client] Deleted WhatsApp template from cloud: ${templateId}`);
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to delete WhatsApp template from cloud:', err);
+      // If cloud deletion fails, we should NOT rely on the cloud version anymore for this specific template.
+      // But we can't easily prevent getDocs from returning it.
+      // For now, we will log and continue. The local file is already filtered.
+      handleCloudError('Delete WhatsApp Template', err);
+      // Force a re-fetch to be safe
+      dbCache.templates = null;
+    }
+  }
+  // Force cache clear again after cloud operations
+  dbCache.templates = null;
 }
 
 

@@ -22,14 +22,19 @@ export interface Message {
   status?: 'sent' | 'delivered' | 'read' | 'failed';
   templateName?: string;
   channel?: 'whatsapp' | 'sms' | 'system';
+  type?: 'text' | 'image' | 'pdf' | 'document';
+  mediaUrl?: string;
+  fileName?: string;
+  fileSize?: string;
 }
 
 export interface WhatsAppTemplate {
   id: string;
   title: string;
-  category: 'onboarding' | 'interview' | 'documentation' | 'status' | 'offer';
+  category: 'onboarding' | 'interview' | 'documentation' | 'status' | 'offer' | 'quick_reply';
   description: string;
   text: string;
+  type?: 'template' | 'quick_reply';
 }
 
 export interface Lead {

@@ -81,13 +81,20 @@ Please reply to this WhatsApp message or call us back at your earliest convenien
     category: 'onboarding',
     description: 'Broadcasts urgent vacancy requirements for targeted countries.',
     text: `⚡ URGENT VACANCY ALERT - {{country}} ⚡
-
+ 
 Career Growth Placement is urgently hiring for:
 🔹 Position: {{position}}
 🔹 Destination: {{country}}
 🔹 Benefits: Free Accommodation, Medical & Transportation
-
+ 
 Seats are limited! Reply "INTERESTED" or call {{coordinator}} now to register.`
+  },
+  {
+    id: 'assign',
+    title: '🤝 Coordinator Assignment (assign)',
+    category: 'onboarding',
+    description: 'Meta template: Ms. Edenla/coordinator will assist shortly, save phone 9832354098.',
+    text: `Ms. {{coordinator}} will assist you shortly. Please save 9832354098. If you miss her call, just call back on the same number. Regards, Career Growth Placement`
   }
 ];
 
@@ -141,7 +148,10 @@ export async function sendWhatsAppMessage(
   phone: string,
   text: string,
   candidateName?: string,
-  templateName?: string
+  templateName?: string,
+  mediaUrl?: string,
+  mediaType?: 'text' | 'image' | 'pdf' | 'document',
+  fileName?: string
 ): Promise<SendWhatsAppResult> {
   const formattedPhone = formatPhoneForWhatsApp(phone);
   const messageId = `wa_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -155,6 +165,25 @@ export async function sendWhatsAppMessage(
     try {
       const graphUrl = `https://graph.facebook.com/v20.0/${phoneNumberId.trim()}/messages`;
       
+      let type = 'text';
+      let payload: any = {};
+
+      if (mediaUrl) {
+        if (mediaType === 'image') {
+          type = 'image';
+          payload = { image: { link: mediaUrl, caption: text } };
+        } else if (mediaType === 'pdf' || mediaType === 'document') {
+          type = 'document';
+          payload = { document: { link: mediaUrl, filename: fileName || 'document', caption: text } };
+        } else {
+          type = 'text';
+          payload = { text: { preview_url: false, body: text } };
+        }
+      } else {
+        type = 'text';
+        payload = { text: { preview_url: false, body: text } };
+      }
+
       const response = await fetch(graphUrl, {
         method: 'POST',
         headers: {
@@ -165,11 +194,8 @@ export async function sendWhatsAppMessage(
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
           to: formattedPhone,
-          type: 'text',
-          text: {
-            preview_url: false,
-            body: text
-          }
+          type,
+          ...payload
         })
       });
 

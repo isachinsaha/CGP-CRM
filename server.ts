@@ -38,7 +38,10 @@ import {
   restoreDatabaseFromBackup,
   listAvailableBackups,
   FullDatabaseBackup,
-  clearLeadsCache
+  clearLeadsCache,
+  getWhatsAppTemplates,
+  saveWhatsAppTemplate,
+  deleteWhatsAppTemplate
 } from './src/server/db.ts';
 import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate } from './src/types.ts';
 import { isDefaultExperience, getEffectiveExperience } from './src/utils.ts';
@@ -49,6 +52,43 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Ensure uploads directory exists and mount it statically
+const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+app.use('/uploads', express.static(UPLOADS_DIR));
+
+// POST base64 file upload
+app.post('/api/upload', (req, res) => {
+  try {
+    const { fileName, fileType, base64Data } = req.body;
+    if (!fileName || !base64Data) {
+      res.status(400).json({ error: 'Missing fileName or base64Data' });
+      return;
+    }
+
+    // Extract the raw base64 data (strip prefix if present, e.g. "data:image/png;base64,")
+    const cleanBase64 = base64Data.replace(/^data:[^;]+;base64,/, "");
+    const buffer = Buffer.from(cleanBase64, 'base64');
+
+    // Create a safe, unique filename to prevent collisions
+    const ext = path.extname(fileName);
+    const base = path.basename(fileName, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeName = `${base}_${Date.now()}${ext}`;
+    
+    const filePath = path.join(UPLOADS_DIR, safeName);
+    fs.writeFileSync(filePath, buffer);
+
+    const fileUrl = `/uploads/${safeName}`;
+    console.log(`[UploadSystem] File uploaded: ${safeName} (${buffer.length} bytes)`);
+    res.json({ success: true, url: fileUrl, safeName });
+  } catch (err: any) {
+    console.error('File upload failed:', err);
+    res.status(500).json({ error: 'File upload failed' });
+  }
+});
 
 // Lazy-initialize Gemini client to avoid startup crashes if key is omitted
 let aiClient: GoogleGenAI | null = null;
@@ -1630,21 +1670,81 @@ app.get('/api/whatsapp/webhook', (req, res) => {
   }
 });
 
-// GET preconfigured WhatsApp recruitment templates
-app.get('/api/whatsapp/templates', (req, res) => {
-  res.json({
-    templates: DEFAULT_WHATSAPP_TEMPLATES
-  });
+// GET preconfigured and custom WhatsApp recruitment templates
+app.get('/api/whatsapp/templates', async (req, res) => {
+  try {
+    const templates = await getWhatsAppTemplates();
+    res.json({ templates });
+  } catch (err: any) {
+    console.error('Failed to get WhatsApp templates:', err);
+    res.json({ templates: DEFAULT_WHATSAPP_TEMPLATES }); // fallback
+  }
+});
+
+// POST save a new custom WhatsApp template
+app.post('/api/whatsapp/templates', async (req, res) => {
+  try {
+    const { id, title, category, description, text, type } = req.body;
+    if (!id || !title || !category || !text) {
+      res.status(400).json({ error: 'Missing required template fields (id, title, category, text)' });
+      return;
+    }
+    
+    const newTemplate: WhatsAppTemplate = {
+      id: String(id).trim(),
+      title: String(title).trim(),
+      category: category,
+      description: String(description || '').trim(),
+      text: String(text).trim(),
+      type: type || 'template'
+    };
+
+    await saveWhatsAppTemplate(newTemplate);
+    res.json({ success: true, template: newTemplate });
+  } catch (err: any) {
+    console.error('Failed to save WhatsApp template:', err);
+    res.status(500).json({ error: 'Failed to save template' });
+  }
+});
+
+// DELETE a custom WhatsApp template
+app.delete('/api/whatsapp/templates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ error: 'Missing template ID' });
+      return;
+    }
+    
+    await deleteWhatsAppTemplate(id);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Failed to delete WhatsApp template:', err);
+    res.status(500).json({ error: 'Failed to delete template' });
+  }
+});
+
+// Sync templates from Meta Business
+app.post('/api/whatsapp/templates/sync', async (req, res) => {
+  try {
+    console.log('[System] Syncing templates from Meta Business...');
+    // TODO: Implement actual API call with credentials
+    res.json({ success: true, message: 'Sync triggered (stub)' });
+  } catch (err: any) {
+    console.error('Failed to sync templates:', err);
+    res.status(500).json({ error: 'Failed to sync templates' });
+  }
 });
 
 // POST send WhatsApp message to a lead (Outbound via Meta Cloud API)
 app.post('/api/leads/:id/messages', async (req, res) => {
   try {
-    const { text, sender, senderName, templateName, channel } = req.body;
-    if (!text || !text.trim()) {
-      res.status(400).json({ error: 'Message text is required' });
-      return;
-    }
+    const { text, sender, senderName, templateName, channel, type, mediaUrl, fileName, fileSize } = req.body;
+    
+    // For media messages, body text is optional (can act as a caption)
+    const msgType = type || 'text';
+    const isMedia = msgType !== 'text';
+    const messageText = (text || '').trim() || (msgType === 'image' ? 'Sent an image' : msgType === 'pdf' ? 'Sent a PDF document' : 'Sent a document');
 
     const leads = await getLeads();
     const idx = leads.findIndex(l => l.id === req.params.id);
@@ -1657,6 +1757,12 @@ app.post('/api/leads/:id/messages', async (req, res) => {
     const userRole = req.headers['x-user-role'] || 'user';
     const agentId = (req.headers['x-agent-id'] as string) || senderName || 'Coordinator';
 
+    // Build absolute URL for Meta Cloud API to download if it's a local/relative URL
+    let absoluteMediaUrl = mediaUrl;
+    if (mediaUrl && mediaUrl.startsWith('/')) {
+      absoluteMediaUrl = `${req.protocol}://${req.get('host')}${mediaUrl}`;
+    }
+
     // Dispatch directly via Meta Cloud API or Sandbox Engine
     const isOutbound = sender !== 'lead';
     let deliveryResult: { success: boolean; channel: string; status: 'sent' | 'delivered' | 'read'; messageId?: string; details?: any } = {
@@ -1667,9 +1773,12 @@ app.post('/api/leads/:id/messages', async (req, res) => {
     if (isOutbound && lead.phone) {
       deliveryResult = await sendWhatsAppMessage(
         lead.phone,
-        text.trim(),
+        messageText,
         lead.name,
-        templateName
+        templateName,
+        absoluteMediaUrl,
+        msgType,
+        fileName
       );
     }
 
@@ -1677,11 +1786,15 @@ app.post('/api/leads/:id/messages', async (req, res) => {
       id: `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       sender: sender || 'user',
       senderName: senderName || (sender === 'lead' ? lead.name : (agentId === 'admin' ? 'Administrator' : agentId)),
-      text: text.trim(),
+      text: messageText,
       timestamp: new Date().toISOString(),
       status: deliveryResult.status || 'delivered',
       templateName: templateName || undefined,
-      channel: channel || 'whatsapp'
+      channel: channel || 'whatsapp',
+      type: msgType,
+      mediaUrl: mediaUrl || undefined,
+      fileName: fileName || undefined,
+      fileSize: fileSize || undefined
     };
 
     if (!Array.isArray(lead.messages)) {
