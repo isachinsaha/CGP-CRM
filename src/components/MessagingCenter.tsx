@@ -56,6 +56,7 @@ export default function MessagingCenter({
   const [filterType, setFilterType] = useState<'requesting' | 'active' | 'history'>(
     userRole === 'admin' ? 'requesting' : 'active'
   );
+  const [selectedCoordinatorFilter, setSelectedCoordinatorFilter] = useState<string>('');
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
   const [showLeadDetailsPanel, setShowLeadDetailsPanel] = useState(userRole === 'admin');
@@ -64,6 +65,7 @@ export default function MessagingCenter({
   const [tagAddedToast, setTagAddedToast] = useState<string | null>(null);
   const [showSimulatorModal, setShowSimulatorModal] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [isRefreshingChat, setIsRefreshingChat] = useState(false);
 
   // Start New Chat States
   const [showStartChatModal, setShowStartChatModal] = useState(false);
@@ -156,18 +158,110 @@ export default function MessagingCenter({
         l.assignedTo.trim() === '';
       const isMine = isAssignedToAgent(l, currentAgentId);
       
-      if (userRole === 'admin') return !isUnassigned && !isOlderThan24Hours(l);
+      if (userRole === 'admin') {
+        if (isUnassigned || isOlderThan24Hours(l)) return false;
+        if (selectedCoordinatorFilter) {
+          if (selectedCoordinatorFilter === 'unassigned') {
+            if (!isUnassigned) return false;
+          } else if (!isAssignedToAgent(l, selectedCoordinatorFilter)) {
+            return false;
+          }
+        }
+        return true;
+      }
       return isMine && !isOlderThan24Hours(l);
     }).length;
-  }, [activeChatLeads, currentAgentId, userRole]);
+  }, [activeChatLeads, currentAgentId, userRole, selectedCoordinatorFilter]);
 
   const historyLeadsCount = useMemo(() => {
     return activeChatLeads.filter(l => {
+      const isUnassigned = !l.assignedTo || 
+        l.assignedTo.toLowerCase() === 'unassigned' || 
+        l.assignedTo.toLowerCase() === 'all' ||
+        l.assignedTo.trim() === '';
       const isMine = isAssignedToAgent(l, currentAgentId);
-      if (userRole === 'admin') return isOlderThan24Hours(l);
+      if (userRole === 'admin') {
+        if (!isOlderThan24Hours(l)) return false;
+        if (selectedCoordinatorFilter) {
+          if (selectedCoordinatorFilter === 'unassigned') {
+            if (!isUnassigned) return false;
+          } else if (!isAssignedToAgent(l, selectedCoordinatorFilter)) {
+            return false;
+          }
+        }
+        return true;
+      }
       return isMine && isOlderThan24Hours(l);
     }).length;
-  }, [activeChatLeads, currentAgentId, userRole]);
+  }, [activeChatLeads, currentAgentId, userRole, selectedCoordinatorFilter]);
+
+  // Total unread messages count for requesting
+  const requestingUnreadCount = useMemo(() => {
+    return activeChatLeads.reduce((sum, l) => {
+      const isUnassigned = !l.assignedTo || 
+        l.assignedTo.toLowerCase() === 'unassigned' || 
+        l.assignedTo.toLowerCase() === 'all' ||
+        l.assignedTo.trim() === '';
+      const isReq = isUnassigned && !isOlderThan24Hours(l);
+      if (!isReq) return sum;
+      const unreadMsgs = (l.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
+      return sum + unreadMsgs;
+    }, 0);
+  }, [activeChatLeads]);
+
+  // Total unread messages count for active chats
+  const activeUnreadCount = useMemo(() => {
+    return activeChatLeads.reduce((sum, l) => {
+      const isUnassigned = !l.assignedTo || 
+        l.assignedTo.toLowerCase() === 'unassigned' || 
+        l.assignedTo.toLowerCase() === 'all' ||
+        l.assignedTo.trim() === '';
+      const isMine = isAssignedToAgent(l, currentAgentId);
+      let isActive = false;
+      if (userRole === 'admin') {
+        isActive = !isUnassigned && !isOlderThan24Hours(l);
+        if (selectedCoordinatorFilter) {
+          if (selectedCoordinatorFilter === 'unassigned') {
+            if (!isUnassigned) isActive = false;
+          } else if (!isAssignedToAgent(l, selectedCoordinatorFilter)) {
+            isActive = false;
+          }
+        }
+      } else {
+        isActive = isMine && !isOlderThan24Hours(l);
+      }
+      if (!isActive) return sum;
+      const unreadMsgs = (l.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
+      return sum + unreadMsgs;
+    }, 0);
+  }, [activeChatLeads, currentAgentId, userRole, selectedCoordinatorFilter]);
+
+  // Total unread messages count for history (closed) chats
+  const historyUnreadCount = useMemo(() => {
+    return activeChatLeads.reduce((sum, l) => {
+      const isUnassigned = !l.assignedTo || 
+        l.assignedTo.toLowerCase() === 'unassigned' || 
+        l.assignedTo.toLowerCase() === 'all' ||
+        l.assignedTo.trim() === '';
+      const isMine = isAssignedToAgent(l, currentAgentId);
+      let isHist = false;
+      if (userRole === 'admin') {
+        isHist = isOlderThan24Hours(l);
+        if (selectedCoordinatorFilter) {
+          if (selectedCoordinatorFilter === 'unassigned') {
+            if (!isUnassigned) isHist = false;
+          } else if (!isAssignedToAgent(l, selectedCoordinatorFilter)) {
+            isHist = false;
+          }
+        }
+      } else {
+        isHist = isMine && isOlderThan24Hours(l);
+      }
+      if (!isHist) return sum;
+      const unreadMsgs = (l.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
+      return sum + unreadMsgs;
+    }, 0);
+  }, [activeChatLeads, currentAgentId, userRole, selectedCoordinatorFilter]);
 
   // Filtered leads based on RBAC (Admin vs Coordinator) and active filter
   const filteredChatLeads = useMemo(() => {
@@ -178,6 +272,15 @@ export default function MessagingCenter({
         lead.assignedTo.trim() === '';
       const olderThan24h = isOlderThan24Hours(lead);
       const assignedToMe = isAssignedToAgent(lead, currentAgentId);
+
+      // Admin coordinator filter (applies to active and history tabs, since requesting is unassigned)
+      if (userRole === 'admin' && selectedCoordinatorFilter && filterType !== 'requesting') {
+        if (selectedCoordinatorFilter === 'unassigned') {
+          if (!isUnassigned) return false;
+        } else {
+          if (!isAssignedToAgent(lead, selectedCoordinatorFilter)) return false;
+        }
+      }
 
       // Requesting: Always unassigned
       if (filterType === 'requesting') {
@@ -221,13 +324,9 @@ export default function MessagingCenter({
 
   // Currently active lead for chat panel
   const currentChatLead = useMemo(() => {
-    if (filteredChatLeads.length === 0) return null;
-    if (!selectedLeadId) {
-      return filteredChatLeads[0];
-    }
-    const found = filteredChatLeads.find(l => l.id === selectedLeadId);
-    return found || filteredChatLeads[0];
-  }, [filteredChatLeads, selectedLeadId]);
+    if (!selectedLeadId) return null;
+    return leads.find(l => l.id === selectedLeadId) || null;
+  }, [leads, selectedLeadId]);
 
   // Sync lead form data when active lead changes
   useEffect(() => {
@@ -255,6 +354,30 @@ export default function MessagingCenter({
       setTagAddedToast(null);
     }
   }, [currentChatLead?.id]);
+
+  // Mark as read when active lead changes in MessagingCenter
+  useEffect(() => {
+    if (selectedLeadId) {
+      const activeLead = leads.find(l => l.id === selectedLeadId);
+      const hasUnread = activeLead && (activeLead.messages || []).some(m => m.sender === 'lead' && m.status !== 'read');
+      
+      if (hasUnread) {
+        fetch(`/api/leads/${selectedLeadId}/read`, { method: 'POST' })
+          .then(async (res) => {
+            if (res.ok) {
+              const updatedLeadRes = await fetch(`/api/leads/${selectedLeadId}`);
+              if (updatedLeadRes.ok) {
+                const updatedLead = await updatedLeadRes.json();
+                if (onLeadUpdated) {
+                  onLeadUpdated(updatedLead);
+                }
+              }
+            }
+          })
+          .catch(err => console.error('Error marking as read in MessagingCenter:', err));
+      }
+    }
+  }, [selectedLeadId, leads, onLeadUpdated]);
 
   // Handle lead item click in list
   const handleSelectChat = (lead: Lead) => {
@@ -285,6 +408,28 @@ export default function MessagingCenter({
       ...prev,
       tags: prev.tags.filter(t => t !== tagToRemove)
     }));
+  };
+
+  // Refresh currently active chat messages and details directly
+  const handleRefreshActiveChat = async () => {
+    if (!currentChatLead || isRefreshingChat) return;
+    setIsRefreshingChat(true);
+    try {
+      const res = await fetch(`/api/leads/${currentChatLead.id}`);
+      if (res.ok) {
+        const updatedLead = await res.json();
+        if (onLeadUpdated) {
+          onLeadUpdated(updatedLead);
+        }
+      }
+      if (onRefreshData) {
+        onRefreshData();
+      }
+    } catch (err) {
+      console.error('Error refreshing active chat:', err);
+    } finally {
+      setIsRefreshingChat(false);
+    }
   };
 
   // Save lead details and transfer to coordinator
@@ -537,6 +682,26 @@ export default function MessagingCenter({
             />
           </div>
 
+          {/* Coordinator Filter (Admin only) */}
+          {userRole === 'admin' && (
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1.5 px-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+              <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase shrink-0">Coordinator:</span>
+              <select
+                value={selectedCoordinatorFilter}
+                onChange={(e) => setSelectedCoordinatorFilter(e.target.value)}
+                className="flex-1 bg-transparent border-none p-0 focus:ring-0 text-xs font-black text-slate-700 dark:text-slate-300 focus:outline-hidden cursor-pointer"
+              >
+                <option value="" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans font-medium text-xs">👤 All Coordinators</option>
+                <option value="unassigned" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans font-medium text-xs">⚠️ Unassigned</option>
+                {coordinators.map(c => (
+                  <option key={c.id} value={c.displayName || c.username} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans font-medium text-xs">
+                    👤 {c.displayName || c.username}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Filter Buttons: Single Line, No-Wrap */}
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-nowrap w-full py-0.5">
             {/* Tab 1: Requesting */}
@@ -554,6 +719,11 @@ export default function MessagingCenter({
                   filterType === 'requesting' ? 'bg-white text-amber-700' : 'bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200'
                 }`}>
                   {requestingLeadsCount}
+                </span>
+              )}
+              {requestingUnreadCount > 0 && (
+                <span className="text-[9.5px] px-1.5 py-0.2 rounded-full font-mono font-black bg-rose-500 text-white animate-pulse" title={`${requestingUnreadCount} unread WhatsApp messages`}>
+                  ✉ {requestingUnreadCount}
                 </span>
               )}
             </button>
@@ -574,6 +744,11 @@ export default function MessagingCenter({
                   filterType === 'active' ? 'bg-white text-emerald-700' : 'bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-200'
                 }`}>
                   {activeLeadsCount}
+                </span>
+              )}
+              {activeUnreadCount > 0 && (
+                <span className="text-[9.5px] px-1.5 py-0.2 rounded-full font-mono font-black bg-rose-500 text-white animate-pulse" title={`${activeUnreadCount} unread WhatsApp messages`}>
+                  ✉ {activeUnreadCount}
                 </span>
               )}
             </button>
@@ -627,7 +802,7 @@ export default function MessagingCenter({
                 const isSelected = currentChatLead?.id === lead.id;
                 const msgs = (lead.messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
                 const latestMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
-                const inboundCount = msgs.filter(m => m.sender === 'lead').length;
+                const inboundCount = msgs.filter(m => m.sender === 'lead' && m.status !== 'read').length;
                 const isLatestFromLead = latestMsg?.sender === 'lead';
                 const isUnassigned = !lead.assignedTo || 
                   lead.assignedTo.toLowerCase() === 'unassigned' || 
@@ -850,16 +1025,15 @@ export default function MessagingCenter({
                   </button>
 
                   {/* Refresh button */}
-                  {onRefreshData && (
-                    <button
-                      onClick={onRefreshData}
-                      className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
-                      title="Refresh Chat"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      <span>Refresh</span>
-                    </button>
-                  )}
+                  <button
+                    onClick={handleRefreshActiveChat}
+                    disabled={isRefreshingChat}
+                    className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap disabled:opacity-50"
+                    title="Refresh Chat"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingChat ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshingChat ? 'Refreshing...' : 'Refresh'}</span>
+                  </button>
                 </div>
               </div>
 
@@ -1273,11 +1447,11 @@ export default function MessagingCenter({
                         <select
                           value={leadFormData.assignedTo}
                           onChange={(e) => setLeadFormData({ ...leadFormData, assignedTo: e.target.value })}
-                          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border-2 border-indigo-300 dark:border-indigo-700 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-black focus:outline-hidden focus:border-indigo-500 shadow-xs"
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border-2 border-indigo-300 dark:border-indigo-700 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-black focus:outline-hidden focus:border-indigo-500 shadow-xs cursor-pointer"
                         >
-                          <option value="unassigned">⚠️ Unassigned (Keep in Requesting)</option>
+                          <option value="unassigned" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans font-medium text-xs">⚠️ Unassigned (Keep in Requesting)</option>
                           {coordinators.map(c => (
-                            <option key={c.id} value={c.displayName || c.username}>
+                            <option key={c.id} value={c.displayName || c.username} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans font-medium text-xs">
                               👤 {c.displayName || c.username} ({c.role === 'admin' ? 'Admin' : 'Coordinator'})
                             </option>
                           ))}

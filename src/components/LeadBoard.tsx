@@ -247,6 +247,17 @@ export default function LeadBoard({
   const visibleLeads = React.useMemo(() => {
     let filtered = leads;
 
+    // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
+    filtered = filtered.filter(lead => {
+      const isUnassigned = !lead.assignedTo || 
+        lead.assignedTo.toLowerCase() === 'unassigned' || 
+        lead.assignedTo.trim() === '';
+      if (lead.stage === 'new' && isUnassigned) {
+        return false;
+      }
+      return true;
+    });
+
     // Search query filter
     if (searchQuery) {
       const q = searchQuery.toLowerCase().trim();
@@ -415,13 +426,13 @@ export default function LeadBoard({
         <div className="flex items-center justify-between gap-1.5">
           <h4 className="font-extrabold text-slate-100 text-sm tracking-wide uppercase font-sans truncate">{formatCandidateName(String(lead.name || 'Candidate'))}</h4>
           {(() => {
-            const inboundCount = (lead.messages || []).filter(m => m && m.sender === 'lead').length;
+            const inboundCount = (lead.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
             const totalMsgCount = (lead.messages || []).filter(m => m && m.sender !== 'system').length;
             if (inboundCount > 0) {
               return (
                 <span 
                   className="shrink-0 text-[10px] font-black text-emerald-950 dark:text-emerald-300 bg-emerald-400 dark:bg-emerald-950/90 border border-emerald-500/50 dark:border-emerald-700/80 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs animate-pulse font-mono"
-                  title={`${inboundCount} candidate WhatsApp message${inboundCount > 1 ? 's' : ''} received (${totalMsgCount} total messages)`}
+                  title={`${inboundCount} unread WhatsApp message${inboundCount > 1 ? 's' : ''} received (${totalMsgCount} total messages)`}
                 >
                   <MessageSquare className="h-2.5 w-2.5 fill-current" />
                   <span>{inboundCount}</span>
@@ -707,6 +718,10 @@ export default function LeadBoard({
                   if (col.id === 'cold_leads') return l.stage === 'cold_leads' || l.stage === 'rotations';
                   return l.stage === col.id;
                 });
+                const colUnreadCount = colLeads.reduce((acc, lead) => {
+                  const leadUnread = (lead.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
+                  return acc + leadUnread;
+                }, 0);
                 const isSelected = selectedStage === col.id || 
                   (selectedStage === 'negotiating' && col.id === 'in_discussion') ||
                   (selectedStage === 'proposal' && col.id === 'office_visited') ||
@@ -790,8 +805,12 @@ export default function LeadBoard({
                         <IconComponent className={`w-3.5 h-3.5 ${iconColor}`} />
                       </div>
                       <div className="flex flex-col items-end gap-0.5">
-                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md font-mono border ${badgeColor}`}>
-                          {colLeads.length} {colLeads.length === 1 ? 'Lead' : 'Leads'}
+                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md font-mono border ${
+                          colUnreadCount > 0 
+                            ? 'bg-rose-600 dark:bg-rose-500 text-white border-rose-500/50 animate-pulse' 
+                            : badgeColor
+                        }`}>
+                          {colUnreadCount > 0 ? `(${colLeads.length} - ${colUnreadCount}) ✉` : `${colLeads.length} ${colLeads.length === 1 ? 'Lead' : 'Leads'}`}
                         </span>
                         {col.id === 'in_discussion' && (
                           <span className={`text-[8.5px] font-extrabold font-mono ${inDiscussionPctInfo.textColor}`} title={`In Discussion load: ${inDiscussionPctInfo.inDiscussionCount}/${inDiscussionPctInfo.totalAssignedLifetime} lifetime assigned leads (${inDiscussionPctInfo.percentage.toFixed(1)}%)`}>
@@ -883,6 +902,10 @@ export default function LeadBoard({
                   if (col.id === 'cold_leads') return l.stage === 'cold_leads' || l.stage === 'rotations';
                   return l.stage === col.id;
                 });
+                const colClassicUnreadCount = colLeads.reduce((acc, lead) => {
+                  const leadUnread = (lead.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
+                  return acc + leadUnread;
+                }, 0);
                 const isDraggedOver = draggedOverColumn === col.id;
 
                 return (
@@ -909,9 +932,20 @@ export default function LeadBoard({
                   >
                     {/* Column Header */}
                     <div className="flex items-center justify-between mb-4 border-b border-slate-700 pb-2.5 min-h-[44px]">
-                      <span className={`text-[9px] sm:text-[9.5px] font-black uppercase tracking-tight px-2 py-1 rounded-md leading-normal break-words inline-block ${col.headerColor}`}>
-                        {col.title} ({colLeads.length}{col.id === 'in_discussion' ? ` • ${inDiscussionPctInfo.percentage.toFixed(1)}%` : ''})
-                      </span>
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <span className={`text-[9px] sm:text-[9.5px] font-black uppercase tracking-tight px-2 py-1 rounded-md leading-normal break-words inline-block ${
+                          colClassicUnreadCount > 0 
+                            ? 'bg-rose-600 text-white animate-pulse' 
+                            : col.headerColor
+                        }`}>
+                          {col.title} ({colClassicUnreadCount > 0 ? `${colLeads.length} - ${colClassicUnreadCount}` : colLeads.length}{col.id === 'in_discussion' ? ` • ${inDiscussionPctInfo.percentage.toFixed(1)}%` : ''})
+                        </span>
+                        {colClassicUnreadCount > 0 && (
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white font-mono animate-pulse shrink-0 flex items-center gap-0.5" title={`${colClassicUnreadCount} unread WhatsApp messages`}>
+                            ✉ {colClassicUnreadCount}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Leads Stack */}

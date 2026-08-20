@@ -1736,6 +1736,38 @@ app.post('/api/whatsapp/templates/sync', async (req, res) => {
   }
 });
 
+// POST mark all WhatsApp messages for a lead as read
+app.post('/api/leads/:id/read', async (req, res) => {
+  try {
+    const leads = await getLeads();
+    const idx = leads.findIndex(l => l.id === req.params.id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Lead not found' });
+      return;
+    }
+
+    const lead = leads[idx];
+    let changed = false;
+    if (Array.isArray(lead.messages)) {
+      lead.messages.forEach(m => {
+        if (m.sender === 'lead' && m.status !== 'read') {
+          m.status = 'read';
+          changed = true;
+        }
+      });
+    }
+
+    if (changed) {
+      clearLeadsCache();
+      await saveLeads(leads);
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Failed to mark messages as read:', err);
+    res.status(500).json({ error: 'Failed to mark messages as read' });
+  }
+});
+
 // POST send WhatsApp message to a lead (Outbound via Meta Cloud API)
 app.post('/api/leads/:id/messages', async (req, res) => {
   try {
@@ -1856,7 +1888,7 @@ app.post('/api/leads/:id/simulate-reply', async (req, res) => {
       senderName: candidateName,
       text: replyText,
       timestamp: new Date().toISOString(),
-      status: 'read',
+      status: 'delivered',
       channel: 'whatsapp'
     };
 
@@ -1949,7 +1981,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
           senderName: lead.name,
           text: String(messageBody),
           timestamp: new Date().toISOString(),
-          status: 'read',
+          status: 'delivered',
           channel: 'whatsapp'
         };
 
@@ -2015,7 +2047,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
               senderName: `WhatsApp Lead ${cleanPhone.slice(-10)}`,
               text: String(messageBody),
               timestamp: new Date().toISOString(),
-              status: 'read',
+              status: 'delivered',
               channel: 'whatsapp'
             }
           ]

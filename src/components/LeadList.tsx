@@ -1536,12 +1536,12 @@ export default function LeadList({
                           <div className={`font-extrabold text-emerald-800 dark:text-emerald-400 uppercase tracking-normal truncate ${!isInlineEdit && 'group-hover:text-accent-emerald transition-colors'} flex items-center gap-1.5 font-sans`}>
                             <span className="truncate">{formatCandidateName(lead.name)}</span>
                             {(() => {
-                              const inboundCount = (lead.messages || []).filter(m => m.sender === 'lead').length;
+                              const inboundCount = (lead.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
                               if (inboundCount > 0) {
                                 return (
                                   <span 
                                     className="shrink-0 text-[9.5px] font-black text-emerald-950 dark:text-emerald-300 bg-emerald-400 dark:bg-emerald-950/90 border border-emerald-500/50 dark:border-emerald-700/80 px-1.5 py-0.2 rounded-full flex items-center gap-0.5 shadow-2xs animate-pulse font-mono"
-                                    title={`${inboundCount} candidate WhatsApp message${inboundCount > 1 ? 's' : ''} received`}
+                                    title={`${inboundCount} unread WhatsApp message${inboundCount > 1 ? 's' : ''} received`}
                                   >
                                     <MessageSquare className="h-2.5 w-2.5 fill-current" />
                                     <span>{inboundCount}</span>

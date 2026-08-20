@@ -2696,6 +2696,12 @@ export async function getWhatsAppTemplates(): Promise<WhatsAppTemplate[]> {
   }
 
   let customTemplates: WhatsAppTemplate[] = [];
+  let isNewSetup = false;
+
+  // If local file does not exist, consider it a new setup
+  if (!fs.existsSync(TEMPLATES_FILE)) {
+    isNewSetup = true;
+  }
 
   if (checkCloudStatus()) {
     try {
@@ -2703,32 +2709,49 @@ export async function getWhatsAppTemplates(): Promise<WhatsAppTemplate[]> {
       snapshot.forEach(docSnap => {
         customTemplates.push(docSnap.data() as WhatsAppTemplate);
       });
-      // Update local file with latest from cloud
-      safeWriteJsonSync(TEMPLATES_FILE, customTemplates);
+      
+      // If Firestore collection is empty and it's a new setup, seed
+      if (snapshot.empty && isNewSetup) {
+        console.log('[Templates] Firestore and local templates are empty. Seeding default templates...');
+        customTemplates = DEFAULT_WHATSAPP_TEMPLATES.map(t => ({
+          ...t,
+          type: t.type || 'template'
+        }));
+        
+        // Write local copy
+        safeWriteJsonSync(TEMPLATES_FILE, customTemplates);
+        
+        // Write to Firestore
+        for (const t of customTemplates) {
+          try {
+            await setDoc(doc(db, 'whatsapp_templates', t.id), t);
+          } catch (e) {
+            console.error('Failed to seed default template to cloud:', t.id, e);
+          }
+        }
+      } else {
+        // Update local file with latest from cloud
+        safeWriteJsonSync(TEMPLATES_FILE, customTemplates);
+      }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to fetch custom templates from cloud, falling back to local files:', err);
       customTemplates = safeReadJsonSync<WhatsAppTemplate[]>(TEMPLATES_FILE, []);
     }
   } else {
-    customTemplates = safeReadJsonSync<WhatsAppTemplate[]>(TEMPLATES_FILE, []);
+    if (isNewSetup) {
+      console.log('[Templates] Local templates are empty. Seeding default templates locally...');
+      customTemplates = DEFAULT_WHATSAPP_TEMPLATES.map(t => ({
+        ...t,
+        type: t.type || 'template'
+      }));
+      safeWriteJsonSync(TEMPLATES_FILE, customTemplates);
+    } else {
+      customTemplates = safeReadJsonSync<WhatsAppTemplate[]>(TEMPLATES_FILE, []);
+    }
   }
 
-  // Merge default templates with custom templates. Ensure unique by ID
-  const mergedTemplatesMap = new Map<string, WhatsAppTemplate>();
-  
-  // Load default templates
-  DEFAULT_WHATSAPP_TEMPLATES.forEach(t => {
-    mergedTemplatesMap.set(t.id, t);
-  });
-
-  // Load custom templates (override defaults if IDs match)
-  customTemplates.forEach(t => {
-    console.log(`[Templates] Loading template: ${t.id}, type: ${t.type}`);
-    mergedTemplatesMap.set(t.id, t);
-  });
-
-  const finalTemplates = Array.from(mergedTemplatesMap.values());
-  console.log(`[Templates] Final count: ${finalTemplates.length}`);
+  const finalTemplates = customTemplates;
+  console.log(`[Templates] Loaded count: ${finalTemplates.length}`);
   dbCache.templates = { data: finalTemplates, timestamp: Date.now() };
   return finalTemplates;
 }
