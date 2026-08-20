@@ -18,7 +18,7 @@ import {
   writeBatch,
   setLogLevel
 } from 'firebase/firestore';
-import { Lead, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate } from '../types.ts';
+import { Lead, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings } from '../types.ts';
 
 // Configure Firebase SDK to only log errors, suppressing gRPC connection warnings
 setLogLevel('error');
@@ -36,6 +36,7 @@ const METADATA_FILE = path.join(DATA_DIR, 'metadata.json');
 const WALLETS_FILE = path.join(DATA_DIR, 'wallets.json');
 const INCENTIVE_RULES_FILE = path.join(DATA_DIR, 'incentive_rules.json');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'whatsapp_templates.json');
+const AUTOREPLY_FILE = path.join(DATA_DIR, 'whatsapp_autoreply.json');
 
 // --- SAFE ATOMIC JSON READ / WRITE / RECOVERY HELPERS ---
 
@@ -415,6 +416,7 @@ const dbCache = {
   wallets: null as CacheEntry<Wallet[]> | null,
   incentive_rules: null as CacheEntry<IncentiveRule[]> | null,
   templates: null as CacheEntry<WhatsAppTemplate[]> | null,
+  auto_reply: null as CacheEntry<WhatsAppAutoReplySettings> | null,
 };
 
 let lastFullLeadsSyncTime = 0;
@@ -2820,6 +2822,66 @@ export async function deleteWhatsAppTemplate(templateId: string): Promise<void> 
   }
   // Force cache clear again after cloud operations
   dbCache.templates = null;
+}
+
+const DEFAULT_AUTO_REPLY_SETTINGS: WhatsAppAutoReplySettings = {
+  enabled: false,
+  text: "Hello! Thank you for contacting Career Growth Placement. We have received your query and one of our job coordinators will review your application and get back to you shortly. Have a great day! ✨",
+  delay: 5 // Default delay of 5 seconds
+};
+
+export async function getWhatsAppAutoReplySettings(): Promise<WhatsAppAutoReplySettings> {
+  await initializeDatabase();
+
+  if (dbCache.auto_reply && (Date.now() - dbCache.auto_reply.timestamp < CACHE_TTL_MS)) {
+    return dbCache.auto_reply.data;
+  }
+
+  let settings: WhatsAppAutoReplySettings = { ...DEFAULT_AUTO_REPLY_SETTINGS };
+
+  if (checkCloudStatus()) {
+    try {
+      const docRef = doc(db, 'settings', 'whatsapp_autoreply');
+      const docSnap = await runWithTimeout(getDoc(docRef), 8000);
+      if (docSnap.exists()) {
+        settings = docSnap.data() as WhatsAppAutoReplySettings;
+      } else {
+        // Seed default settings to Cloud
+        await runWithTimeout(setDoc(docRef, cleanForFirestore(settings)), 8000);
+        safeWriteJsonSync(AUTOREPLY_FILE, settings);
+      }
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to fetch auto-reply settings, falling back to local files:', err);
+      settings = safeReadJsonSync<WhatsAppAutoReplySettings>(AUTOREPLY_FILE, DEFAULT_AUTO_REPLY_SETTINGS);
+    }
+  } else {
+    settings = safeReadJsonSync<WhatsAppAutoReplySettings>(AUTOREPLY_FILE, DEFAULT_AUTO_REPLY_SETTINGS);
+  }
+
+  dbCache.auto_reply = { data: settings, timestamp: Date.now() };
+  return settings;
+}
+
+export async function saveWhatsAppAutoReplySettings(settings: WhatsAppAutoReplySettings): Promise<void> {
+  await initializeDatabase();
+  console.log(`[AutoReply] Saving auto-reply settings. Enabled: ${settings.enabled}, Delay: ${settings.delay}s`);
+
+  // Write local copy
+  safeWriteJsonSync(AUTOREPLY_FILE, settings);
+
+  // Clear cache
+  dbCache.auto_reply = null;
+
+  if (checkCloudStatus()) {
+    try {
+      const docRef = doc(db, 'settings', 'whatsapp_autoreply');
+      await runWithTimeout(setDoc(docRef, cleanForFirestore(settings)), 8000);
+      console.log(`[Firestore Client] Saved WhatsApp auto-reply settings to cloud.`);
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to sync auto-reply settings to cloud:', err);
+      handleCloudError('Save WhatsApp Auto Reply', err);
+    }
+  }
 }
 
 

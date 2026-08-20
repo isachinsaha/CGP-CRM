@@ -171,6 +171,12 @@ export interface IncentiveRule {
   createdAt: string;
 }
 
+export interface WhatsAppAutoReplySettings {
+  enabled: boolean;
+  text: string;
+  delay: number; // in seconds
+}
+
 
 
 

@@ -25,6 +25,7 @@ import MetadataManager from './components/MetadataManager.tsx';
 import IncentiveRulesManager from './components/IncentiveRulesManager.tsx';
 import MessagingCenter from './components/MessagingCenter.tsx';
 import TemplateManagerModal from './components/TemplateManagerModal.tsx';
+import AutoReplyManagerModal from './components/AutoReplyManagerModal.tsx';
 import CGPLogo from './components/CGPLogo.tsx';
 import ImportantUpdatesBar from './components/ImportantUpdatesBar.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
@@ -43,6 +44,7 @@ export default function App() {
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]); // Add state
   const [isCoordManagerOpen, setIsCoordManagerOpen] = useState(false);
   const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false); // Add this
+  const [isAutoReplyOpen, setIsAutoReplyOpen] = useState(false);
   const [isMetadataManagerOpen, setIsMetadataManagerOpen] = useState(false);
   const [isIncentiveRulesOpen, setIsIncentiveRulesOpen] = useState(false);
   const [isBackupManagerOpen, setIsBackupManagerOpen] = useState(false);
@@ -631,6 +633,14 @@ export default function App() {
                         >
                           <MessageSquare className="h-4 w-4 text-emerald-500 shrink-0" />
                           <span>Manage Templates</span>
+                        </button>
+                        <button
+                          onClick={() => { setIsAutoReplyOpen(true); setIsAdminMenuOpen(false); }}
+                          className="w-full px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition text-left cursor-pointer"
+                          id="admin-menu-auto-reply-btn"
+                        >
+                          <Sparkles className="h-4 w-4 text-emerald-500 shrink-0" />
+                          <span>Auto-Reply Settings</span>
                         </button>
                         <button
                           onClick={() => { setIsIncentiveRulesOpen(true); setIsAdminMenuOpen(false); }}
@@ -1417,6 +1427,14 @@ export default function App() {
               .then(data => setTemplates(data.templates || []))
               .catch(console.error);
           }}
+        />
+      )}
+
+      {/* WhatsApp Auto-Reply Manager */}
+      {isAutoReplyOpen && (
+        <AutoReplyManagerModal
+          isOpen={isAutoReplyOpen}
+          onClose={() => setIsAutoReplyOpen(false)}
         />
       )}
 

@@ -41,9 +41,11 @@ import {
   clearLeadsCache,
   getWhatsAppTemplates,
   saveWhatsAppTemplate,
-  deleteWhatsAppTemplate
+  deleteWhatsAppTemplate,
+  getWhatsAppAutoReplySettings,
+  saveWhatsAppAutoReplySettings
 } from './src/server/db.ts';
-import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate } from './src/types.ts';
+import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings } from './src/types.ts';
 import { isDefaultExperience, getEffectiveExperience } from './src/utils.ts';
 import { DEFAULT_WHATSAPP_TEMPLATES, sendWhatsAppMessage, replaceTemplatePlaceholders, formatPhoneForWhatsApp } from './src/server/whatsapp.ts';
 
@@ -1413,6 +1415,98 @@ app.put('/api/leads/:id', async (req, res) => {
 
 // ---------------- DIRECT META WHATSAPP CLOUD API ENDPOINTS ----------------
 
+// GET WhatsApp auto-reply settings
+app.get('/api/whatsapp/auto-reply', async (req, res) => {
+  try {
+    const settings = await getWhatsAppAutoReplySettings();
+    res.json({ settings });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST update WhatsApp auto-reply settings
+app.post('/api/whatsapp/auto-reply', async (req, res) => {
+  try {
+    const { enabled, text, delay } = req.body;
+    const settings: WhatsAppAutoReplySettings = {
+      enabled: typeof enabled === 'boolean' ? enabled : false,
+      text: String(text || '').trim(),
+      delay: typeof delay === 'number' ? delay : 5
+    };
+    await saveWhatsAppAutoReplySettings(settings);
+    res.json({ success: true, settings });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Helper function to handle delayed auto-replies for WhatsApp
+async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadName: string) {
+  try {
+    const settings = await getWhatsAppAutoReplySettings();
+    if (!settings || !settings.enabled) {
+      return;
+    }
+
+    const delayMs = Math.max(0, settings.delay) * 1000;
+    
+    setTimeout(async () => {
+      try {
+        const leads = await getLeads();
+        const matchIdx = leads.findIndex(l => l.id === leadId);
+        if (matchIdx === -1) return;
+
+        const lead = leads[matchIdx];
+        
+        // Construct reply text using placeholders
+        const replyText = replaceTemplatePlaceholders(settings.text, lead, 'CGP Auto-Reply');
+
+        console.log(`[AutoReply] Triggering auto-reply to ${lead.name} (${leadPhone}) with ${delayMs}ms delay...`);
+
+        // Send the message
+        const result = await sendWhatsAppMessage(leadPhone, replyText, leadName);
+
+        if (result.success) {
+          const autoReplyMsg: Message = {
+            id: `msg_auto_${Date.now()}`,
+            sender: 'system',
+            senderName: 'CGP Auto-Reply',
+            text: replyText,
+            timestamp: new Date().toISOString(),
+            status: 'delivered',
+            channel: 'whatsapp'
+          };
+
+          if (!Array.isArray(lead.messages)) lead.messages = [];
+          lead.messages.push(autoReplyMsg);
+
+          if (!Array.isArray(lead.timeline)) lead.timeline = [];
+          lead.timeline.push({
+            id: `tl_${Date.now()}_autoreply`,
+            type: 'message',
+            text: `Automated WhatsApp Reply Sent: "${replyText.substring(0, 75)}"`,
+            actor: 'System',
+            timestamp: new Date().toISOString()
+          });
+
+          lead.updatedAt = new Date().toISOString();
+          leads[matchIdx] = lead;
+          clearLeadsCache();
+          await saveLeads(leads);
+          console.log(`[AutoReply] Auto-reply successfully sent and saved.`);
+        } else {
+          console.error(`[AutoReply] Failed to send auto-reply:`, result.details);
+        }
+      } catch (err) {
+        console.error('[AutoReply] Error in delayed auto-reply execution:', err);
+      }
+    }, delayMs);
+  } catch (err) {
+    console.error('[AutoReply] Error checking auto-reply settings:', err);
+  }
+}
+
 // GET WhatsApp service configuration & active status
 app.get('/api/whatsapp/config', (req, res) => {
   const hasMetaKey = (!!process.env.WHATSAPP_API_KEY && process.env.WHATSAPP_API_KEY !== 'MY_WHATSAPP_API_KEY' && process.env.WHATSAPP_API_KEY.trim().length > 0) ||
@@ -1912,6 +2006,9 @@ app.post('/api/leads/:id/simulate-reply', async (req, res) => {
     leads[idx] = lead;
     await saveLeads(leads);
 
+    // Trigger auto-reply if enabled
+    handleAutoReplyIfEnabled(lead.id, lead.phone, candidateName);
+
     res.json({
       success: true,
       lead,
@@ -2002,6 +2099,9 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
         clearLeadsCache();
         await saveLeads(leads);
         console.log(`[Meta Webhook POST] Saved inbound message to candidate database and cleared memory cache.`);
+
+        // Trigger auto-reply if enabled
+        handleAutoReplyIfEnabled(lead.id, lead.phone, lead.name);
       } else {
         console.warn(`[Meta Webhook POST] Candidate match not found for phone "${cleanPhone}". Adding as new conversion inquiry.`);
         // Fallback: If candidate doesn't exist, create a new Inquiry automatically!
@@ -2056,6 +2156,9 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
         clearLeadsCache();
         await addLead(newLead);
         console.log(`[Meta Webhook POST] Created new active lead ID="${newLeadId}" for inbound message and cleared memory cache.`);
+
+        // Trigger auto-reply if enabled
+        handleAutoReplyIfEnabled(newLead.id, newLead.phone, newLead.name);
       }
     } else {
       console.warn(`[Meta Webhook POST] Ignored webhook payload. Missing fromNumber ("${fromNumber}") or messageBody ("${messageBody}")`);
@@ -2533,6 +2636,10 @@ Extract:
     };
 
     await addLead(newLead);
+    
+    // Trigger auto-reply if enabled
+    handleAutoReplyIfEnabled(newLead.id, phone, newLead.name);
+
     res.json({ success: true, lead: newLead, simulated: !ai });
 
   } catch (err) {
