@@ -208,7 +208,9 @@ export default function LeadModal({
     docResume: initialLead.docResume === true,
     docOfficeVisited: initialLead.docOfficeVisited === true,
     docOthers: initialLead.docOthers === true,
-    reminderEnabled: !!initialLead.reminderEnabled
+    reminderEnabled: !!initialLead.reminderEnabled,
+    autoReplySent: initialLead.autoReplySent === true,
+    intake: initialLead.intake === true
   });
 
   const [savingForm, setSavingForm] = useState(false);
@@ -254,7 +256,9 @@ export default function LeadModal({
       docResume: initialLead.docResume === true,
       docOfficeVisited: initialLead.docOfficeVisited === true,
       docOthers: initialLead.docOthers === true,
-      reminderEnabled: !!initialLead.reminderEnabled
+      reminderEnabled: !!initialLead.reminderEnabled,
+      autoReplySent: initialLead.autoReplySent === true,
+      intake: initialLead.intake === true
     });
     isFirstMountOrChangeRef.current = true;
   }, [initialLead.id]);
@@ -1311,7 +1315,14 @@ export default function LeadModal({
                       <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Coordinator</label>
                       <SearchableSelect
                         value={formFields.assignedTo}
-                        onChange={(val) => setFormFields(prev => ({ ...prev, assignedTo: val }))}
+                        onChange={(val) => {
+                          const hasRealCoordinator = val && val.trim() !== '' && val.toLowerCase() !== 'unassigned';
+                          setFormFields(prev => ({
+                            ...prev,
+                            assignedTo: val,
+                            ...(hasRealCoordinator ? { intake: true } : {})
+                          }));
+                        }}
                         options={[
                           { value: '', label: '👤 UNASSIGNED' },
                           ...(coordinators && coordinators.length > 0 ? (

@@ -443,7 +443,7 @@ export default function MessagingCenter({
     try {
       const updatedPayload = {
         ...currentChatLead,
-        name: leadFormData.name.trim() || currentChatLead.name,
+        name: leadFormData.name.trim() || 'Unnamed candidate',
         phone: leadFormData.phone.trim() || currentChatLead.phone,
         alternateNo: leadFormData.alternateNo.trim() || currentChatLead.alternateNo || '',
         gender: leadFormData.gender,
@@ -459,7 +459,8 @@ export default function MessagingCenter({
         stage: leadFormData.stage,
         assignedTo: coordToAssign,
         tags: leadFormData.tags || [],
-        adminRemarks: leadFormData.adminRemarks
+        adminRemarks: leadFormData.adminRemarks,
+        intake: true
       };
 
       const res = await fetch(`/api/leads/${currentChatLead.id}`, {
@@ -614,8 +615,8 @@ export default function MessagingCenter({
   return (
     <div className="flex-1 flex min-h-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-lg overflow-hidden text-left" id="cgp-messaging-center">
       
-      {/* Left Pane: Candidate Conversation List (Width increased by 10%) */}
-      <div className={`w-full md:w-[345px] lg:w-[380px] xl:w-[410px] flex flex-col border-r border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0 ${
+      {/* Left Pane: Candidate Conversation List (Width increased by 15% from original) */}
+      <div className={`w-full md:w-[405px] lg:w-[450px] xl:w-[495px] flex flex-col border-r border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0 ${
         mobileView === 'chat' ? 'hidden md:flex' : 'flex'
       }`}>
         
@@ -878,9 +879,23 @@ export default function MessagingCenter({
                             : 'text-slate-600 dark:text-slate-400'
                         }`}>
                           {latestMsg ? (
-                            <span>
-                              {latestMsg.sender === 'user' ? '✓ ' : ''}
-                              {latestMsg.text}
+                            <span className="inline-flex items-center gap-0.5">
+                              {latestMsg.sender !== 'lead' && (
+                                <span 
+                                  className={`inline-flex items-center shrink-0 mr-1 ${
+                                    latestMsg.status === 'read' 
+                                      ? 'text-sky-500 dark:text-sky-400' 
+                                      : 'text-slate-400 dark:text-slate-500'
+                                  }`}
+                                >
+                                  {latestMsg.status === 'sent' ? (
+                                    <Check className="h-3 w-3 stroke-[2.5]" />
+                                  ) : (
+                                    <CheckCheck className="h-3 w-3 stroke-[2.5]" />
+                                  )}
+                                </span>
+                              )}
+                              <span>{latestMsg.text}</span>
                             </span>
                           ) : (
                             <span className="italic text-slate-400">No message snippet</span>
@@ -1241,6 +1256,7 @@ export default function MessagingCenter({
                               onChange={(e) => setLeadFormData({ ...leadFormData, country: e.target.value })}
                               className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                             >
+                              <option value="">Select Country (Leave Blank)</option>
                               {countries.map(c => (
                                 <option key={c} value={c}>{c}</option>
                               ))}
@@ -1412,6 +1428,7 @@ export default function MessagingCenter({
                             onChange={(e) => setLeadFormData({ ...leadFormData, project: e.target.value })}
                             className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                           >
+                            <option value="">Select Project (Leave Blank)</option>
                             {projects.map(p => (
                               <option key={p} value={p}>{p}</option>
                             ))}

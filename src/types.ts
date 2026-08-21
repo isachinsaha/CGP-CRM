@@ -80,6 +80,8 @@ export interface Lead {
   docOfficeVisited?: boolean;
   docOthers?: boolean;
   reminderEnabled?: boolean;
+  autoReplySent?: boolean;
+  intake?: boolean;
   tasks?: {
     id: string;
     title: string;

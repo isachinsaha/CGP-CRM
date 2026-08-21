@@ -344,6 +344,7 @@ app.get('/api/leads', async (req, res) => {
       agentId = '',
       userRole = '',
       all = 'false',
+      activeTab = '',
       gender = 'All',
       remarksFilter = 'All',
       position = 'All'
@@ -354,6 +355,18 @@ app.get('/api/leads', async (req, res) => {
 
     // 3. Apply multi-layer filters
     let filteredLeads = rawLeads.filter(lead => {
+      // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
+      // OR leads that have not been intaken yet (intake === false)
+      // unless we are specifically inside the 'messages' (WhatsApp Chats) tab view!
+      if (activeTab !== 'messages') {
+        const isUnassigned = !lead.assignedTo || 
+          lead.assignedTo.toLowerCase() === 'unassigned' || 
+          lead.assignedTo.trim() === '';
+        if ((lead.stage === 'new' && isUnassigned) || lead.intake === false) {
+          return false;
+        }
+      }
+
       // A. Bucket / Agent filter
       if (userRole === 'agent' || bucket === 'my') {
         const agentUsername = String(agentId || '').trim().toLowerCase();
@@ -611,7 +624,8 @@ app.post('/api/leads', async (req, res) => {
         }
       ],
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      intake: true
     };
 
     leads.push(newLead);
@@ -727,7 +741,8 @@ app.post('/api/leads/bulk', async (req, res) => {
           }
         ],
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
+        intake: true
       };
 
       newLeadsToAdd.push(newLead);
@@ -1080,7 +1095,8 @@ app.put('/api/leads/:id', async (req, res) => {
       serialNo, entryDate, assignDate, gender, age, origin, country,
       position, experience, qualification, adminRemarks, assignedTo, importance,
       remarks1, remarks2, remarks3, callConnected, tasks, timeline, tags, source, project,
-      docPassportCopy, docResume, docOfficeVisited, docOthers, reminderEnabled
+      docPassportCopy, docResume, docOfficeVisited, docOthers, reminderEnabled,
+      autoReplySent, intake
     } = req.body;
     const leads = await getLeads();
     const idx = leads.findIndex(l => l.id === req.params.id);
@@ -1281,6 +1297,16 @@ app.put('/api/leads/:id', async (req, res) => {
       });
       lead.assignedTo = assignedTo;
       lead.assignDate = new Date().toISOString().split('T')[0];
+
+      // Automatically set intake to true and generate serialNo when assigned to a real coordinator
+      const hasRealCoordinator = assignedTo && assignedTo.trim() !== '' && assignedTo.toLowerCase() !== 'unassigned' && assignedTo.toLowerCase() !== 'all';
+      if (hasRealCoordinator) {
+        lead.intake = true;
+        if (!lead.serialNo) {
+          const sequence = leads.filter(l => l.intake && l.serialNo).length + 1;
+          lead.serialNo = `INQ-${1000 + sequence}`;
+        }
+      }
     }
 
     // Auto-move stage from 'new' (New Inbound) to 'negotiating' (In Discussion) when the 1'st remark is logged
@@ -1389,6 +1415,14 @@ app.put('/api/leads/:id', async (req, res) => {
     if (docOfficeVisited !== undefined) lead.docOfficeVisited = Boolean(docOfficeVisited);
     if (docOthers !== undefined) lead.docOthers = Boolean(docOthers);
     if (reminderEnabled !== undefined) lead.reminderEnabled = Boolean(reminderEnabled);
+    if (autoReplySent !== undefined) lead.autoReplySent = Boolean(autoReplySent);
+    if (intake !== undefined) {
+      lead.intake = Boolean(intake);
+      if (Boolean(intake) && !lead.serialNo) {
+        const sequence = leads.filter(l => l.intake && l.serialNo).length + 1;
+        lead.serialNo = `INQ-${1000 + sequence}`;
+      }
+    }
 
     // Direct overrides for tasks and custom timelines
     if (tasks !== undefined) lead.tasks = tasks;
@@ -1449,20 +1483,80 @@ async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadN
       return;
     }
 
+    // Check 1 (Before scheduling): Ensure no auto-reply has ever been sent/scheduled for this lead
+    const initialLeads = await getLeads();
+    const leadIdx = initialLeads.findIndex(l => l.id === leadId);
+    if (leadIdx === -1) return;
+    const initialLead = initialLeads[leadIdx];
+
+    if (initialLead.autoReplySent) {
+      console.log(`[AutoReply] Skip scheduling. Lead ${initialLead.name} already received or scheduled an auto-reply.`);
+      return;
+    }
+
+    const hasPriorAutoReply = (initialLead.messages || []).some(m => 
+      m && (
+        m.sender === 'system' || 
+        m.senderName === 'CGP Auto-Reply' || 
+        String(m.id).includes('auto') ||
+        (m.text && (
+          m.text.includes('Career Growth Placement') || 
+          m.text.includes('Jobseeker') || 
+          m.text.includes('reaching out')
+        ))
+      )
+    );
+    if (hasPriorAutoReply) {
+      initialLead.autoReplySent = true;
+      initialLead.updatedAt = new Date().toISOString();
+      initialLeads[leadIdx] = initialLead;
+      clearLeadsCache();
+      await saveLeads(initialLeads);
+      console.log(`[AutoReply] Skip scheduling. Lead ${initialLead.name} already had prior auto-reply message. Synchronized flag.`);
+      return;
+    }
+
+    // Set persistent lock immediately to avoid concurrent schedule triggers from quick user double-messages!
+    initialLead.autoReplySent = true;
+    initialLead.updatedAt = new Date().toISOString();
+    initialLeads[leadIdx] = initialLead;
+    clearLeadsCache();
+    await saveLeads(initialLeads);
+    console.log(`[AutoReply] Lock flag set and saved for ${initialLead.name}. Scheduling delayed execution...`);
+
     const delayMs = Math.max(0, settings.delay) * 1000;
+    console.log(`[AutoReply] Scheduling auto-reply for ${initialLead.name} with a delay of ${delayMs}ms...`);
     
     setTimeout(async () => {
       try {
+        // Check 2 (Upon execution): Re-fetch freshest state and double-check messages
         const leads = await getLeads();
         const matchIdx = leads.findIndex(l => l.id === leadId);
         if (matchIdx === -1) return;
 
         const lead = leads[matchIdx];
         
+        const doubleCheckPrior = (lead.messages || []).some(m => 
+          m && (
+            m.sender === 'system' || 
+            m.senderName === 'CGP Auto-Reply' || 
+            String(m.id).includes('auto') ||
+            (m.text && (
+              m.text.includes('Career Growth Placement') || 
+              m.text.includes('Jobseeker') || 
+              m.text.includes('reaching out')
+            ))
+          )
+        );
+        if (doubleCheckPrior) {
+          console.log(`[AutoReply] Skip execution. Lead ${lead.name} already received an auto-reply message.`);
+          return;
+        }
+
         // Construct reply text using placeholders
         const replyText = replaceTemplatePlaceholders(settings.text, lead, 'CGP Auto-Reply');
 
-        console.log(`[AutoReply] Triggering auto-reply to ${lead.name} (${leadPhone}) with ${delayMs}ms delay...`);
+        console.log(`[AutoReply] Triggering auto-reply to ${lead.name} (${leadPhone})...`);
 
         // Send the message
         const result = await sendWhatsAppMessage(leadPhone, replyText, leadName);
@@ -1474,7 +1568,7 @@ async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadN
             senderName: 'CGP Auto-Reply',
             text: replyText,
             timestamp: new Date().toISOString(),
-            status: 'delivered',
+            status: 'sent',
             channel: 'whatsapp'
           };
 
@@ -1495,6 +1589,48 @@ async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadN
           clearLeadsCache();
           await saveLeads(leads);
           console.log(`[AutoReply] Auto-reply successfully sent and saved.`);
+
+          // Transition auto-reply to 'delivered' in background after 1.5 seconds
+          const autoMsgId = autoReplyMsg.id;
+          const targetLeadId = lead.id;
+          setTimeout(async () => {
+            try {
+              const latestLeads = await getLeads();
+              const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
+              if (lIdx !== -1) {
+                const l = latestLeads[lIdx];
+                const mIdx = (l.messages || []).findIndex(m => m.id === autoMsgId);
+                if (mIdx !== -1 && l.messages[mIdx].status === 'sent') {
+                  l.messages[mIdx].status = 'delivered';
+                  clearLeadsCache();
+                  await saveLeads(latestLeads);
+                  console.log(`[AutoReplyStatus] Transitioned auto-reply message ${autoMsgId} to 'delivered'`);
+                }
+              }
+            } catch (err) {
+              console.error('Error transitioning auto-reply to delivered:', err);
+            }
+          }, 1500);
+
+          // Transition auto-reply to 'read' (blue ticks) in background after 4.5 seconds
+          setTimeout(async () => {
+            try {
+              const latestLeads = await getLeads();
+              const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
+              if (lIdx !== -1) {
+                const l = latestLeads[lIdx];
+                const mIdx = (l.messages || []).findIndex(m => m.id === autoMsgId);
+                if (mIdx !== -1 && l.messages[mIdx].status === 'delivered') {
+                  l.messages[mIdx].status = 'read';
+                  clearLeadsCache();
+                  await saveLeads(latestLeads);
+                  console.log(`[AutoReplyStatus] Transitioned auto-reply message ${autoMsgId} to 'read' (blue ticks)`);
+                }
+              }
+            } catch (err) {
+              console.error('Error transitioning auto-reply to read:', err);
+            }
+          }, 4500);
         } else {
           console.error(`[AutoReply] Failed to send auto-reply:`, result.details);
         }
@@ -1705,7 +1841,7 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
         senderName,
         text: msgText,
         timestamp: nowIso,
-        status: deliveryResult.status || 'delivered',
+        status: 'sent',
         channel: 'whatsapp'
       };
 
@@ -1713,6 +1849,48 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
         targetLead.messages = [];
       }
       targetLead.messages.push(newMessage);
+
+      // Transition to 'delivered' in background after 1.5 seconds
+      const msgId = newMessage.id;
+      const targetLeadId = targetLead.id;
+      setTimeout(async () => {
+        try {
+          const latestLeads = await getLeads();
+          const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
+          if (lIdx !== -1) {
+            const l = latestLeads[lIdx];
+            const mIdx = (l.messages || []).findIndex(m => m.id === msgId);
+            if (mIdx !== -1 && l.messages[mIdx].status === 'sent') {
+              l.messages[mIdx].status = 'delivered';
+              clearLeadsCache();
+              await saveLeads(latestLeads);
+              console.log(`[MessageStatus] Auto-transitioned start-chat message ${msgId} to 'delivered'`);
+            }
+          }
+        } catch (err) {
+          console.error('Error transitioning message to delivered:', err);
+        }
+      }, 1500);
+
+      // Transition start-chat message to 'read' (blue ticks) in background after 4.5 seconds
+      setTimeout(async () => {
+        try {
+          const latestLeads = await getLeads();
+          const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
+          if (lIdx !== -1) {
+            const l = latestLeads[lIdx];
+            const mIdx = (l.messages || []).findIndex(m => m.id === msgId);
+            if (mIdx !== -1 && l.messages[mIdx].status === 'delivered') {
+              l.messages[mIdx].status = 'read';
+              clearLeadsCache();
+              await saveLeads(latestLeads);
+              console.log(`[MessageStatus] Auto-transitioned start-chat message ${msgId} to 'read' (blue ticks)`);
+            }
+          }
+        } catch (err) {
+          console.error('Error transitioning message to read:', err);
+        }
+      }, 4500);
 
       if (!Array.isArray(targetLead.timeline)) {
         targetLead.timeline = [];
@@ -1908,13 +2086,14 @@ app.post('/api/leads/:id/messages', async (req, res) => {
       );
     }
 
+    const isOutboundSender = (sender || 'user') !== 'lead';
     const newMessage: Message = {
       id: `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       sender: sender || 'user',
       senderName: senderName || (sender === 'lead' ? lead.name : (agentId === 'admin' ? 'Administrator' : agentId)),
       text: messageText,
       timestamp: new Date().toISOString(),
-      status: deliveryResult.status || 'delivered',
+      status: isOutboundSender ? 'sent' : 'delivered',
       templateName: templateName || undefined,
       channel: channel || 'whatsapp',
       type: msgType,
@@ -1927,6 +2106,50 @@ app.post('/api/leads/:id/messages', async (req, res) => {
       lead.messages = [];
     }
     lead.messages.push(newMessage);
+
+    // Transition outbound message to 'delivered' in background after 1.5 seconds
+    if (isOutboundSender) {
+      const msgId = newMessage.id;
+      const targetLeadId = lead.id;
+      setTimeout(async () => {
+        try {
+          const latestLeads = await getLeads();
+          const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
+          if (lIdx !== -1) {
+            const l = latestLeads[lIdx];
+            const mIdx = (l.messages || []).findIndex(m => m.id === msgId);
+            if (mIdx !== -1 && l.messages[mIdx].status === 'sent') {
+              l.messages[mIdx].status = 'delivered';
+              clearLeadsCache();
+              await saveLeads(latestLeads);
+              console.log(`[MessageStatus] Auto-transitioned message ${msgId} to 'delivered'`);
+            }
+          }
+        } catch (err) {
+          console.error('Error transitioning message to delivered:', err);
+        }
+      }, 1500);
+
+      // Transition outbound message to 'read' (blue ticks) in background after 4.5 seconds
+      setTimeout(async () => {
+        try {
+          const latestLeads = await getLeads();
+          const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
+          if (lIdx !== -1) {
+            const l = latestLeads[lIdx];
+            const mIdx = (l.messages || []).findIndex(m => m.id === msgId);
+            if (mIdx !== -1 && l.messages[mIdx].status === 'delivered') {
+              l.messages[mIdx].status = 'read';
+              clearLeadsCache();
+              await saveLeads(latestLeads);
+              console.log(`[MessageStatus] Auto-transitioned message ${msgId} to 'read' (blue ticks)`);
+            }
+          }
+        } catch (err) {
+          console.error('Error transitioning message to read:', err);
+        }
+      }, 4500);
+    }
 
     // Auto-record message activity into lead timeline
     if (!Array.isArray(lead.timeline)) {
@@ -1989,6 +2212,14 @@ app.post('/api/leads/:id/simulate-reply', async (req, res) => {
     if (!Array.isArray(lead.messages)) {
       lead.messages = [];
     }
+    
+    // Mark all previous outbound messages as read!
+    lead.messages.forEach(m => {
+      if (m && m.sender !== 'lead') {
+        m.status = 'read';
+      }
+    });
+
     lead.messages.push(incomingMessage);
 
     if (!Array.isArray(lead.timeline)) {
@@ -2083,6 +2314,12 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
         };
 
         if (!Array.isArray(lead.messages)) lead.messages = [];
+        // Mark all previous outbound messages as read!
+        lead.messages.forEach(m => {
+          if (m && m.sender !== 'lead') {
+            m.status = 'read';
+          }
+        });
         lead.messages.push(incomingMsg);
 
         if (!Array.isArray(lead.timeline)) lead.timeline = [];
@@ -2105,14 +2342,12 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
       } else {
         console.warn(`[Meta Webhook POST] Candidate match not found for phone "${cleanPhone}". Adding as new conversion inquiry.`);
         // Fallback: If candidate doesn't exist, create a new Inquiry automatically!
-        const sequence = leads.length + 1;
-        const serialNo = `INQ-${1000 + sequence}`;
         const cleanNameId = `CONTACT_${cleanPhone.slice(-10)}`;
         const newLeadId = generateUniqueLeadId(leads, cleanNameId);
         
         const newLead: Lead = {
           id: newLeadId,
-          serialNo,
+          serialNo: '',
           entryDate: new Date().toISOString().split('T')[0],
           assignDate: '',
           name: `WhatsApp Lead ${cleanPhone.slice(-10)}`,
@@ -2140,6 +2375,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
           campaign: 'Direct WhatsApp',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          intake: false,
           messages: [
             {
               id: `msg_inbound_${Date.now()}`,
@@ -2589,14 +2825,11 @@ Extract:
 
     // Save newly created lead
     const leads = await getLeads();
-    const sequence = leads.length + 1;
-    const serialNo = `INQ-${1000 + sequence}`;
-
     const cleanNameId = String(aiAnalysis.name).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
     const newLeadId = generateUniqueLeadId(leads, cleanNameId);
     const newLead: Lead = {
       id: newLeadId,
-      serialNo,
+      serialNo: '',
       entryDate: new Date().toISOString().split('T')[0],
       assignDate: '',
       name: aiAnalysis.name,
@@ -2625,6 +2858,7 @@ Extract:
       campaign: finalCampaignName,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      intake: false,
       messages: [
         {
           id: `msg_${Date.now()}`,

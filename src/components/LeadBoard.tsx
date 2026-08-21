@@ -248,11 +248,12 @@ export default function LeadBoard({
     let filtered = leads;
 
     // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
+    // OR leads that have not been intaken yet (intake === false)
     filtered = filtered.filter(lead => {
       const isUnassigned = !lead.assignedTo || 
         lead.assignedTo.toLowerCase() === 'unassigned' || 
         lead.assignedTo.trim() === '';
-      if (lead.stage === 'new' && isUnassigned) {
+      if ((lead.stage === 'new' && isUnassigned) || lead.intake === false) {
         return false;
       }
       return true;

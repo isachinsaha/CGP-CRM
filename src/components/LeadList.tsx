@@ -703,6 +703,15 @@ export default function LeadList({
       return leads;
     }
     return leads.filter(lead => {
+      // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
+      // OR leads that have not been intaken yet (intake === false)
+      const isUnassigned = !lead.assignedTo || 
+        lead.assignedTo.toLowerCase() === 'unassigned' || 
+        lead.assignedTo.trim() === '';
+      if ((lead.stage === 'new' && isUnassigned) || lead.intake === false) {
+        return false;
+      }
+
       // 1. Coordinator bucket constraint: force MY seats only if Agent role!
       if (userRole === 'agent') {
         const isAssignedToMe = lead.assignedTo?.toLowerCase() === currentAgentId.toLowerCase();

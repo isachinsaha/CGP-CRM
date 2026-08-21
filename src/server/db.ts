@@ -901,24 +901,40 @@ function syncAndMergeLeadsList(
         const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
         const cloudTime = new Date(cloud.updatedAt || cloud.createdAt || 0).getTime();
 
+        let chosen: Lead;
         if (localTime > cloudTime) {
-          mergedLeads.push(local);
-          pendingUpload.push(local);
+          chosen = { ...local };
+          pendingUpload.push(chosen);
         } else {
-          mergedLeads.push(cloud);
+          chosen = { ...cloud };
         }
+
+        // Keep autoReplySent true if either version had it set
+        if (local.autoReplySent || cloud.autoReplySent) {
+          chosen.autoReplySent = true;
+        }
+
+        mergedLeads.push(chosen);
       }
     } else if (local && cloud && !synced) {
       // Exist in local and cloud, but wasn't tracked as synced
       const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
       const cloudTime = new Date(cloud.updatedAt || cloud.createdAt || 0).getTime();
 
+      let chosen: Lead;
       if (localTime > cloudTime) {
-        mergedLeads.push(local);
-        pendingUpload.push(local);
+        chosen = { ...local };
+        pendingUpload.push(chosen);
       } else {
-        mergedLeads.push(cloud);
+        chosen = { ...cloud };
       }
+
+      // Keep autoReplySent true if either version had it set
+      if (local.autoReplySent || cloud.autoReplySent) {
+        chosen.autoReplySent = true;
+      }
+
+      mergedLeads.push(chosen);
     } else if (local && !cloud && synced) {
       // Deleted from Cloud by another coordinator/admin
       // So we delete it locally
@@ -1260,7 +1276,15 @@ export async function addLead(lead: Lead): Promise<void> {
 
 // Get aggregate statistics
 export async function getStats(): Promise<StatSummary> {
-  const leads = await getLeads();
+  const rawLeads = await getLeads();
+  // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
+  const leads = rawLeads.filter(lead => {
+    const isUnassigned = !lead.assignedTo || 
+      lead.assignedTo.toLowerCase() === 'unassigned' || 
+      lead.assignedTo.trim() === '';
+    const isRequesting = (lead.stage === 'new' && isUnassigned) || lead.intake === false;
+    return !isRequesting;
+  });
   
   const totalLeads = leads.length;
   const newLeads = leads.filter(l => l.stage === 'new').length;
@@ -2389,7 +2413,15 @@ export async function createFullDatabaseBackup(sourceDescription: string = 'Manu
  * Generates the full master Excel workbook buffer for all database collections.
  */
 export async function generateFullXLSXBuffer(): Promise<Buffer> {
-  const leads = await getLeads();
+  const rawLeads = await getLeads();
+  // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
+  const leads = rawLeads.filter(lead => {
+    const isUnassigned = !lead.assignedTo || 
+      lead.assignedTo.toLowerCase() === 'unassigned' || 
+      lead.assignedTo.trim() === '';
+    const isRequesting = (lead.stage === 'new' && isUnassigned) || lead.intake === false;
+    return !isRequesting;
+  });
   const coordinators = await getCoordinators();
   const jobs = await getJobs();
   const updates = await getUpdates();

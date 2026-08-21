@@ -95,17 +95,60 @@ export default function LeadWhatsAppChat({
     lastMessagesLengthRef.current = currentLength;
 
     if (isInitialLoad) {
-      // Unconditionally scroll on initial lead change to start at bottom
+      // Force instant bottom alignment
+      el.scrollTop = el.scrollHeight;
       chatBottomRef.current?.scrollIntoView({ behavior: 'auto' });
+
+      const timer1 = setTimeout(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+        chatBottomRef.current?.scrollIntoView({ behavior: 'auto' });
+      }, 40);
+
+      const timer2 = setTimeout(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+        chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 150);
+
+      const timer3 = setTimeout(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+      }, 350);
+
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+        clearTimeout(timer3);
+      };
     } else if (isNewMessageFromSelf) {
       // Scroll unconditionally when sending a message ourselves
+      el.scrollTop = el.scrollHeight;
       chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      
+      const timer = setTimeout(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+        chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
+      return () => clearTimeout(timer);
     } else if (hasNewMessage) {
       // Only scroll on new incoming messages if they were already reading near the bottom
       const offset = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const userNearBottom = offset < 150;
+      const userNearBottom = offset < 280;
       if (userNearBottom) {
         chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        const timer = setTimeout(() => {
+          if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+          }
+          chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 50);
+        return () => clearTimeout(timer);
       }
     }
   }, [messages, showTemplates, lead.id]);
@@ -473,59 +516,82 @@ export default function LeadWhatsAppChat({
     return true;
   });
 
-  return (
-    <div className="flex flex-col h-full bg-slate-50/70 dark:bg-slate-950/60 overflow-hidden text-left relative" id="whatsapp-inbuilt-module">
+  // Helper to format date header segregation (WhatsApp style)
+  const getMessageDateString = (timestamp?: string) => {
+    if (!timestamp) return '';
+    try {
+      const d = new Date(timestamp);
+      if (isNaN(d.getTime())) return '';
       
-      {/* 2. Messages Stream List - Maximized Room */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-1.5 text-xs">
-        {displayMessages.length === 0 ? (
-          <div className="text-center py-12 space-y-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xs">
-            <div className="h-12 w-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-2xs">
-              <MessageSquare className="h-6 w-6" />
+      const today = new Date();
+      const yesterday = new Date();
+      yesterday.setDate(today.getDate() - 1);
+      
+      const isSameDay = (d1: Date, d2: Date) => 
+        d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate();
+        
+      if (isSameDay(d, today)) {
+        return 'Today';
+      } else if (isSameDay(d, yesterday)) {
+        return 'Yesterday';
+      } else {
+        return d.toLocaleDateString(undefined, { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+      }
+    } catch {
+      return '';
+    }
+  };
+
+  // Helper to render the map stream with sequential variables (wrapped cleanly)
+  const renderMessageStream = () => {
+    let lastDateString = '';
+    return displayMessages.map((msg, index) => {
+      const isUser = msg.sender === 'user';
+      const isLead = msg.sender === 'lead';
+      const isSystem = msg.sender === 'system';
+
+      const formattedTime = msg.timestamp
+        ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : '';
+
+      const dateString = msg.timestamp ? getMessageDateString(msg.timestamp) : '';
+      const showDateHeader = dateString && dateString !== lastDateString;
+      if (dateString) {
+        lastDateString = dateString;
+      }
+
+      const dateHeaderElement = showDateHeader ? (
+        <div key={`date-header-${msg.id || index}`} className="flex justify-center my-4 w-full select-none">
+          <span className="bg-slate-200/90 dark:bg-slate-850/90 text-slate-600 dark:text-slate-300 px-3.5 py-1 rounded-full text-[10px] font-black tracking-wide uppercase border border-slate-300/40 dark:border-slate-700/40 shadow-xs">
+            {dateString}
+          </span>
+        </div>
+      ) : null;
+
+      return (
+        <React.Fragment key={msg.id || index}>
+          {dateHeaderElement}
+
+          {isSystem ? (
+            <div className="flex justify-center my-1.5 w-full">
+              <div className="bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-3 py-1 rounded-lg text-[10.5px] font-bold font-mono text-center max-w-[70%] border border-slate-300 dark:border-slate-700">
+                ℹ️ {msg.text}
+              </div>
             </div>
-            <h5 className="text-sm font-black text-slate-900 dark:text-white">Start WhatsApp Conversation</h5>
-            <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
-              No WhatsApp messages sent yet to <strong>{lead.name || 'Candidate'}</strong> ({lead.phone}). Choose a recruitment template below or write a custom message.
-            </p>
-            <div className="pt-2 flex justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowTemplates(true)}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 shadow-xs cursor-pointer uppercase tracking-wider"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                Browse WhatsApp Templates
-              </button>
-            </div>
-          </div>
-        ) : (
-          displayMessages.map((msg, index) => {
-            const isUser = msg.sender === 'user';
-            const isLead = msg.sender === 'lead';
-            const isSystem = msg.sender === 'system';
-
-            const formattedTime = msg.timestamp
-              ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : '';
-
-            if (isSystem) {
-              return (
-                <div key={msg.id || index} className="flex justify-center my-1.5">
-                  <div className="bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-3 py-1 rounded-lg text-[10.5px] font-bold font-mono text-center max-w-[70%] border border-slate-300 dark:border-slate-700">
-                    ℹ️ {msg.text}
-                  </div>
-                </div>
-              );
-            }
-
-            return (
-              <motion.div
-                key={msg.id || index}
-                initial={{ opacity: 0, y: 6, scale: 0.99 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ duration: 0.15 }}
-                className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group max-w-full`}
-              >
+          ) : (
+            <motion.div
+              initial={{ opacity: 0, y: 6, scale: 0.99 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.15 }}
+              className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group max-w-full w-full`}
+            >
                 {/* Sender Tag Header */}
                 <div className={`flex items-center gap-1.5 text-[9px] font-bold mb-0.5 px-1 max-w-[85%] sm:max-w-[420px] ${isUser ? 'text-emerald-700 dark:text-emerald-400 justify-end' : 'text-slate-500 dark:text-slate-400 justify-start'}`}>
                   {isUser ? (
@@ -607,8 +673,25 @@ export default function LeadWhatsAppChat({
                     <span>{formattedTime}</span>
 
                     {isUser && (
-                      <span className="inline-flex items-center text-emerald-700 dark:text-emerald-400" title="Delivered via Meta WhatsApp Cloud API">
-                        <CheckCheck className="h-3.5 w-3.5 stroke-[2.5]" />
+                      <span 
+                        className={`inline-flex items-center ${
+                          msg.status === 'read' 
+                            ? 'text-sky-500 dark:text-sky-400 font-extrabold' 
+                            : 'text-slate-400 dark:text-slate-500'
+                        }`} 
+                        title={
+                          msg.status === 'read' 
+                            ? "Read by candidate (Blue tick)" 
+                            : msg.status === 'delivered' 
+                              ? "Delivered to candidate (Double tick)" 
+                              : "Sent to candidate (Single tick)"
+                        }
+                      >
+                        {msg.status === 'sent' ? (
+                          <Check className="h-3.5 w-3.5 stroke-[2.5]" />
+                        ) : (
+                          <CheckCheck className="h-3.5 w-3.5 stroke-[2.5]" />
+                        )}
                       </span>
                     )}
 
@@ -627,11 +710,42 @@ export default function LeadWhatsAppChat({
                   </div>
                 </div>
               </motion.div>
-            );
-          })
-        )}
-        <div ref={chatBottomRef} />
-      </div>
+            )}
+          </React.Fragment>
+        );
+      });
+    };
+
+    return (
+      <div className="flex flex-col h-full bg-slate-50/70 dark:bg-slate-950/60 overflow-hidden text-left relative" id="whatsapp-inbuilt-module">
+        
+        {/* 2. Messages Stream List - Maximized Room */}
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-1.5 text-xs">
+          {displayMessages.length === 0 ? (
+            <div className="text-center py-12 space-y-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xs">
+              <div className="h-12 w-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-2xs">
+                <MessageSquare className="h-6 w-6" />
+              </div>
+              <h5 className="text-sm font-black text-slate-900 dark:text-white">Start WhatsApp Conversation</h5>
+              <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
+                No WhatsApp messages sent yet to <strong>{lead.name || 'Candidate'}</strong> ({lead.phone}). Choose a recruitment template below or write a custom message.
+              </p>
+              <div className="pt-2 flex justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTemplates(true)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 shadow-xs cursor-pointer uppercase tracking-wider"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Browse WhatsApp Templates
+                </button>
+              </div>
+            </div>
+          ) : (
+            renderMessageStream()
+          )}
+          <div ref={chatBottomRef} />
+        </div>
 
       {/* 3. Templates Drawer / Quick Selector (Expandable) */}
       <AnimatePresence>

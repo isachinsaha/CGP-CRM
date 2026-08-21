@@ -342,6 +342,7 @@ export default function App() {
         agentId: currentAgentId,
         userRole: userRole,
         all: activeTab !== 'list' ? 'true' : 'false',
+        activeTab: activeTab,
         gender: filters.gender || 'All',
         remarksFilter: filters.remarksFilter || 'All'
       });
