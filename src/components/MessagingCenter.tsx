@@ -462,7 +462,8 @@ export default function MessagingCenter({
         assignedTo: coordToAssign,
         tags: leadFormData.tags || [],
         adminRemarks: leadFormData.adminRemarks,
-        intake: true
+        intake: true,
+        assignedFrom: 'whatsapp_chat_menu'
       };
 
       const res = await fetch(`/api/leads/${currentChatLead.id}`, {

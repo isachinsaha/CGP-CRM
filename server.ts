@@ -1106,7 +1106,7 @@ app.put('/api/leads/:id', async (req, res) => {
       position, experience, qualification, adminRemarks, assignedTo, importance,
       remarks1, remarks2, remarks3, callConnected, tasks, timeline, tags, source, project,
       docPassportCopy, docResume, docOfficeVisited, docOthers, reminderEnabled,
-      autoReplySent, intake
+      autoReplySent, intake, assignedFrom
     } = req.body;
     const leads = await getLeads();
     const idx = leads.findIndex(l => l.id === req.params.id);
@@ -1298,15 +1298,20 @@ app.put('/api/leads/:id', async (req, res) => {
 
     // Log Coordinator assignments
     if (assignedTo !== undefined && lead.assignedTo !== assignedTo) {
+      const isFromWa = assignedFrom === 'whatsapp_chat_menu' || req.headers['x-assigned-from'] === 'whatsapp_chat_menu';
+      const suffix = isFromWa ? ' via WhatsApp Chat Menu' : '';
       lead.timeline.push({
         id: `tl_${Date.now()}_assign`,
         type: 'assignment',
-        text: `Assigned coordinator changed from "${lead.assignedTo || 'Unassigned'}" to "${assignedTo || 'Unassigned'}"`,
+        text: `Assigned coordinator changed from "${lead.assignedTo || 'Unassigned'}" to "${assignedTo || 'Unassigned'}"${suffix}`,
         actor,
         timestamp: new Date().toISOString()
       });
       lead.assignedTo = assignedTo;
       lead.assignDate = new Date().toISOString().split('T')[0];
+      if (isFromWa) {
+        lead.assignedFrom = 'whatsapp_chat_menu';
+      }
 
       // Automatically set intake to true and generate serialNo when assigned to a real coordinator
       const hasRealCoordinator = assignedTo && assignedTo.trim() !== '' && assignedTo.toLowerCase() !== 'unassigned' && assignedTo.toLowerCase() !== 'all';
@@ -1400,6 +1405,7 @@ app.put('/api/leads/:id', async (req, res) => {
     if (budget !== undefined) lead.budget = Number(budget);
     if (fitScore !== undefined) lead.fitScore = fitScore as FitScore;
     if (campaign !== undefined) lead.campaign = campaign;
+    if (assignedFrom !== undefined) lead.assignedFrom = assignedFrom;
 
     // Career Growth Placement Custom Attributes
     if (alternateNo !== undefined) lead.alternateNo = alternateNo;
@@ -1796,13 +1802,14 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
         tags: ['Direct WhatsApp', 'New Outreach'],
         source: 'WhatsApp Direct',
         project: 'General',
+        assignedFrom: 'whatsapp_chat_menu',
         messages: [],
         tasks: [],
         timeline: [
           {
             id: `tl_init_${Date.now()}`,
             type: 'creation' as const,
-            text: `Started direct WhatsApp conversation from CRM. Assigned: ${assignedCoordinator || 'Unassigned'}.`,
+            text: `Started direct WhatsApp conversation from CRM. Assigned: ${assignedCoordinator || 'Unassigned'} via WhatsApp Chat Menu.`,
             actor: userRole === 'admin' ? 'Administrator' : `Coordinator (${agentId})`,
             timestamp: nowIso
           }

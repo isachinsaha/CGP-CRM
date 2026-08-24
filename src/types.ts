@@ -87,6 +87,7 @@ export interface Lead {
   intake?: boolean;
   isDeleted?: boolean;
   deletedAt?: string | null;
+  assignedFrom?: string;
   tasks?: {
     id: string;
     title: string;

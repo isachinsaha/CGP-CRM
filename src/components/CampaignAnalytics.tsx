@@ -64,13 +64,40 @@ export default function CampaignAnalytics({
   onSelectLead,
   coordinators = []
 }: CampaignAnalyticsProps) {
-  const [reportTab, setReportTab] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('daily');
+  const [reportTab, setReportTab] = useState<'daily' | 'dpr' | 'weekly' | 'monthly' | 'custom'>('daily');
   const [customStartDate, setCustomStartDate] = useState<string>('2025-01-01');
   const [customEndDate, setCustomEndDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [selectedCoordFilter, setSelectedCoordFilter] = useState<string>('All');
   const [todoCoordFilter, setTodoCoordFilter] = useState<string>('All');
   const [attributionChartType, setAttributionChartType] = useState<'bar' | 'pie'>('bar');
   const [pipelineChartType, setPipelineChartType] = useState<'funnel' | 'pie'>('funnel');
+
+  const [dprDate, setDprDate] = useState<string>(() => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
+  const [dprCoord, setDprCoord] = useState<string>('All');
+  const [dprSubTab, setDprSubTab] = useState<'summary' | 'remarks' | 'bucket_movements' | 'assignments' | 'touches'>('summary');
+
+  const allCoordinatorsNames = useMemo(() => {
+    const list = coordinators && coordinators.length > 0
+      ? coordinators.filter(c => c.role === 'agent').map(c => c.displayName)
+      : [];
+    
+    leads.forEach(l => {
+      if (l.assignedTo && l.assignedTo.trim() !== '' && l.assignedTo.toLowerCase() !== 'unassigned') {
+        const found = list.some(name => name.toLowerCase() === l.assignedTo.toLowerCase());
+        if (!found) {
+          list.push(l.assignedTo);
+        }
+      }
+    });
+    
+    return Array.from(new Set(list)).sort();
+  }, [coordinators, leads]);
 
   // Selected coordinator display name for filtering
   const selectedCoordinatorName = useMemo(() => {
@@ -403,6 +430,287 @@ export default function CampaignAnalytics({
       remarksToday
     };
   }, [activeLeads]);
+
+  // 1b. DPR (DAILY PROGRESS REPORT) ESTIMATIONS
+  const dprStats = useMemo(() => {
+    const targetDate = dprDate;
+    const leadsList = leads || [];
+    
+    const touchedLeadsSet = new Set<string>();
+    const touchedLeadsList: any[] = [];
+    
+    let remarksCount = 0;
+    const remarksList: any[] = [];
+    
+    let movedCount = 0;
+    const movedList: any[] = [];
+    
+    const bucketMovements: Record<string, { count: number; leads: any[] }> = {
+      'New Inbound': { count: 0, leads: [] },
+      'In Discussion': { count: 0, leads: [] },
+      'Strong Opportunity': { count: 0, leads: [] },
+      'Office Visited/Interview Attended': { count: 0, leads: [] },
+      'Closed Won': { count: 0, leads: [] },
+      'In Rotations': { count: 0, leads: [] },
+      'Closed Lost': { count: 0, leads: [] }
+    };
+
+    const normalizeBucketName = (name: string) => {
+      const lower = name.toLowerCase();
+      if (lower.includes('new')) return 'New Inbound';
+      if (lower.includes('discussion') || lower.includes('negotiating')) return 'In Discussion';
+      if (lower.includes('strong') || lower.includes('opportunity')) return 'Strong Opportunity';
+      if (lower.includes('office') || lower.includes('visited') || lower.includes('interview') || lower.includes('proposal')) return 'Office Visited/Interview Attended';
+      if (lower.includes('won') || lower.includes('closed won')) return 'Closed Won';
+      if (lower.includes('rotation') || lower.includes('cold') || lower.includes('rotations')) return 'In Rotations';
+      if (lower.includes('lost') || lower.includes('closed lost')) return 'Closed Lost';
+      return name;
+    };
+
+    // Map to collect unique assignments for each lead ID
+    const uniqueAssignmentsMap = new Map<string, any>();
+
+    leadsList.forEach(l => {
+      // 1. Check for initial/registration assignment done on targetDate
+      if (l.assignDate === targetDate && l.assignedTo && l.assignedTo.trim() !== '' && l.assignedTo.toLowerCase() !== 'unassigned') {
+        const matchesCoord = dprCoord === 'All' || (l.assignedTo || '').toLowerCase() === dprCoord.toLowerCase();
+        if (matchesCoord) {
+          uniqueAssignmentsMap.set(l.id, {
+            id: l.id,
+            name: l.name,
+            lead: l,
+            text: `Newly assigned to coordinator "${l.assignedTo}" by Administrator upon registration.`,
+            actor: 'Administrator',
+            timestamp: new Date(`${targetDate}T09:00:00`).toISOString()
+          });
+          touchedLeadsSet.add(l.id);
+        }
+      }
+
+      if (!l.timeline || !Array.isArray(l.timeline)) return;
+
+      l.timeline.forEach(e => {
+        const eventDate = new Date(e.timestamp);
+        if (isNaN(eventDate.getTime())) return;
+        
+        const eventYear = eventDate.getFullYear();
+        const eventMonth = String(eventDate.getMonth() + 1).padStart(2, '0');
+        const eventDay = String(eventDate.getDate()).padStart(2, '0');
+        const eventDateStr = `${eventYear}-${eventMonth}-${eventDay}`;
+        
+        if (eventDateStr !== targetDate) return;
+
+        const actorLower = (e.actor || '').toLowerCase();
+        const coordLower = dprCoord.toLowerCase();
+        
+        if (dprCoord !== 'All') {
+          const matchesActor = actorLower.includes(coordLower);
+          const matchesCurrentAssigned = (l.assignedTo || '').toLowerCase() === coordLower;
+          if (!matchesActor && !matchesCurrentAssigned) return;
+        }
+
+        // Only count assignment events that are performed by Administrator/Admin (or system automated triggers)
+        const isAssignmentEvent = e.type === 'assignment' || e.text.toLowerCase().includes('assigned coordinator') || e.text.toLowerCase().includes('coordinator changed');
+        if (isAssignmentEvent) {
+          const match = e.text.match(/to\s+"([^"]+)"/i) || e.text.match(/to\s+([^"]+)$/i);
+          const targetAssignedTo = match ? match[1] : l.assignedTo;
+
+          const matchesCoord = dprCoord === 'All' || (targetAssignedTo || '').toLowerCase() === dprCoord.toLowerCase();
+          if (matchesCoord) {
+            uniqueAssignmentsMap.set(l.id, {
+              id: l.id,
+              name: l.name,
+              lead: l,
+              text: e.text,
+              actor: e.actor || 'Administrator',
+              timestamp: e.timestamp
+            });
+          }
+          touchedLeadsSet.add(l.id);
+        }
+
+        if (e.type === 'remark' || e.type === 'message' || e.text.toLowerCase().includes('remark') || e.text.toLowerCase().includes('call status') || e.text.toLowerCase().includes('whatsapp')) {
+          remarksCount++;
+          remarksList.push({
+            id: l.id,
+            name: l.name,
+            lead: l,
+            text: e.text,
+            actor: e.actor || 'System',
+            timestamp: e.timestamp
+          });
+          touchedLeadsSet.add(l.id);
+        }
+
+        if (e.type === 'status' || e.text.toLowerCase().includes('pipeline stage changed') || e.text.toLowerCase().includes('pipeline stage auto-moved')) {
+          movedCount++;
+          const match = e.text.match(/to\s+"([^"]+)"/i) || e.text.match(/to\s+([^"]+)$/i);
+          const rawTargetBucket = match ? match[1] : 'Unknown';
+          const normalizedBucket = normalizeBucketName(rawTargetBucket);
+          
+          if (bucketMovements[normalizedBucket]) {
+            bucketMovements[normalizedBucket].count++;
+            bucketMovements[normalizedBucket].leads.push({
+              id: l.id,
+              name: l.name,
+              lead: l,
+              actor: e.actor || 'System',
+              text: e.text,
+              timestamp: e.timestamp
+            });
+          }
+          
+          movedList.push({
+            id: l.id,
+            name: l.name,
+            lead: l,
+            text: e.text,
+            actor: e.actor || 'System',
+            targetBucket: normalizedBucket,
+            timestamp: e.timestamp
+          });
+          touchedLeadsSet.add(l.id);
+        }
+
+        touchedLeadsSet.add(l.id);
+      });
+    });
+
+    const assignedLeadsList = Array.from(uniqueAssignmentsMap.values()).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+    const assignedCount = assignedLeadsList.length;
+
+    const whatsappAssignedCount = assignedLeadsList.filter(item => {
+      const isFromWa = item.lead?.assignedFrom === 'whatsapp_chat_menu' || 
+                       (item.text || '').toLowerCase().includes('via whatsapp chat menu') ||
+                       (item.text || '').toLowerCase().includes('via whatsapp') ||
+                       (item.text || '').toLowerCase().includes('started direct whatsapp') ||
+                       (item.lead?.source || '').toLowerCase().includes('whatsapp');
+      return isFromWa;
+    }).length;
+
+    touchedLeadsSet.forEach(id => {
+      const leadObj = leadsList.find(l => l.id === id);
+      if (leadObj) {
+        const activities = (leadObj.timeline || []).filter(e => {
+          const eventDate = new Date(e.timestamp);
+          if (isNaN(eventDate.getTime())) return false;
+          const eventDateStr = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
+          if (eventDateStr !== targetDate) return false;
+          
+          if (dprCoord !== 'All') {
+            const actorLower = (e.actor || '').toLowerCase();
+            const coordLower = dprCoord.toLowerCase();
+            return actorLower.includes(coordLower) || (leadObj.assignedTo || '').toLowerCase() === coordLower;
+          }
+          return true;
+        });
+
+        touchedLeadsList.push({
+          id: leadObj.id,
+          name: leadObj.name,
+          phone: leadObj.phone,
+          country: leadObj.country,
+          position: leadObj.position,
+          assignedTo: leadObj.assignedTo,
+          stage: leadObj.stage,
+          activitiesCount: activities.length > 0 ? activities.length : 1,
+          activities: activities.length > 0 ? activities : [{
+            id: `fallback_${leadObj.id}`,
+            type: 'system',
+            text: `Lead updated on ${targetDate}`,
+            actor: 'System',
+            timestamp: new Date(`${targetDate}T12:00:00Z`).toISOString()
+          }]
+        });
+      }
+    });
+
+    return {
+      assignedCount,
+      whatsappAssignedCount,
+      assignedLeadsList,
+      touchedCount: touchedLeadsSet.size,
+      touchedLeadsList,
+      remarksCount,
+      remarksList: remarksList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
+      movedCount,
+      movedList: movedList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
+      bucketMovements
+    };
+  }, [leads, dprDate, dprCoord]);
+
+  const dprCoordinatorBreakdown = useMemo(() => {
+    const leadsList = leads || [];
+    const baseCoordinatorsList = coordinators && coordinators.length > 0
+      ? coordinators.filter(c => c.role === 'agent').map(c => c.displayName)
+      : [
+          'Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 
+          'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'
+        ];
+
+    return baseCoordinatorsList.map(name => {
+      const assignedSet = new Set<string>();
+      let remarks = 0;
+      let moved = 0;
+      const touchedSet = new Set<string>();
+
+      leadsList.forEach(l => {
+        if (l.assignDate === dprDate && (l.assignedTo || '').toLowerCase() === name.toLowerCase()) {
+          assignedSet.add(l.id);
+          touchedSet.add(l.id);
+        }
+
+        if (!l.timeline || !Array.isArray(l.timeline)) return;
+
+        l.timeline.forEach(e => {
+          const eventDate = new Date(e.timestamp);
+          if (isNaN(eventDate.getTime())) return;
+          const eventDateStr = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
+          if (eventDateStr !== dprDate) return;
+
+          const actorLower = (e.actor || '').toLowerCase();
+          const nameLower = name.toLowerCase();
+          const matchesActor = actorLower.includes(nameLower);
+          const matchesCurrentAssigned = (l.assignedTo || '').toLowerCase() === nameLower;
+
+          if (matchesActor || matchesCurrentAssigned) {
+            touchedSet.add(l.id);
+          }
+
+          // Check for assignments to this coordinator on this date
+          const isAssignmentEvent = e.type === 'assignment' || e.text.toLowerCase().includes('assigned coordinator') || e.text.toLowerCase().includes('coordinator changed');
+          if (isAssignmentEvent) {
+            const match = e.text.match(/to\s+"([^"]+)"/i) || e.text.match(/to\s+([^"]+)$/i);
+            const targetAssignedTo = match ? match[1] : l.assignedTo;
+
+            if ((targetAssignedTo || '').toLowerCase() === nameLower) {
+              assignedSet.add(l.id);
+              touchedSet.add(l.id);
+            }
+          }
+
+          if (matchesActor || (matchesCurrentAssigned && actorLower.includes('system'))) {
+            if (e.type === 'remark' || e.type === 'message' || e.text.toLowerCase().includes('remark') || e.text.toLowerCase().includes('call status') || e.text.toLowerCase().includes('whatsapp')) {
+              remarks++;
+            }
+            if (e.type === 'status' || e.text.toLowerCase().includes('pipeline stage changed') || e.text.toLowerCase().includes('pipeline stage auto-moved')) {
+              moved++;
+            }
+          }
+        });
+      });
+
+      return {
+        name,
+        assigned: assignedSet.size,
+        touched: touchedSet.size,
+        remarks,
+        moved
+      };
+    }).sort((a, b) => b.touched - a.touched || b.remarks - a.remarks);
+  }, [leads, dprDate, coordinators]);
 
   // 2. WEEKLY REPORT ESTIMATIONS (Leads created in last 7 days)
   const weeklyStats = useMemo(() => {
@@ -1019,6 +1327,7 @@ export default function CampaignAnalytics({
           <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 flex-wrap gap-1">
             {[
               { id: 'daily', label: 'Daily Report' },
+              { id: 'dpr', label: 'Daily Progress Report (DPR)' },
               { id: 'weekly', label: 'Weekly Report' },
               { id: 'monthly', label: 'Monthly Report' },
               { id: 'custom', label: 'Select Date Wise' }
@@ -1158,7 +1467,543 @@ export default function CampaignAnalytics({
         </div>
       )}
 
-        {/* --- WEEKLY REPORT CONTENT --- */}
+      {/* --- DPR (DAILY PROGRESS REPORT) CONTENT --- */}
+      {reportTab === 'dpr' && (
+        <div className="space-y-6 text-left">
+          {/* Filter and Date bar */}
+          <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center bg-slate-950 p-4 rounded-xl border border-slate-800">
+            <div>
+              <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-accent-purple animate-pulse" />
+                DPR Configuration Engine
+              </h4>
+              <p className="text-[10px] text-slate-450 font-medium font-sans mt-0.5">Select target date and filter by coordinator to view absolute performance logs.</p>
+            </div>
+            
+            <div className="flex flex-wrap gap-3 items-center w-full md:w-auto">
+              {/* Date Picker */}
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
+                <Calendar className="h-3.5 w-3.5 text-accent-emerald shrink-0" />
+                <span className="text-[10px] font-bold text-slate-400 uppercase font-mono">DPR Date:</span>
+                <input 
+                  type="date" 
+                  value={dprDate} 
+                  onChange={(e) => setDprDate(e.target.value)} 
+                  className="bg-transparent text-xs text-slate-100 font-bold outline-hidden focus:ring-0 border-0 p-0 cursor-pointer"
+                />
+              </div>
+
+              {/* Coordinator Select */}
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
+                <User className="h-3.5 w-3.5 text-accent-purple shrink-0" />
+                <span className="text-[10px] font-bold text-slate-400 uppercase font-mono">Agent:</span>
+                <select
+                  value={dprCoord}
+                  onChange={(e) => setDprCoord(e.target.value)}
+                  className="bg-slate-900 text-xs text-slate-100 font-bold outline-hidden border-0 p-0 cursor-pointer focus:ring-0"
+                >
+                  <option value="All">All Coordinators</option>
+                  {allCoordinatorsNames.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* DPR KPI Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Card 1: Assigned */}
+            <div 
+              onClick={() => setDprSubTab('assignments')}
+              className={`p-4 rounded-xl border transition-all cursor-pointer select-none relative overflow-hidden group ${
+                dprSubTab === 'assignments' 
+                  ? 'bg-blue-950/20 border-blue-500/50 shadow-md' 
+                  : 'bg-slate-950/30 border-slate-800/80 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Leads Assigned</span>
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="text-3xl font-black text-slate-100 block">{dprStats.assignedCount}</span>
+                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-900/30">
+                      {dprStats.whatsappAssignedCount || 0} from WhatsApp Chat
+                    </span>
+                  </div>
+                </div>
+                <div className="p-2 bg-blue-500/10 rounded-lg">
+                  <UserCheck className="h-5 w-5 text-blue-400" />
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-450 mt-2">New/redistributed leads assigned on this date ({dprStats.whatsappAssignedCount || 0} claimed from WhatsApp Chat Menu).</p>
+              {dprSubTab === 'assignments' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-500" />}
+            </div>
+
+            {/* Card 2: Touched */}
+            <div 
+              onClick={() => setDprSubTab('touches')}
+              className={`p-4 rounded-xl border transition-all cursor-pointer select-none relative overflow-hidden group ${
+                dprSubTab === 'touches' 
+                  ? 'bg-purple-950/20 border-purple-500/50 shadow-md' 
+                  : 'bg-slate-950/30 border-slate-800/80 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Leads Touched</span>
+                  <span className="text-3xl font-black text-slate-100 block">{dprStats.touchedCount}</span>
+                </div>
+                <div className="p-2 bg-purple-500/10 rounded-lg">
+                  <Users className="h-5 w-5 text-purple-400" />
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-450 mt-2">Unique candidates with any logged activity.</p>
+              {dprSubTab === 'touches' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-purple-500" />}
+            </div>
+
+            {/* Card 3: Remarks Made */}
+            <div 
+              onClick={() => setDprSubTab('remarks')}
+              className={`p-4 rounded-xl border transition-all cursor-pointer select-none relative overflow-hidden group ${
+                dprSubTab === 'remarks' 
+                  ? 'bg-emerald-950/20 border-emerald-500/50 shadow-md' 
+                  : 'bg-slate-950/30 border-slate-800/80 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Remarks Logged</span>
+                  <span className="text-3xl font-black text-slate-100 block">{dprStats.remarksCount}</span>
+                </div>
+                <div className="p-2 bg-emerald-500/10 rounded-lg">
+                  <ListTodo className="h-5 w-5 text-emerald-400" />
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-450 mt-2">Total caller notes & message logs made today.</p>
+              {dprSubTab === 'remarks' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500" />}
+            </div>
+
+            {/* Card 4: Bucket Movements */}
+            <div 
+              onClick={() => setDprSubTab('bucket_movements')}
+              className={`p-4 rounded-xl border transition-all cursor-pointer select-none relative overflow-hidden group ${
+                dprSubTab === 'bucket_movements' 
+                  ? 'bg-amber-950/20 border-amber-500/50 shadow-md' 
+                  : 'bg-slate-950/30 border-slate-800/80 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Bucket Movements</span>
+                  <span className="text-3xl font-black text-slate-100 block">{dprStats.movedCount}</span>
+                </div>
+                <div className="p-2 bg-amber-500/10 rounded-lg">
+                  <TrendingUp className="h-5 w-5 text-amber-400" />
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-450 mt-2">Leads transitioned to a different pipeline stage.</p>
+              {dprSubTab === 'bucket_movements' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-500" />}
+            </div>
+          </div>
+
+          {/* Internal DPR Tab selectors */}
+          <div className="flex border-b border-slate-850 gap-2 pb-px overflow-x-auto pb-1">
+            {[
+              { id: 'summary', label: '📊 Overview & Staff' },
+              { id: 'remarks', label: `💬 Remarks Logged (${dprStats.remarksCount})` },
+              { id: 'bucket_movements', label: `🔄 Stage Transitions (${dprStats.movedCount})` },
+              { id: 'assignments', label: `👤 Assignments (${dprStats.assignedCount})` },
+              { id: 'touches', label: `🎯 Touched Candidates (${dprStats.touchedCount})` }
+            ].map(sub => (
+              <button
+                key={sub.id}
+                onClick={() => setDprSubTab(sub.id as any)}
+                className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
+                  dprSubTab === sub.id
+                    ? 'border-accent-purple text-slate-100'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {sub.label}
+              </button>
+            ))}
+          </div>
+
+          {/* --- SUB-TAB CONTENT 1: OVERVIEW & STAFF --- */}
+          {dprSubTab === 'summary' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Bucket movements summary */}
+                <div className="lg:col-span-5 bg-slate-950/40 rounded-xl border border-slate-800 p-4 space-y-4">
+                  <div>
+                    <h5 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4 text-accent-purple" />
+                      Leads Moved to Buckets
+                    </h5>
+                    <p className="text-[10px] text-slate-450">Summary of target stage transitions on {dprDate}.</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {Object.entries(dprStats.bucketMovements).map(([bucket, item]) => {
+                      let dotColor = 'bg-slate-450';
+                      if (bucket === 'New Inbound') dotColor = 'bg-blue-400';
+                      else if (bucket === 'In Discussion') dotColor = 'bg-purple-400';
+                      else if (bucket === 'Strong Opportunity') dotColor = 'bg-indigo-400';
+                      else if (bucket === 'Office Visited/Interview Attended') dotColor = 'bg-amber-400';
+                      else if (bucket === 'Closed Won') dotColor = 'bg-emerald-400';
+                      else if (bucket === 'In Rotations') dotColor = 'bg-pink-400';
+                      else if (bucket === 'Closed Lost') dotColor = 'bg-rose-400';
+
+                      return (
+                        <div 
+                          key={bucket} 
+                          className={`p-3 rounded-lg border flex justify-between items-center bg-slate-900/60 ${
+                            item.count > 0 ? 'border-slate-700/80' : 'border-slate-800/40 opacity-70'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className={`w-2.5 h-2.5 rounded-full ${dotColor}`} />
+                            <span className="text-xs font-bold text-slate-300">{bucket}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {item.count > 0 && (
+                              <span className="text-[10px] font-bold bg-slate-800 text-slate-350 px-2 py-0.5 rounded-sm">
+                                {item.leads.map(l => l.name).slice(0, 3).join(', ')}
+                                {item.leads.length > 3 ? '...' : ''}
+                              </span>
+                            )}
+                            <span className={`text-sm font-black px-2.5 py-0.5 rounded-md ${
+                              item.count > 0 ? 'bg-amber-500/10 text-accent-orange' : 'bg-slate-950 text-slate-500'
+                            }`}>
+                              {item.count}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Staff Performance Breakdown */}
+                <div className="lg:col-span-7 bg-slate-950/40 rounded-xl border border-slate-800 p-4 space-y-4">
+                  <div>
+                    <h5 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                      <Users className="h-4 w-4 text-accent-emerald" />
+                      Coordinator Activity Index
+                    </h5>
+                    <p className="text-[10px] text-slate-450">Individual team productivity metrics captured for {dprDate}.</p>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">
+                          <th className="pb-2.5">Coordinator</th>
+                          <th className="pb-2.5 text-center">Assigned</th>
+                          <th className="pb-2.5 text-center">Leads Touched</th>
+                          <th className="pb-2.5 text-center">Remarks Made</th>
+                          <th className="pb-2.5 text-center">Stage Moves</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-850/60">
+                        {dprCoordinatorBreakdown.map((agent) => (
+                          <tr 
+                            key={agent.name} 
+                            onClick={() => {
+                              setDprCoord(agent.name);
+                            }}
+                            className={`text-xs hover:bg-slate-900/30 cursor-pointer transition-colors ${
+                              dprCoord === agent.name ? 'bg-slate-900/50 font-semibold' : ''
+                            }`}
+                          >
+                            <td className="py-2.5 flex items-center gap-2 text-slate-200 font-bold">
+                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                agent.touched > 0 ? 'bg-emerald-400' : 'bg-slate-600'
+                              }`} />
+                              {agent.name}
+                            </td>
+                            <td className="py-2.5 text-center font-mono font-bold text-blue-400">{agent.assigned}</td>
+                            <td className="py-2.5 text-center font-mono font-bold text-purple-400">{agent.touched}</td>
+                            <td className="py-2.5 text-center font-mono font-bold text-emerald-400">{agent.remarks}</td>
+                            <td className="py-2.5 text-center font-mono font-bold text-amber-400">{agent.moved}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- SUB-TAB CONTENT 2: REMARKS LOGGED --- */}
+          {dprSubTab === 'remarks' && (
+            <div className="bg-slate-950/40 rounded-xl border border-slate-800 p-4 space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                  <h5 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                    Full Remarks Detail Report
+                  </h5>
+                  <p className="text-[10px] text-slate-450">Direct text logs updated by coordinators on {dprDate}.</p>
+                </div>
+                <div className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-1 rounded">
+                  Total: <span className="font-bold text-accent-emerald">{dprStats.remarksCount}</span> Remarks
+                </div>
+              </div>
+
+              {dprStats.remarksList.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[600px] overflow-y-auto pr-1">
+                  {dprStats.remarksList.map((item, idx) => (
+                    <div 
+                      key={idx} 
+                      onClick={() => {
+                        if (item.lead && onSelectLead) {
+                          onSelectLead(item.lead);
+                        }
+                      }}
+                      className="p-3 bg-slate-900 border border-slate-800 rounded-xl hover:border-emerald-500/40 transition-all cursor-pointer flex justify-between gap-4 group text-left"
+                    >
+                      <div className="space-y-1.5 min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-200 text-xs group-hover:text-emerald-400 group-hover:underline transition-colors truncate">
+                            {item.name}
+                          </span>
+                          <span className="text-[9px] bg-slate-950 text-slate-400 px-1.5 py-0.5 rounded font-mono border border-slate-800">
+                            ✈️ {item.lead?.country || 'N/A'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-300 italic line-clamp-3 bg-slate-950/50 p-2 rounded border border-slate-800/60 font-sans mt-1">
+                          "{item.text}"
+                        </p>
+                        <div className="text-[10px] text-slate-450 mt-1 flex items-center gap-1.5">
+                          Caller: <span className="font-bold text-accent-emerald">{item.actor}</span>
+                        </div>
+                      </div>
+                      <span className="text-[9px] text-slate-400 font-mono self-start shrink-0">
+                        {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-1">
+                  <p>No remarks found for {dprDate}.</p>
+                  <p className="text-[10px]">Change the date or coordinator filter above.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* --- SUB-TAB CONTENT 3: BUCKET MOVEMENTS --- */}
+          {dprSubTab === 'bucket_movements' && (
+            <div className="bg-slate-950/40 rounded-xl border border-slate-800 p-4 space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                  <h5 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                    Pipeline Transitions Audit Trail
+                  </h5>
+                  <p className="text-[10px] text-slate-450">Chronological history of candidate status changes on {dprDate}.</p>
+                </div>
+                <div className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-1 rounded">
+                  Total Moves: <span className="font-bold text-accent-orange">{dprStats.movedCount}</span> Transitions
+                </div>
+              </div>
+
+              {dprStats.movedList.length > 0 ? (
+                <div className="space-y-2.5 max-h-[600px] overflow-y-auto pr-1">
+                  {dprStats.movedList.map((item, idx) => (
+                    <div 
+                      key={idx}
+                      onClick={() => {
+                        if (item.lead && onSelectLead) {
+                          onSelectLead(item.lead);
+                        }
+                      }}
+                      className="p-3 bg-slate-900 border border-slate-800 rounded-xl hover:border-amber-500/40 transition-all cursor-pointer flex justify-between items-center gap-4 group text-left"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
+                          <TrendingUp className="h-4 w-4 text-amber-400" />
+                        </div>
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-200 text-xs group-hover:text-amber-400 transition-colors truncate">
+                              {item.name}
+                            </span>
+                            <span className="text-[9px] bg-amber-950/20 text-accent-orange px-1.5 py-0.2 rounded font-semibold">
+                              {item.targetBucket}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400">
+                            {item.text}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <div className="text-[10px] font-bold text-slate-450">
+                          By: {item.actor}
+                        </div>
+                        <div className="text-[9px] text-slate-500 font-mono">
+                          {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-1">
+                  <p>No stage transitions found for {dprDate}.</p>
+                  <p className="text-[10px]">Change the date or coordinator filter above.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* --- SUB-TAB CONTENT 4: ASSIGNMENTS --- */}
+          {dprSubTab === 'assignments' && (
+            <div className="bg-slate-950/40 rounded-xl border border-slate-800 p-4 space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                  <h5 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                    New Lead Assignments Log
+                  </h5>
+                  <p className="text-[10px] text-slate-450">Details of candidates assigned or transferred to coordinators on {dprDate}.</p>
+                </div>
+                <div className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-1 rounded">
+                  Assigned: <span className="font-bold text-blue-400">{dprStats.assignedCount}</span> Leads
+                </div>
+              </div>
+
+              {dprStats.assignedLeadsList.length > 0 ? (
+                <div className="space-y-2.5 max-h-[600px] overflow-y-auto pr-1">
+                  {dprStats.assignedLeadsList.map((item, idx) => (
+                    <div 
+                      key={idx}
+                      onClick={() => {
+                        if (item.lead && onSelectLead) {
+                          onSelectLead(item.lead);
+                        }
+                      }}
+                      className="p-3 bg-slate-900 border border-slate-800 rounded-xl hover:border-blue-500/40 transition-all cursor-pointer flex justify-between items-center gap-4 group text-left"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+                          <UserCheck className="h-4 w-4 text-blue-400" />
+                        </div>
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-slate-200 text-xs group-hover:text-blue-400 transition-colors truncate">
+                              {item.name}
+                            </span>
+                            {(item.lead?.assignedFrom === 'whatsapp_chat_menu' || 
+                              (item.text || '').toLowerCase().includes('via whatsapp chat menu') || 
+                              (item.text || '').toLowerCase().includes('whatsapp conversation') ||
+                              (item.text || '').toLowerCase().includes('started direct whatsapp') ||
+                              (item.lead?.source || '').toLowerCase().includes('whatsapp')) && (
+                              <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-emerald-950/80 text-emerald-400 border border-emerald-900/40 select-none">
+                                WhatsApp Chat Menu
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-400 truncate">
+                            {item.text}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <div className="text-[10px] font-bold text-slate-450">
+                          Assigned to: <span className="text-blue-400 font-bold">{item.lead?.assignedTo || 'Unassigned'}</span>
+                        </div>
+                        <div className="text-[9px] text-slate-500 font-mono">
+                          {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-1">
+                  <p>No new assignments registered for {dprDate}.</p>
+                  <p className="text-[10px]">Change the date or coordinator filter above.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* --- SUB-TAB CONTENT 5: TOUCHES --- */}
+          {dprSubTab === 'touches' && (
+            <div className="bg-slate-950/40 rounded-xl border border-slate-800 p-4 space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                  <h5 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                    Touched Candidates Logs
+                  </h5>
+                  <p className="text-[10px] text-slate-450">Full list of candidates who had any contact or update on {dprDate}.</p>
+                </div>
+                <div className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-1 rounded">
+                  Touched: <span className="font-bold text-purple-400">{dprStats.touchedCount}</span> Candidates
+                </div>
+              </div>
+
+              {dprStats.touchedLeadsList.length > 0 ? (
+                <div className="space-y-2.5 max-h-[600px] overflow-y-auto pr-1">
+                  {dprStats.touchedLeadsList.map((item, idx) => (
+                    <div 
+                      key={idx}
+                      onClick={() => {
+                        const originalLead = leads.find(l => l.id === item.id);
+                        if (originalLead && onSelectLead) {
+                          onSelectLead(originalLead);
+                        }
+                      }}
+                      className="p-3 bg-slate-900 border border-slate-800 rounded-xl hover:border-purple-500/40 transition-all cursor-pointer flex justify-between items-center gap-4 group text-left"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center shrink-0">
+                          <Users className="h-4 w-4 text-purple-400" />
+                        </div>
+                        <div className="space-y-0.5 min-w-0">
+                          <span className="font-bold text-slate-200 text-xs group-hover:text-purple-400 transition-colors block truncate">
+                            {item.name}
+                          </span>
+                          <div className="flex items-center gap-2 text-xs text-slate-400 flex-wrap">
+                            <span>📞 {item.phone}</span>
+                            <span>•</span>
+                            <span>✈️ {item.country}</span>
+                            <span>•</span>
+                            <span className="text-[10px] font-semibold text-slate-350 bg-slate-950 px-1 rounded uppercase">
+                              {item.stage}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <div className="text-xs font-bold text-slate-300">
+                          Agent: <span className="text-accent-purple">{item.assignedTo}</span>
+                        </div>
+                        <span className="text-[10px] font-bold bg-purple-950/30 text-purple-400 px-2 py-0.5 rounded-full border border-purple-900/30">
+                          {item.activitiesCount} Actions
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-1">
+                  <p>No candidates were touched on {dprDate}.</p>
+                  <p className="text-[10px]">Change the date or coordinator filter above.</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* --- WEEKLY REPORT CONTENT --- */}
         {reportTab === 'weekly' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-left">
