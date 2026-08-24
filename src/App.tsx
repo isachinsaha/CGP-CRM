@@ -539,6 +539,18 @@ export default function App() {
 
       {/* TOP HEADER & NAVIGATION BAR */}
       {(() => {
+        const isOlderThan24Hours = (lead: Lead) => {
+          const msgs = (lead.messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
+          if (msgs.length === 0) return true;
+          const latestMsg = msgs[msgs.length - 1];
+          if (!latestMsg?.timestamp) return true;
+          const latestTime = new Date(latestMsg.timestamp).getTime();
+          if (isNaN(latestTime)) return true;
+          const now = Date.now();
+          const diffMs = now - latestTime;
+          return diffMs > 24 * 60 * 60 * 1000;
+        };
+
         const activeChatCount = leads.filter(l => {
           const msgs = (l.messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
           return msgs.length > 0;
@@ -547,7 +559,7 @@ export default function App() {
         const requestingCount = leads.filter(l => {
           const msgs = (l.messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
           const isUnassigned = !l.assignedTo || l.assignedTo.toLowerCase() === 'unassigned' || l.assignedTo.toLowerCase() === 'all' || l.assignedTo.trim() === '';
-          return msgs.length > 0 && isUnassigned;
+          return msgs.length > 0 && isUnassigned && !isOlderThan24Hours(l);
         }).length;
 
         const navItems = [
@@ -827,7 +839,7 @@ export default function App() {
                   onDeleteLead={handleDeleteLead}
                   userRole={userRole}
                   currentAgentId={currentAgentId}
-                  onRefreshData={() => pullCrmData(true)}
+                  onRefreshData={() => pullCrmData(true, true)}
                   coordinators={coordinatorsList}
                   totalLeadsCount={totalLeadsCount}
                   totalPagesCount={totalPagesCount}
@@ -853,8 +865,9 @@ export default function App() {
                   countries={countries}
                   positions={positions}
                   projects={projects}
-                  onRefreshData={() => pullCrmData(true)}
+                  onRefreshData={() => pullCrmData(true, true)}
                   onLeadUpdated={async () => { await pullCrmData(true); }}
+                  isRefreshing={isRefreshing}
                 />
               </div>
             )}
@@ -865,7 +878,7 @@ export default function App() {
                   <CampaignAnalytics 
                     stats={stats} 
                     leads={leads} 
-                    onRefreshData={() => pullCrmData(true)} 
+                    onRefreshData={() => pullCrmData(true, true)} 
                     userRole={userRole}
                     currentAgentId={currentAgentId}
                     onSelectLead={setSelectedLead}

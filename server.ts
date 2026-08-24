@@ -2265,8 +2265,12 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const payload = req.body || {};
     console.log(`[Meta Webhook POST] Received payload:`, JSON.stringify(payload, null, 2));
 
-    let fromNumber = payload.destination || payload.from || payload.phone;
-    let messageBody = payload.text || payload.message || payload.body;
+    let fromNumber = payload.destination || payload.from || payload.phone || payload.mobile;
+    let messageBody = payload.text || payload.message || payload.body || payload.caption;
+    let mediaUrl = payload.mediaUrl || payload.fileUrl || payload.imageUrl || payload.url;
+    let mediaType: 'text' | 'image' | 'pdf' | 'document' = 'text';
+    let fileName = payload.fileName || payload.filename;
+    let fileSize = payload.fileSize || payload.filesize;
 
     // Support standard Meta WhatsApp Cloud API Webhook JSON structure
     // entry[0].changes[0].value.messages[0]
@@ -2280,6 +2284,18 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                 fromNumber = m.from;
                 if (m.type === 'text' && m.text) {
                   messageBody = m.text.body;
+                } else if (m.type === 'image' && m.image) {
+                  mediaType = 'image';
+                  messageBody = m.image.caption || 'Sent an image';
+                  mediaUrl = m.image.url || m.image.link || m.image.id;
+                  fileName = m.image.filename || 'image.jpg';
+                } else if (m.type === 'document' && m.document) {
+                  const isPdf = m.document.mime_type === 'application/pdf' || String(m.document.filename || '').toLowerCase().endsWith('.pdf');
+                  mediaType = isPdf ? 'pdf' : 'document';
+                  messageBody = m.document.caption || m.document.filename || 'Sent a document';
+                  mediaUrl = m.document.url || m.document.link || m.document.id;
+                  fileName = m.document.filename || 'document';
+                  fileSize = m.document.file_size ? `${(Number(m.document.file_size) / (1024 * 1024)).toFixed(2)} MB` : 'Unknown size';
                 } else if (m.type === 'button') {
                   messageBody = m.button?.text || m.button?.payload;
                 } else if (m.type === 'interactive') {
@@ -2292,9 +2308,33 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
       }
     }
 
-    if (fromNumber && messageBody) {
+    // Secondary parsing for flattened formats
+    if (payload.type === 'image' || payload.messageType === 'image') {
+      mediaType = 'image';
+      messageBody = messageBody || 'Sent an image';
+    } else if (payload.type === 'pdf' || payload.messageType === 'pdf') {
+      mediaType = 'pdf';
+      messageBody = messageBody || 'Sent a PDF document';
+    } else if (payload.type === 'document' || payload.messageType === 'document' || payload.type === 'file' || payload.messageType === 'file') {
+      const isPdf = String(fileName || '').toLowerCase().endsWith('.pdf') || String(mediaUrl || '').toLowerCase().includes('.pdf');
+      mediaType = isPdf ? 'pdf' : 'document';
+      messageBody = messageBody || 'Sent a document';
+    }
+
+    // Set fallback body if media is present but caption is absent
+    if (!messageBody && mediaUrl) {
+      messageBody = mediaType === 'image' ? 'Sent an image' : (mediaType === 'pdf' ? 'Sent a PDF document' : 'Sent a document');
+    }
+
+    if (fromNumber && (messageBody || mediaUrl)) {
       const cleanPhone = String(fromNumber).replace(/\D/g, '');
-      console.log(`[Meta Webhook POST] Parsing inbound message. Raw phone="${fromNumber}", Clean phone="${cleanPhone}", Message="${messageBody}"`);
+      console.log(`[Meta Webhook POST] Parsing inbound message. Raw phone="${fromNumber}", Clean phone="${cleanPhone}", Message="${messageBody}", MediaUrl="${mediaUrl}"`);
+
+      // Proxy Meta Media IDs through our local /api/whatsapp/media/:mediaId helper endpoint
+      let parsedMediaUrl = mediaUrl;
+      if (mediaUrl && !mediaUrl.startsWith('http') && !mediaUrl.startsWith('/')) {
+        parsedMediaUrl = `/api/whatsapp/media/${mediaUrl}`;
+      }
 
       const leads = await getLeads();
       const matchIdx = leads.findIndex(l => {
@@ -2319,7 +2359,13 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
           text: String(messageBody),
           timestamp: new Date().toISOString(),
           status: 'delivered',
-          channel: 'whatsapp'
+          channel: 'whatsapp',
+          ...(mediaUrl ? {
+            type: mediaType,
+            mediaUrl: String(parsedMediaUrl),
+            fileName: fileName ? String(fileName) : undefined,
+            fileSize: fileSize ? String(fileSize) : undefined
+          } : {})
         };
 
         if (!Array.isArray(lead.messages)) lead.messages = [];
@@ -2393,7 +2439,13 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
               text: String(messageBody),
               timestamp: new Date().toISOString(),
               status: 'delivered',
-              channel: 'whatsapp'
+              channel: 'whatsapp',
+              ...(mediaUrl ? {
+                type: mediaType,
+                mediaUrl: String(parsedMediaUrl),
+                fileName: fileName ? String(fileName) : undefined,
+                fileSize: fileSize ? String(fileSize) : undefined
+              } : {})
             }
           ]
         };
@@ -2412,6 +2464,61 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     res.status(200).json({ success: true, received: true });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+
+// GET WhatsApp Media proxy from Meta
+app.get('/api/whatsapp/media/:mediaId', async (req, res) => {
+  try {
+    const { mediaId } = req.params;
+    const metaToken = process.env.WHATSAPP_API_KEY || process.env.META_WA_ACCESS_TOKEN;
+    if (!metaToken || metaToken === 'MY_WHATSAPP_API_KEY' || !metaToken.trim()) {
+      return res.status(400).send('WhatsApp API Key is not configured in CRM.');
+    }
+
+    console.log(`[Meta Media Proxy] Fetching media info for ID="${mediaId}"`);
+    const infoRes = await fetch(`https://graph.facebook.com/v20.0/${mediaId}`, {
+      headers: {
+        'Authorization': `Bearer ${metaToken.trim()}`
+      }
+    });
+
+    if (!infoRes.ok) {
+      const errorText = await infoRes.text();
+      console.error('[Meta Media Proxy] Meta returned error:', errorText);
+      return res.status(infoRes.status).send(`Failed to fetch media metadata: ${errorText}`);
+    }
+
+    const info = await infoRes.json() as any;
+    const mediaUrl = info.url;
+    if (!mediaUrl) {
+      return res.status(404).send('Media download URL not found in Meta response.');
+    }
+
+    console.log(`[Meta Media Proxy] Fetching binary media from Lookaside URL`);
+    const binaryRes = await fetch(mediaUrl, {
+      headers: {
+        'Authorization': `Bearer ${metaToken.trim()}`
+      }
+    });
+
+    if (!binaryRes.ok) {
+      return res.status(binaryRes.status).send('Failed to fetch binary file from Facebook server.');
+    }
+
+    // Set content type and disposition to stream it directly to the browser
+    if (info.mime_type) {
+      res.setHeader('Content-Type', info.mime_type);
+    }
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    
+    const arrayBuffer = await binaryRes.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    res.send(buffer);
+  } catch (err: any) {
+    console.error('[Meta Media Proxy] Exception:', err);
+    res.status(500).send(`Internal Media Proxy Error: ${err.message}`);
   }
 });
 

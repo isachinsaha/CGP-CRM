@@ -73,26 +73,6 @@ export default function LeadBoard({
   const [boardPositionFilter, setBoardPositionFilter] = useState('All');
   const [boardGenderFilter, setBoardGenderFilter] = useState('All');
 
-  const boardCountryOptions = React.useMemo(() => {
-    const countries = new Set<string>();
-    leads.forEach(lead => {
-      if (lead.country) {
-        countries.add(lead.country.toUpperCase().trim());
-      }
-    });
-    return ['All', ...Array.from(countries).sort()];
-  }, [leads]);
-
-  const boardPositionOptions = React.useMemo(() => {
-    const positions = new Set<string>();
-    leads.forEach(lead => {
-      if (lead.position) {
-        positions.add(lead.position.toUpperCase().trim());
-      }
-    });
-    return ['All', ...Array.from(positions).sort()];
-  }, [leads]);
-
   // Reset stage filters when stage is switched
   React.useEffect(() => {
     setBoardCountryFilter('All');
@@ -375,22 +355,147 @@ export default function LeadBoard({
     return filtered;
   }, [leads, searchQuery, userRole, currentAgentId, coordinatorFilter, pipelineDateFilter, filterStartDate, filterEndDate, remarksFilter]);
 
-  // Dynamically filter active column leads by Country, Position, and Gender
-  const filteredStageLeads = React.useMemo(() => {
-    return visibleLeads.filter(l => {
-      // Stage matching
-      let inStage = false;
-      if (selectedStage === 'in_discussion' || selectedStage === 'negotiating') {
-        inStage = l.stage === 'in_discussion' || l.stage === 'negotiating';
-      } else if (selectedStage === 'office_visited' || selectedStage === 'proposal') {
-        inStage = l.stage === 'office_visited' || l.stage === 'proposal';
-      } else if (selectedStage === 'cold_leads' || selectedStage === 'rotations') {
-        inStage = l.stage === 'cold_leads' || l.stage === 'rotations';
-      } else {
-        inStage = l.stage === selectedStage;
-      }
-      if (!inStage) return false;
+  // Helper to sort leads such that candidates with unread messages (replies) come first
+  const sortLeadsByUnreadAndDate = (leadsList: Lead[]) => {
+    return [...leadsList].sort((a, b) => {
+      const unreadA = (a.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
+      const unreadB = (b.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
+      
+      if (unreadA > 0 && unreadB === 0) return -1;
+      if (unreadA === 0 && unreadB > 0) return 1;
+      
+      const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+  };
 
+  // Extract all leads belonging to the currently selected stage (without board filters applied)
+  const stageLeads = React.useMemo(() => {
+    return visibleLeads.filter(l => {
+      if (selectedStage === 'in_discussion' || selectedStage === 'negotiating') {
+        return l.stage === 'in_discussion' || l.stage === 'negotiating';
+      } else if (selectedStage === 'office_visited' || selectedStage === 'proposal') {
+        return l.stage === 'office_visited' || l.stage === 'proposal';
+      } else if (selectedStage === 'cold_leads' || selectedStage === 'rotations') {
+        return l.stage === 'cold_leads' || l.stage === 'rotations';
+      } else {
+        return l.stage === selectedStage;
+      }
+    });
+  }, [visibleLeads, selectedStage]);
+
+  // Compute dynamic options with exact candidate counts for the current stage
+  const boardCountryOptions = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    stageLeads.forEach(lead => {
+      if (lead.country) {
+        const c = lead.country.toUpperCase().trim();
+        counts[c] = (counts[c] || 0) + 1;
+      }
+    });
+    return Object.entries(counts)
+      .map(([country, count]) => ({ country, count }))
+      .sort((a, b) => a.country.localeCompare(b.country));
+  }, [stageLeads]);
+
+  const boardPositionOptions = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    stageLeads.forEach(lead => {
+      if (lead.position) {
+        const p = lead.position.toUpperCase().trim();
+        counts[p] = (counts[p] || 0) + 1;
+      }
+    });
+    return Object.entries(counts)
+      .map(([position, count]) => ({ position, count }))
+      .sort((a, b) => a.position.localeCompare(b.position));
+  }, [stageLeads]);
+
+  const boardGenderCounts = React.useMemo(() => {
+    let male = 0;
+    let female = 0;
+    stageLeads.forEach(lead => {
+      const g = String(lead.gender || '').toUpperCase().trim();
+      if (g === 'M' || g === 'MALE') {
+        male++;
+      } else if (g === 'F' || g === 'FEMALE') {
+        female++;
+      }
+    });
+    return { male, female };
+  }, [stageLeads]);
+
+  // Map computed counts to SearchableOption arrays
+  const searchableCountryOptions = React.useMemo(() => {
+    const options = [
+      {
+        value: 'All',
+        label: `All Countries (${stageLeads.length})`,
+        icon: <span className="text-xs">🌍</span>
+      }
+    ];
+    boardCountryOptions.forEach(c => {
+      const flagUrl = getCountryFlagUrl(c.country);
+      options.push({
+        value: c.country,
+        label: `${c.country} (${c.count})`,
+        icon: flagUrl ? (
+          <img
+            src={flagUrl}
+            alt={c.country}
+            className="w-4 h-3 object-cover rounded-xs border border-slate-700/50"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <span className="text-xs">📍</span>
+        )
+      });
+    });
+    return options;
+  }, [boardCountryOptions, stageLeads.length]);
+
+  const searchablePositionOptions = React.useMemo(() => {
+    const options = [
+      {
+        value: 'All',
+        label: `All Positions (${stageLeads.length})`,
+        icon: <Briefcase className="h-3 w-3 text-emerald-500 shrink-0" />
+      }
+    ];
+    boardPositionOptions.forEach(p => {
+      options.push({
+        value: p.position,
+        label: `${p.position} (${p.count})`,
+        icon: <span className="text-[10px] text-indigo-400 font-bold font-mono">💼</span>
+      });
+    });
+    return options;
+  }, [boardPositionOptions, stageLeads.length]);
+
+  const searchableGenderOptions = React.useMemo(() => {
+    return [
+      {
+        value: 'All',
+        label: `All Genders (${stageLeads.length})`,
+        icon: <span className="text-xs">👥</span>
+      },
+      {
+        value: 'MALE',
+        label: `Male (${boardGenderCounts.male})`,
+        icon: <span className="text-xs font-black text-sky-400">♂</span>
+      },
+      {
+        value: 'FEMALE',
+        label: `Female (${boardGenderCounts.female})`,
+        icon: <span className="text-xs font-black text-rose-400">♀</span>
+      }
+    ];
+  }, [boardGenderCounts, stageLeads.length]);
+
+  // Dynamically filter and sort active column leads by Country, Position, and Gender
+  const filteredStageLeads = React.useMemo(() => {
+    const filtered = stageLeads.filter(l => {
       // Country filter
       if (boardCountryFilter !== 'All') {
         if (!l.country || l.country.toUpperCase().trim() !== boardCountryFilter) return false;
@@ -410,7 +515,10 @@ export default function LeadBoard({
 
       return true;
     });
-  }, [visibleLeads, selectedStage, boardCountryFilter, boardPositionFilter, boardGenderFilter]);
+
+    // Prioritize candidates with unread replies, then sort by date desc
+    return sortLeadsByUnreadAndDate(filtered);
+  }, [stageLeads, boardCountryFilter, boardPositionFilter, boardGenderFilter]);
 
   // Lead Card Render Helper to avoid duplicate JSX
   const renderLeadCard = (lead: Lead) => {
@@ -908,39 +1016,31 @@ export default function LeadBoard({
                     {/* Inline Premium Filters next to title with a nice gap */}
                     <div className="flex flex-wrap items-center gap-2.5">
                       {/* Country Filter */}
-                      <select
+                      <SearchableSelect
                         value={boardCountryFilter}
-                        onChange={(e) => setBoardCountryFilter(e.target.value)}
-                        className="bg-slate-900 hover:bg-slate-850 border border-slate-750 text-slate-200 text-xs font-black rounded-xl px-3 py-1.5 focus:outline-hidden focus:border-indigo-500 transition cursor-pointer"
-                      >
-                        <option value="All">All Countries</option>
-                        {boardCountryOptions.filter(c => c !== 'All').map(c => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-
+                        onChange={setBoardCountryFilter}
+                        options={searchableCountryOptions}
+                        className="text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs shrink-0"
+                        dropdownClassName="dark:bg-slate-950 border-slate-700 w-60"
+                      />
+ 
                       {/* Position Filter */}
-                      <select
+                      <SearchableSelect
                         value={boardPositionFilter}
-                        onChange={(e) => setBoardPositionFilter(e.target.value)}
-                        className="bg-slate-900 hover:bg-slate-850 border border-slate-750 text-slate-200 text-xs font-black rounded-xl px-3 py-1.5 focus:outline-hidden focus:border-indigo-500 transition cursor-pointer max-w-[160px] truncate"
-                      >
-                        <option value="All">All Positions</option>
-                        {boardPositionOptions.filter(p => p !== 'All').map(p => (
-                          <option key={p} value={p}>{p}</option>
-                        ))}
-                      </select>
-
+                        onChange={setBoardPositionFilter}
+                        options={searchablePositionOptions}
+                        className="text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs shrink-0 max-w-[180px] truncate"
+                        dropdownClassName="dark:bg-slate-950 border-slate-700 w-64"
+                      />
+ 
                       {/* Gender Filter */}
-                      <select
+                      <SearchableSelect
                         value={boardGenderFilter}
-                        onChange={(e) => setBoardGenderFilter(e.target.value)}
-                        className="bg-slate-900 hover:bg-slate-850 border border-slate-750 text-slate-200 text-xs font-black rounded-xl px-3 py-1.5 focus:outline-hidden focus:border-indigo-500 transition cursor-pointer"
-                      >
-                        <option value="All">All Genders</option>
-                        <option value="MALE">Male (M)</option>
-                        <option value="FEMALE">Female (F)</option>
-                      </select>
+                        onChange={setBoardGenderFilter}
+                        options={searchableGenderOptions}
+                        className="text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs shrink-0"
+                        dropdownClassName="dark:bg-slate-950 border-slate-700 w-48"
+                      />
 
                       {/* Reset Filters button if any are active */}
                       {(boardCountryFilter !== 'All' || boardPositionFilter !== 'All' || boardGenderFilter !== 'All') && (
@@ -1049,14 +1149,17 @@ export default function LeadBoard({
 
                     {/* Leads Stack */}
                     <div className="space-y-3.5 flex-1 overflow-y-auto max-h-[550px] scrollbar-none py-2 px-0.5">
-                      {colLeads.length > 0 ? (
-                        colLeads.map(lead => renderLeadCard(lead))
-                      ) : (
-                        <div className="h-full border border-dashed border-slate-750 rounded-xl flex flex-col items-center justify-center py-10 text-slate-500 space-y-1 bg-slate-900/20">
-                          <Briefcase className="h-4.5 w-4.5 opacity-40 text-slate-600" />
-                          <span className="text-xs font-bold text-slate-500">No leads in channel</span>
-                        </div>
-                      )}
+                      {(() => {
+                        const sorted = sortLeadsByUnreadAndDate(colLeads);
+                        return sorted.length > 0 ? (
+                          sorted.map(lead => renderLeadCard(lead))
+                        ) : (
+                          <div className="h-full border border-dashed border-slate-750 rounded-xl flex flex-col items-center justify-center py-10 text-slate-500 space-y-1 bg-slate-900/20">
+                            <Briefcase className="h-4.5 w-4.5 opacity-40 text-slate-600" />
+                            <span className="text-xs font-bold text-slate-500">No leads in channel</span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 );

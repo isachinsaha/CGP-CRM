@@ -719,6 +719,15 @@ export default function LeadWhatsAppChat({
     return (
       <div className="flex flex-col h-full bg-slate-50/70 dark:bg-slate-950/60 overflow-hidden text-left relative" id="whatsapp-inbuilt-module">
         
+        {/* Sticky API Branding Header */}
+        <div className="bg-emerald-500/10 dark:bg-emerald-500/5 border-b border-emerald-500/20 px-3 py-1 flex items-center justify-between shrink-0 select-none z-10">
+          <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider font-mono">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span>(Powered by AI Sensy Cloud API)</span>
+          </div>
+          <span className="text-[9px] text-emerald-600/60 dark:text-emerald-400/50 font-semibold font-mono">LIVE CLOUD CHANNEL</span>
+        </div>
+
         {/* 2. Messages Stream List - Maximized Room */}
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-1.5 text-xs">
           {displayMessages.length === 0 ? (

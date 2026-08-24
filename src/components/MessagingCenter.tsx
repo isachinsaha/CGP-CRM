@@ -27,6 +27,7 @@ interface MessagingCenterProps {
   onUpdateTagsList?: (tags: string[]) => void;
   onRefreshData?: () => void;
   onLeadUpdated?: (updatedLead?: Lead) => void;
+  isRefreshing?: boolean;
 }
 
 const DEFAULT_AISENSY_TAGS = [
@@ -50,7 +51,8 @@ export default function MessagingCenter({
   onUpdateProjects,
   onUpdateTagsList,
   onRefreshData,
-  onLeadUpdated
+  onLeadUpdated,
+  isRefreshing = false
 }: MessagingCenterProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'requesting' | 'active' | 'history'>(
@@ -660,10 +662,11 @@ export default function MessagingCenter({
             {onRefreshData && (
               <button
                 onClick={onRefreshData}
-                className="p-1.5 rounded-lg text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition cursor-pointer shadow-2xs"
+                disabled={isRefreshing}
+                className="p-1.5 rounded-lg text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition cursor-pointer shadow-2xs disabled:opacity-60"
                 title="Refresh Chats"
               >
-                <RefreshCw className="h-3.5 w-3.5" />
+                <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
               </button>
             )}
           </div>
@@ -705,29 +708,31 @@ export default function MessagingCenter({
 
           {/* Filter Buttons: Single Line, No-Wrap */}
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-nowrap w-full py-0.5">
-            {/* Tab 1: Requesting */}
-            <button
-              onClick={() => setFilterType('requesting')}
-              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                filterType === 'requesting'
-                  ? 'bg-amber-500 text-white border-amber-500 shadow-2xs font-black'
-                  : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 hover:bg-amber-100'
-              }`}
-            >
-              <span>📥 Requesting</span>
-              {requestingLeadsCount > 0 && (
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
-                  filterType === 'requesting' ? 'bg-white text-amber-700' : 'bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200'
-                }`}>
-                  {requestingLeadsCount}
-                </span>
-              )}
-              {requestingUnreadCount > 0 && (
-                <span className="text-[9.5px] px-1.5 py-0.2 rounded-full font-mono font-black bg-rose-500 text-white animate-pulse" title={`${requestingUnreadCount} unread WhatsApp messages`}>
-                  ✉ {requestingUnreadCount}
-                </span>
-              )}
-            </button>
+            {/* Tab 1: Requesting (Admin Only) */}
+            {userRole === 'admin' && (
+              <button
+                onClick={() => setFilterType('requesting')}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  filterType === 'requesting'
+                    ? 'bg-amber-500 text-white border-amber-500 shadow-2xs font-black'
+                    : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 hover:bg-amber-100'
+                }`}
+              >
+                <span>📥 Requesting</span>
+                {requestingLeadsCount > 0 && (
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
+                    filterType === 'requesting' ? 'bg-white text-amber-700' : 'bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200'
+                  }`}>
+                    {requestingLeadsCount}
+                  </span>
+                )}
+                {requestingUnreadCount > 0 && (
+                  <span className="text-[9.5px] px-1.5 py-0.2 rounded-full font-mono font-black bg-rose-500 text-white animate-pulse" title={`${requestingUnreadCount} unread WhatsApp messages`}>
+                    ✉ {requestingUnreadCount}
+                  </span>
+                )}
+              </button>
+            )}
 
             {/* Tab 2: Active Chats */}
             <button
