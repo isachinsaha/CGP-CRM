@@ -3,7 +3,8 @@ import { Lead, Message, WhatsAppTemplate } from '../types.ts';
 import { 
   Send, MessageSquare, ExternalLink, Sparkles, Check, CheckCheck, 
   Clock, RefreshCw, FileText, Calendar, Phone, PhoneCall, Copy, 
-  ChevronDown, ChevronUp, Bot, UserCheck, AlertCircle, Info, Plus, Paperclip, Zap
+  ChevronDown, ChevronUp, Bot, UserCheck, AlertCircle, Info, Plus, Paperclip, Zap,
+  CornerUpLeft, Smile, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatPhoneForWhatsApp, replaceTemplatePlaceholders } from '../server/whatsapp.ts';
@@ -53,6 +54,15 @@ export default function LeadWhatsAppChat({
     description: '',
     text: ''
   });
+
+  const [replyingToMessage, setReplyingToMessage] = useState<Message | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  const emojis = [
+    '👍', '❤️', '😂', '😮', '😢', '🙏', '👋', '✨', '✅', '🔥', '🎉', '💯',
+    '😀', '😊', '😍', '😎', '🤔', '🙌', '👏', '🤝', '💪', '✍️', '📝', '💼',
+    '📞', '💬', '✉️', '📅', '⏰', '✈️', '🏠', '🔑', '🎯', '⭐️', '📍'
+  ];
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -163,15 +173,20 @@ export default function LeadWhatsAppChat({
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/leads/${lead.id}`);
-        if (res.ok) {
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
           const updatedLead = await res.json();
           if (JSON.stringify(updatedLead.messages) !== JSON.stringify(messagesRef.current)) {
             setMessages(updatedLead.messages || []);
             onLeadUpdated(updatedLead);
           }
         }
-      } catch (err) {
-        console.error('Error polling for new messages:', err);
+      } catch (err: any) {
+        if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+          // Gracefully suppress logs during local dev server restarts / cold boots
+          console.warn('[Chat Poll] Connection skipped (backend is starting up or offline)');
+        } else {
+          console.error('Error polling for new messages:', err);
+        }
       }
     }, 1000);
     return () => clearInterval(interval);
@@ -185,14 +200,20 @@ export default function LeadWhatsAppChat({
         .then(async (res) => {
           if (res.ok) {
             const updatedRes = await fetch(`/api/leads/${lead.id}`);
-            if (updatedRes.ok) {
+            if (updatedRes.ok && updatedRes.headers.get('content-type')?.includes('application/json')) {
               const updatedLead = await updatedRes.json();
               setMessages(updatedLead.messages || []);
               onLeadUpdated(updatedLead);
             }
           }
         })
-        .catch(err => console.error('Error marking as read in LeadWhatsAppChat:', err));
+        .catch(err => {
+          if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+            console.warn('[Chat Read] Connection skipped (backend offline)');
+          } else {
+            console.error('Error marking as read in LeadWhatsAppChat:', err);
+          }
+        });
     }
   }, [lead.id, messages, onLeadUpdated]);
 
@@ -204,19 +225,23 @@ export default function LeadWhatsAppChat({
         fetch('/api/whatsapp/templates').catch(() => null)
       ]);
 
-      if (configRes && configRes.ok) {
+      if (configRes && configRes.ok && configRes.headers.get('content-type')?.includes('application/json')) {
         const configData = await configRes.json();
         setConfig(configData);
       }
 
-      if (tplRes && tplRes.ok) {
+      if (tplRes && tplRes.ok && tplRes.headers.get('content-type')?.includes('application/json')) {
         const tplData = await tplRes.json();
         if (Array.isArray(tplData.templates)) {
           setTemplates(tplData.templates);
         }
       }
-    } catch (err) {
-      console.error('Error fetching WhatsApp configuration:', err);
+    } catch (err: any) {
+      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+        console.warn('[Chat Config] Config fetch skipped (backend offline)');
+      } else {
+        console.error('Error fetching WhatsApp configuration:', err);
+      }
     } finally {
       setLoadingTemplates(false);
     }
@@ -248,7 +273,10 @@ export default function LeadWhatsAppChat({
           senderName,
           templateName: templateName || undefined,
           channel: 'whatsapp',
-          ...(mediaParams || {})
+          ...(mediaParams || {}),
+          replyToId: replyingToMessage?.id || undefined,
+          replyToText: replyingToMessage?.text || undefined,
+          replyToSender: replyingToMessage ? (replyingToMessage.senderName || (replyingToMessage.sender === 'lead' ? lead.name : 'Coordinator')) : undefined
         })
       });
 
@@ -260,6 +288,7 @@ export default function LeadWhatsAppChat({
         }
         setInputText('');
         setShowTemplates(false);
+        setReplyingToMessage(null);
       } else {
         const errData = await res.json().catch(() => ({}));
         alert(`Failed to send message: ${errData.error || 'Unknown server error'}`);
@@ -622,6 +651,19 @@ export default function LeadWhatsAppChat({
                     </div>
                   )}
 
+                  {/* Quoted Message Reply Box */}
+                  {msg.replyToId && (
+                    <div className="mb-1.5 p-1.5 px-2 rounded-lg bg-black/5 dark:bg-white/5 border-l-3 border-emerald-500 dark:border-emerald-400 text-[10.5px] leading-tight select-none text-slate-800 dark:text-slate-200">
+                      <div className="font-extrabold text-[9px] text-emerald-600 dark:text-emerald-400 mb-0.5 truncate flex items-center gap-1">
+                        <CornerUpLeft className="h-2.5 w-2.5" />
+                        <span>{msg.replyToSender || 'Contact'}</span>
+                      </div>
+                      <div className="line-clamp-2 italic text-slate-600 dark:text-slate-300">
+                        {msg.replyToText}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Media Content Previews */}
                   {msg.type === 'image' && msg.mediaUrl && (
                     <div className="mb-2 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950">
@@ -695,6 +737,16 @@ export default function LeadWhatsAppChat({
                       </span>
                     )}
 
+                     {/* Reply Button */}
+                    <button
+                      type="button"
+                      onClick={() => setReplyingToMessage(msg)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-slate-900 dark:hover:text-white cursor-pointer ml-1"
+                      title="Reply to this message"
+                    >
+                      <CornerUpLeft className="h-3 w-3" />
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => handleCopyMessage(msg.text, msg.id)}
@@ -723,7 +775,7 @@ export default function LeadWhatsAppChat({
         <div className="bg-emerald-500/10 dark:bg-emerald-500/5 border-b border-emerald-500/20 px-3 py-1 flex items-center justify-between shrink-0 select-none z-10">
           <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider font-mono">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span>(Powered by AI Sensy Cloud API)</span>
+            <span>Powered by AI Sensy Cloud API</span>
           </div>
           <span className="text-[9px] text-emerald-600/60 dark:text-emerald-400/50 font-semibold font-mono">LIVE CLOUD CHANNEL</span>
         </div>
@@ -1030,8 +1082,30 @@ export default function LeadWhatsAppChat({
       </AnimatePresence>
 
       {/* 4. WhatsApp Message Composer Bar */}
-      <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shrink-0 space-y-2 shadow-sm">
+      <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shrink-0 space-y-2 shadow-sm relative">
         
+        {/* Reply Message Preview Panel */}
+        {replyingToMessage && (
+          <div className="bg-slate-50 dark:bg-slate-950 border-l-4 border-emerald-500 p-2.5 rounded-lg flex items-center justify-between text-xs transition-all relative shadow-2xs">
+            <div className="flex-1 min-w-0 pr-4">
+              <span className="font-extrabold text-emerald-600 dark:text-emerald-400 block mb-0.5 text-[10.5px]">
+                Replying to {replyingToMessage.senderName || (replyingToMessage.sender === 'lead' ? lead.name : 'Coordinator')}
+              </span>
+              <span className="text-slate-600 dark:text-slate-300 truncate block italic text-[11px]">
+                {replyingToMessage.text}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReplyingToMessage(null)}
+              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
+              title="Cancel Reply"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
         {/* Helper tools row */}
         <div className="flex items-center justify-between text-xs px-1">
           <div className="flex items-center gap-2">
@@ -1075,6 +1149,37 @@ export default function LeadWhatsAppChat({
           </div>
         </div>
 
+        {/* Popover Emoji Picker */}
+        {showEmojiPicker && (
+          <div className="absolute bottom-[58px] right-3 bg-white dark:bg-slate-950 border border-slate-250 dark:border-slate-800 rounded-2xl shadow-xl p-3 z-30 w-64 text-left">
+            <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-100 dark:border-slate-800">
+              <span className="text-[10px] font-black uppercase text-slate-400">Insert Emoji</span>
+              <button
+                type="button"
+                onClick={() => setShowEmojiPicker(false)}
+                className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-6 gap-2 max-h-48 overflow-y-auto pr-1">
+              {emojis.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => {
+                    setInputText(prev => prev + emoji);
+                    textareaRef.current?.focus();
+                  }}
+                  className="text-lg p-1 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-lg active:scale-90 transition-transform cursor-pointer select-none text-center flex items-center justify-center h-8 w-8"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Input box & action controls */}
         <div className="flex items-end gap-2">
           {/* Hidden File Input */}
@@ -1100,6 +1205,20 @@ export default function LeadWhatsAppChat({
             placeholder={`Type a WhatsApp message to ${lead.name || 'Candidate'} (${lead.phone})...`}
             className="flex-1 text-xs sm:text-[13px] p-2.5 px-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium resize-none leading-relaxed transition-all"
           />
+
+          {/* Emoji Trigger Button */}
+          <button
+            type="button"
+            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+            className={`p-3 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 border h-[42px] w-[42px] ${
+              showEmojiPicker
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+            }`}
+            title="Emoji Keyboard"
+          >
+            <Smile className="h-4 w-4" />
+          </button>
 
           {/* Attachment Button */}
           <button

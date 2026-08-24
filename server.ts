@@ -43,7 +43,8 @@ import {
   saveWhatsAppTemplate,
   deleteWhatsAppTemplate,
   getWhatsAppAutoReplySettings,
-  saveWhatsAppAutoReplySettings
+  saveWhatsAppAutoReplySettings,
+  extractMetaMediaId
 } from './src/server/db.ts';
 import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings } from './src/types.ts';
 import { isDefaultExperience, getEffectiveExperience, getEffectiveIntake } from './src/utils.ts';
@@ -1572,7 +1573,7 @@ async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadN
 
         if (result.success) {
           const autoReplyMsg: Message = {
-            id: `msg_auto_${Date.now()}`,
+            id: result.messageId || `msg_auto_${Date.now()}`,
             sender: 'system',
             senderName: 'CGP Auto-Reply',
             text: replyText,
@@ -1620,26 +1621,6 @@ async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadN
               console.error('Error transitioning auto-reply to delivered:', err);
             }
           }, 1500);
-
-          // Transition auto-reply to 'read' (blue ticks) in background after 4.5 seconds
-          setTimeout(async () => {
-            try {
-              const latestLeads = await getLeads();
-              const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
-              if (lIdx !== -1) {
-                const l = latestLeads[lIdx];
-                const mIdx = (l.messages || []).findIndex(m => m.id === autoMsgId);
-                if (mIdx !== -1 && l.messages[mIdx].status === 'delivered') {
-                  l.messages[mIdx].status = 'read';
-                  clearLeadsCache();
-                  await saveLeads(latestLeads);
-                  console.log(`[AutoReplyStatus] Transitioned auto-reply message ${autoMsgId} to 'read' (blue ticks)`);
-                }
-              }
-            } catch (err) {
-              console.error('Error transitioning auto-reply to read:', err);
-            }
-          }, 4500);
         } else {
           console.error(`[AutoReply] Failed to send auto-reply:`, result.details);
         }
@@ -1845,7 +1826,7 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
 
       const senderName = userRole === 'admin' ? 'Administrator' : `Coordinator (${agentId})`;
       const newMessage: Message = {
-        id: `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: deliveryResult?.messageId || `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         sender: 'user',
         senderName,
         text: msgText,
@@ -1880,26 +1861,6 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
           console.error('Error transitioning message to delivered:', err);
         }
       }, 1500);
-
-      // Transition start-chat message to 'read' (blue ticks) in background after 4.5 seconds
-      setTimeout(async () => {
-        try {
-          const latestLeads = await getLeads();
-          const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
-          if (lIdx !== -1) {
-            const l = latestLeads[lIdx];
-            const mIdx = (l.messages || []).findIndex(m => m.id === msgId);
-            if (mIdx !== -1 && l.messages[mIdx].status === 'delivered') {
-              l.messages[mIdx].status = 'read';
-              clearLeadsCache();
-              await saveLeads(latestLeads);
-              console.log(`[MessageStatus] Auto-transitioned start-chat message ${msgId} to 'read' (blue ticks)`);
-            }
-          }
-        } catch (err) {
-          console.error('Error transitioning message to read:', err);
-        }
-      }, 4500);
 
       if (!Array.isArray(targetLead.timeline)) {
         targetLead.timeline = [];
@@ -2052,7 +2013,7 @@ app.post('/api/leads/:id/read', async (req, res) => {
 // POST send WhatsApp message to a lead (Outbound via Meta Cloud API)
 app.post('/api/leads/:id/messages', async (req, res) => {
   try {
-    const { text, sender, senderName, templateName, channel, type, mediaUrl, fileName, fileSize } = req.body;
+    const { text, sender, senderName, templateName, channel, type, mediaUrl, fileName, fileSize, replyToId, replyToText, replyToSender } = req.body;
     
     // For media messages, body text is optional (can act as a caption)
     const msgType = type || 'text';
@@ -2097,7 +2058,7 @@ app.post('/api/leads/:id/messages', async (req, res) => {
 
     const isOutboundSender = (sender || 'user') !== 'lead';
     const newMessage: Message = {
-      id: `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: deliveryResult?.messageId || `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       sender: sender || 'user',
       senderName: senderName || (sender === 'lead' ? lead.name : (agentId === 'admin' ? 'Administrator' : agentId)),
       text: messageText,
@@ -2108,7 +2069,10 @@ app.post('/api/leads/:id/messages', async (req, res) => {
       type: msgType,
       mediaUrl: mediaUrl || undefined,
       fileName: fileName || undefined,
-      fileSize: fileSize || undefined
+      fileSize: fileSize || undefined,
+      replyToId: replyToId || undefined,
+      replyToText: replyToText || undefined,
+      replyToSender: replyToSender || undefined
     };
 
     if (!Array.isArray(lead.messages)) {
@@ -2138,26 +2102,6 @@ app.post('/api/leads/:id/messages', async (req, res) => {
           console.error('Error transitioning message to delivered:', err);
         }
       }, 1500);
-
-      // Transition outbound message to 'read' (blue ticks) in background after 4.5 seconds
-      setTimeout(async () => {
-        try {
-          const latestLeads = await getLeads();
-          const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
-          if (lIdx !== -1) {
-            const l = latestLeads[lIdx];
-            const mIdx = (l.messages || []).findIndex(m => m.id === msgId);
-            if (mIdx !== -1 && l.messages[mIdx].status === 'delivered') {
-              l.messages[mIdx].status = 'read';
-              clearLeadsCache();
-              await saveLeads(latestLeads);
-              console.log(`[MessageStatus] Auto-transitioned message ${msgId} to 'read' (blue ticks)`);
-            }
-          }
-        } catch (err) {
-          console.error('Error transitioning message to read:', err);
-        }
-      }, 4500);
     }
 
     // Auto-record message activity into lead timeline
@@ -2265,6 +2209,166 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const payload = req.body || {};
     console.log(`[Meta Webhook POST] Received payload:`, JSON.stringify(payload, null, 2));
 
+    // Handle Meta WhatsApp Status Webhook (read receipts, delivery ticks)
+    let isStatusUpdate = false;
+    const statusesToProcess: { id: string; status: string; recipient_id?: string }[] = [];
+
+    // 1. Check for standard Meta nested statuses array
+    if (payload.entry && Array.isArray(payload.entry)) {
+      for (const entry of payload.entry) {
+        if (entry.changes && Array.isArray(entry.changes)) {
+          for (const change of entry.changes) {
+            const val = change.value;
+            if (val && val.statuses && Array.isArray(val.statuses)) {
+              for (const s of val.statuses) {
+                if (s.id && s.status) {
+                  statusesToProcess.push({
+                    id: String(s.id),
+                    status: String(s.status),
+                    recipient_id: s.recipient_id ? String(s.recipient_id) : undefined
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Check for flat or custom/AISensy/Simulation webhook status updates
+    // Check if the payload itself represents a status update
+    // e.g. { "status": "read", "id": "wamid.ID", "phone": "..." }
+    const flatStatusRaw = payload.status || payload.messageStatus || payload.eventStatus || payload.state || payload.event;
+    const flatId = payload.messageId || payload.id || payload.wamid || payload.msgId || payload.msg_id;
+    const flatPhone = payload.phone || payload.recipient || payload.to || payload.from || payload.mobile || payload.recipient_id;
+
+    if (flatStatusRaw && flatId && !payload.text && !payload.message && !payload.body) {
+      let flatStatus = String(flatStatusRaw).toLowerCase();
+      if (flatStatus.includes('read')) flatStatus = 'read';
+      else if (flatStatus.includes('deliver')) flatStatus = 'delivered';
+      else if (flatStatus.includes('sent')) flatStatus = 'sent';
+      else if (flatStatus.includes('fail')) flatStatus = 'failed';
+
+      const validStatuses = ['sent', 'delivered', 'read', 'failed'];
+      if (validStatuses.includes(flatStatus)) {
+        statusesToProcess.push({
+          id: String(flatId),
+          status: flatStatus,
+          recipient_id: flatPhone ? String(flatPhone) : undefined
+        });
+      }
+    }
+
+    // Process all identified status updates (nested and flat)
+    if (statusesToProcess.length > 0) {
+      isStatusUpdate = true;
+      const leads = await getLeads();
+      let leadsUpdated = false;
+
+      for (const s of statusesToProcess) {
+        const wamid = s.id;
+        const newStatus = s.status; // 'sent' | 'delivered' | 'read' | 'failed'
+        const recipientId = s.recipient_id;
+        console.log(`[Meta Webhook POST] Processing status update: ID "${wamid}" to "${newStatus}" for recipient "${recipientId || 'unknown'}"`);
+
+        let matched = false;
+
+        // A. Primary Match: Find by exact message ID
+        for (let i = 0; i < leads.length; i++) {
+          const lead = leads[i];
+          if (Array.isArray(lead.messages)) {
+            const mIdx = lead.messages.findIndex(m => m.id === wamid);
+            if (mIdx !== -1) {
+              matched = true;
+              const oldStatus = lead.messages[mIdx].status;
+              const statusPriority = { 'sent': 1, 'delivered': 2, 'read': 3, 'failed': 0 };
+              const oldPriority = statusPriority[oldStatus as keyof typeof statusPriority] || 0;
+              const newPriority = statusPriority[newStatus as keyof typeof statusPriority] || 0;
+
+              if (newPriority > oldPriority || newStatus === 'failed') {
+                lead.messages[mIdx].status = newStatus as 'sent' | 'delivered' | 'read' | 'failed';
+                leadsUpdated = true;
+                console.log(`[Meta Webhook POST] Match exact ID: Updated message "${wamid}" status from "${oldStatus}" to "${newStatus}" for lead "${lead.name}"`);
+                
+                if (newStatus === 'read' && oldStatus !== 'read') {
+                  if (!Array.isArray(lead.timeline)) lead.timeline = [];
+                  const snippet = (lead.messages[mIdx].text || '').substring(0, 50);
+                  lead.timeline.push({
+                    id: `tl_${Date.now()}_read_${Math.random().toString(36).substring(2, 5)}`,
+                    type: 'message',
+                    text: `Candidate read message: "${snippet}..."`,
+                    actor: lead.name,
+                    timestamp: new Date().toISOString()
+                  });
+                }
+              }
+              break;
+            }
+          }
+        }
+
+        // B. Secondary Match: If exact message ID wasn't matched, match by recipient phone number
+        if (!matched && recipientId) {
+          const cleanRecipient = String(recipientId).replace(/\D/g, '');
+          if (cleanRecipient) {
+            for (let i = 0; i < leads.length; i++) {
+              const lead = leads[i];
+              const leadDigits = String(lead.phone || '').replace(/\D/g, '');
+              if (leadDigits && (leadDigits.includes(cleanRecipient) || cleanRecipient.includes(leadDigits) || (leadDigits.length >= 10 && cleanRecipient.endsWith(leadDigits.slice(-10))))) {
+                if (Array.isArray(lead.messages) && lead.messages.length > 0) {
+                  let updatedAny = false;
+                  const statusPriority = { 'sent': 1, 'delivered': 2, 'read': 3, 'failed': 0 };
+                  const newPriority = statusPriority[newStatus as keyof typeof statusPriority] || 0;
+
+                  // Update any preceding outbound message that isn't read/delivered yet, prioritizing the most recent ones
+                  for (let mIdx = lead.messages.length - 1; mIdx >= 0; mIdx--) {
+                    const m = lead.messages[mIdx];
+                    if (m && m.sender !== 'lead') {
+                      const oldStatus = m.status;
+                      const oldPriority = statusPriority[oldStatus as keyof typeof statusPriority] || 0;
+                      if (newPriority > oldPriority || newStatus === 'failed') {
+                        m.status = newStatus as 'sent' | 'delivered' | 'read' | 'failed';
+                        updatedAny = true;
+                        console.log(`[Meta Webhook POST] Match phone secondary: Updated message "${m.id}" status from "${oldStatus}" to "${newStatus}" for lead "${lead.name}"`);
+
+                        if (newStatus === 'read' && oldStatus !== 'read') {
+                          if (!Array.isArray(lead.timeline)) lead.timeline = [];
+                          const snippet = (m.text || '').substring(0, 50);
+                          lead.timeline.push({
+                            id: `tl_${Date.now()}_read_${Math.random().toString(36).substring(2, 5)}`,
+                            type: 'message',
+                            text: `Candidate read message: "${snippet}..."`,
+                            actor: lead.name,
+                            timestamp: new Date().toISOString()
+                          });
+                        }
+                      }
+                    }
+                  }
+
+                  if (updatedAny) {
+                    leadsUpdated = true;
+                  }
+                }
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if (leadsUpdated) {
+        clearLeadsCache();
+        await saveLeads(leads);
+        console.log(`[Meta Webhook POST] Saved status updates to database.`);
+      }
+    }
+
+    if (isStatusUpdate) {
+      res.status(200).json({ success: true, processedStatus: true });
+      return;
+    }
+
     let fromNumber = payload.destination || payload.from || payload.phone || payload.mobile;
     let messageBody = payload.text || payload.message || payload.body || payload.caption;
     let mediaUrl = payload.mediaUrl || payload.fileUrl || payload.imageUrl || payload.url;
@@ -2332,7 +2436,10 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
       // Proxy Meta Media IDs through our local /api/whatsapp/media/:mediaId helper endpoint
       let parsedMediaUrl = mediaUrl;
-      if (mediaUrl && !mediaUrl.startsWith('http') && !mediaUrl.startsWith('/')) {
+      const extractedId = extractMetaMediaId(mediaUrl);
+      if (extractedId) {
+        parsedMediaUrl = `/api/whatsapp/media/${extractedId}`;
+      } else if (mediaUrl && !mediaUrl.startsWith('http') && !mediaUrl.startsWith('/')) {
         parsedMediaUrl = `/api/whatsapp/media/${mediaUrl}`;
       }
 

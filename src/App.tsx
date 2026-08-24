@@ -317,9 +317,20 @@ export default function App() {
 
   useEffect(() => {
     fetch('/api/whatsapp/templates')
-      .then(res => res.json())
+      .then(res => {
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+          return res.json();
+        }
+        return { templates: [] };
+      })
       .then(data => setTemplates(data.templates || []))
-      .catch(console.error);
+      .catch(err => {
+        if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+          console.warn('[Sync] Templates fetch skipped (server starting up or offline)');
+        } else {
+          console.error('[Sync] Templates fetch error:', err);
+        }
+      });
   }, []);
 
   // Synchronize data from Express REST API
@@ -358,7 +369,7 @@ export default function App() {
         fetch('/api/stats').catch(() => null)
       ]);
 
-      if (leadsRes.ok) {
+      if (leadsRes.ok && leadsRes.headers.get('content-type')?.includes('application/json')) {
         const leadsData = await leadsRes.json();
         const leadsArray = Array.isArray(leadsData) ? leadsData : (leadsData.leads || []);
         setLeads(leadsArray);
@@ -385,12 +396,16 @@ export default function App() {
       }
 
       // 2. Fetch aggregate stats
-      if (statsRes && statsRes.ok) {
+      if (statsRes && statsRes.ok && statsRes.headers.get('content-type')?.includes('application/json')) {
         const statsData = await statsRes.json();
         setStats(statsData);
       }
-    } catch (err) {
-      console.error('Failed to sync placement entries from Express REST routes:', err);
+    } catch (err: any) {
+      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+        console.warn('[Sync] Express REST server offline or restarting, skipping poll sync.');
+      } else {
+        console.error('Failed to sync placement entries from Express REST routes:', err);
+      }
     } finally {
       setIsRefreshing(false);
       setLoading(false);

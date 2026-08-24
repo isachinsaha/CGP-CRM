@@ -26,6 +26,9 @@ export interface Message {
   mediaUrl?: string;
   fileName?: string;
   fileSize?: string;
+  replyToId?: string;
+  replyToText?: string;
+  replyToSender?: string;
 }
 
 export interface WhatsAppTemplate {

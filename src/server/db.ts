@@ -18,7 +18,7 @@ import {
   writeBatch,
   setLogLevel
 } from 'firebase/firestore';
-import { Lead, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings } from '../types.ts';
+import { Lead, Message, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings } from '../types.ts';
 import { getEffectiveIntake } from '../utils.ts';
 
 // Configure Firebase SDK to only log errors, suppressing gRPC connection warnings
@@ -943,18 +943,91 @@ function syncAndMergeLeadsList(
   return { mergedLeads, pendingUpload, pendingDeleteIds };
 }
 
+
+// Helper function to extract Meta media_id from various URL formats or IDs
+export function extractMetaMediaId(urlOrId: string | undefined | null): string | null {
+  if (!urlOrId) return null;
+  const s = String(urlOrId).trim();
+  if (/^\d+$/.test(s)) {
+    return s;
+  }
+  
+  // Try to find the "mid" query parameter
+  try {
+    if (s.includes('mid=')) {
+      const match = s.match(/[?&]mid=(\d+)/);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+  } catch (e) {}
+
+  // Try to find the last numeric segment in path
+  try {
+    const urlObj = new URL(s);
+    const pathname = urlObj.pathname;
+    const segments = pathname.split('/').filter(Boolean);
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (/^\d+$/.test(segments[i])) {
+        return segments[i];
+      }
+    }
+  } catch (e) {}
+
+  // Fallback regex match for any 15+ digit number
+  const digitMatch = s.match(/\b\d{14,17}\b/);
+  if (digitMatch) {
+    return digitMatch[0];
+  }
+
+  return null;
+}
+
+// Normalize single lead message media URLs to proxy endpoint
+export function normalizeSingleLeadMediaUrls(lead: Lead | undefined): Lead | undefined {
+  if (!lead) return lead;
+  if (!lead.messages || !Array.isArray(lead.messages)) return lead;
+
+  const mappedMessages = lead.messages.map((m: Message) => {
+    if (!m || !m.mediaUrl) return m;
+    const rawUrl = String(m.mediaUrl).trim();
+    if (rawUrl.startsWith('/api/whatsapp/media/')) return m;
+
+    if (rawUrl.includes('fbsbx.com') || rawUrl.includes('facebook.com') || /^\d+$/.test(rawUrl)) {
+      const extractedId = extractMetaMediaId(rawUrl);
+      if (extractedId) {
+        return {
+          ...m,
+          mediaUrl: `/api/whatsapp/media/${extractedId}`
+        };
+      }
+    }
+    return m;
+  });
+
+  return {
+    ...lead,
+    messages: mappedMessages
+  };
+}
+
+// Normalize a collection of leads
+export function normalizeLeadsMediaUrls(leads: Lead[]): Lead[] {
+  return leads.map(l => normalizeSingleLeadMediaUrls(l) as Lead);
+}
+
 // Find lead by id
 export async function getLeadById(id: string): Promise<Lead | undefined> {
   // Try retrieving from active in-memory cache first if available
   if (dbCache.leads && (Date.now() - dbCache.leads.timestamp < CACHE_TTL_MS)) {
-    return dbCache.leads.data.find(l => l.id === id);
+    return normalizeSingleLeadMediaUrls(dbCache.leads.data.find(l => l.id === id));
   }
 
   if (checkCloudStatus()) {
     try {
       const docSnap = await runWithTimeout(getDoc(doc(db, 'leads', id)), 2000);
       if (docSnap.exists()) {
-        return docSnap.data() as Lead;
+        return normalizeSingleLeadMediaUrls(docSnap.data() as Lead);
       }
       return undefined;
     } catch (err: any) {
@@ -963,7 +1036,7 @@ export async function getLeadById(id: string): Promise<Lead | undefined> {
     }
   }
   const leads = await getLeads();
-  return leads.find(l => l.id === id);
+  return normalizeSingleLeadMediaUrls(leads.find(l => l.id === id));
 }
 
 // Read database with bidirectional sync
@@ -1135,20 +1208,23 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
   }
 
   // Update in-memory cache
-  dbCache.leads = { data: finalLeads, timestamp: Date.now() };
+  const normalizedFinalLeads = normalizeLeadsMediaUrls(finalLeads);
+  dbCache.leads = { data: normalizedFinalLeads, timestamp: Date.now() };
 
-  return finalLeads;
+  return normalizedFinalLeads;
 }
 
 // Save all leads using smart delta-saving for Firestore
 async function saveLeadsInternal(leads: Lead[]): Promise<void> {
   await initializeDatabase();
 
+  const normalizedLeads = normalizeLeadsMediaUrls(leads);
+
   // Update in-memory cache immediately so local changes are instantly reflected on reads
-  dbCache.leads = { data: leads, timestamp: Date.now() };
+  dbCache.leads = { data: normalizedLeads, timestamp: Date.now() };
 
   // Write to local JSON file first so we ALWAYS have a local copy and stay fully functional!
-  safeWriteJsonSync(DATA_FILE, leads);
+  safeWriteJsonSync(DATA_FILE, normalizedLeads);
 
   if (checkCloudStatus()) {
     try {
@@ -1159,7 +1235,7 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
       lastSyncedLeads.forEach(l => { if (l && l.id) syncedMap.set(l.id, l); });
 
       const leadsToSave: Lead[] = [];
-      leads.forEach(l => {
+      normalizedLeads.forEach(l => {
         if (!l || !l.id) return;
         const syncedL = syncedMap.get(l.id);
         if (!syncedL) {
@@ -1173,7 +1249,7 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
         }
       });
 
-      const currentIds = new Set(leads.map(l => l.id).filter(Boolean));
+      const currentIds = new Set(normalizedLeads.map(l => l.id).filter(Boolean));
       const leadsToDelete: string[] = [];
       lastSyncedLeads.forEach(syncedL => {
         if (syncedL && syncedL.id && !currentIds.has(syncedL.id)) {
@@ -1182,13 +1258,13 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
       });
 
       // Safety guardrail: Prevent cascading cloud deletion if local array shrunk unexpectedly by >30%
-      if (leadsToDelete.length > 50 && leads.length < lastSyncedLeads.length * 0.7) {
-        console.warn(`[Firestore Client] SAFETY INTERVENTION: Detected abrupt drop in lead count (${lastSyncedLeads.length} -> ${leads.length}). Suppressing ${leadsToDelete.length} automatic cloud deletions to protect database integrity.`);
+      if (leadsToDelete.length > 50 && normalizedLeads.length < lastSyncedLeads.length * 0.7) {
+        console.warn(`[Firestore Client] SAFETY INTERVENTION: Detected abrupt drop in lead count (${lastSyncedLeads.length} -> ${normalizedLeads.length}). Suppressing ${leadsToDelete.length} automatic cloud deletions to protect database integrity.`);
         leadsToDelete.length = 0;
       }
 
       if (leadsToSave.length > 0 || leadsToDelete.length > 0) {
-        console.log(`[Firestore Client] Syncing saveLeads diff: ${leadsToSave.length} leads to set, ${leadsToDelete.length} leads to delete (total: ${leads.length})`);
+        console.log(`[Firestore Client] Syncing saveLeads diff: ${leadsToSave.length} leads to set, ${leadsToDelete.length} leads to delete (total: ${normalizedLeads.length})`);
       }
 
       // Write changes in batches of 400
@@ -1225,7 +1301,7 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
       }
 
       // Since all Firestore operations succeeded, we can safely update the local DATA_FILE_SYNCED cache
-      safeWriteJsonSync(DATA_FILE_SYNCED, leads);
+      safeWriteJsonSync(DATA_FILE_SYNCED, normalizedLeads);
 
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save leads delta to cloud:', err);
