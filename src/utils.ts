@@ -371,4 +371,32 @@ export const getEffectiveExperience = (lead: {
   return lead.experience && lead.experience.trim() ? lead.experience.trim() : 'Fresh criteria';
 };
 
+/**
+ * Resolves the effective intake status of a lead.
+ * If a lead has a real coordinator, is in a stage other than 'new', or has a serial number,
+ * it is automatically considered intaken. Otherwise, it falls back to the stored 'intake' flag or false.
+ */
+export const getEffectiveIntake = (lead: {
+  assignedTo?: string | null;
+  stage?: string | null;
+  serialNo?: string | null;
+  intake?: boolean;
+}): boolean => {
+  const assigned = String(lead.assignedTo || '').trim().toLowerCase();
+  const hasRealCoordinator = assigned !== '' && assigned !== 'unassigned' && assigned !== 'all';
+  
+  const stage = String(lead.stage || '').trim().toLowerCase();
+  const notStageNew = stage !== '' && stage !== 'new';
+  
+  const serial = String(lead.serialNo || '').trim();
+  const hasSerialNo = serial !== '';
+  
+  if (hasRealCoordinator || notStageNew || hasSerialNo) {
+    return true;
+  }
+  
+  return lead.intake === true;
+};
+
+
 

@@ -19,6 +19,7 @@ import {
   setLogLevel
 } from 'firebase/firestore';
 import { Lead, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings } from '../types.ts';
+import { getEffectiveIntake } from '../utils.ts';
 
 // Configure Firebase SDK to only log errors, suppressing gRPC connection warnings
 setLogLevel('error');
@@ -879,7 +880,7 @@ function syncAndMergeLeadsList(
 
   const mergedLeads: Lead[] = [];
   const pendingUpload: Lead[] = [];
-  const pendingDeleteIds: string[] = [];
+  const pendingDeleteIds: string[] = []; // Intentionally empty to block physical Firestore deletion
 
   const allIds = new Set([
     ...localMap.keys(),
@@ -890,10 +891,9 @@ function syncAndMergeLeadsList(
   for (const id of allIds) {
     const local = localMap.get(id);
     const cloud = cloudMap.get(id);
-    const synced = syncedMap.get(id);
 
-    if (local && cloud && synced) {
-      // Exist in all three
+    if (local && cloud) {
+      // Exist in both local and cloud
       if (JSON.stringify(local) === JSON.stringify(cloud)) {
         mergedLeads.push(local);
       } else {
@@ -914,45 +914,22 @@ function syncAndMergeLeadsList(
           chosen.autoReplySent = true;
         }
 
+        // Keep isDeleted true if either version had it set
+        if (local.isDeleted || cloud.isDeleted) {
+          chosen.isDeleted = true;
+        }
+
         mergedLeads.push(chosen);
       }
-    } else if (local && cloud && !synced) {
-      // Exist in local and cloud, but wasn't tracked as synced
-      const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
-      const cloudTime = new Date(cloud.updatedAt || cloud.createdAt || 0).getTime();
-
-      let chosen: Lead;
-      if (localTime > cloudTime) {
-        chosen = { ...local };
-        pendingUpload.push(chosen);
-      } else {
-        chosen = { ...cloud };
-      }
-
-      // Keep autoReplySent true if either version had it set
-      if (local.autoReplySent || cloud.autoReplySent) {
-        chosen.autoReplySent = true;
-      }
-
-      mergedLeads.push(chosen);
-    } else if (local && !cloud && synced) {
-      // Deleted from Cloud by another coordinator/admin
-      // So we delete it locally
-      console.log(`[Sync] Lead ${local.name || id} was deleted from cloud, removing from local.`);
-    } else if (!local && cloud && synced) {
-      // Deleted locally on this machine
-      // So we delete from cloud
-      console.log(`[Sync] Lead ${cloud.name || id} was deleted locally, marking for cloud deletion.`);
-      pendingDeleteIds.push(id);
-    } else if (local && !cloud && !synced) {
-      // Brand new lead created locally
+    } else if (local && !cloud) {
+      // Exist locally but missing from Cloud. We NEVER delete it! We instead preserve it and upload to Cloud.
+      console.log(`[Sync Safeguard] Lead ${local.name || id} exists locally but is missing from Cloud. Preserving and uploading to Cloud.`);
       mergedLeads.push(local);
       pendingUpload.push(local);
-    } else if (!local && cloud && !synced) {
-      // Brand new lead created on cloud by another coordinator/admin
+    } else if (!local && cloud) {
+      // Exist in Cloud but missing locally. We NEVER delete it! We preserve it locally.
+      console.log(`[Sync Safeguard] Lead ${cloud.name || id} exists in Cloud but is missing locally. Preserving locally.`);
       mergedLeads.push(cloud);
-    } else {
-      // Only in synced map (deleted on both sides), ignore
     }
   }
 
@@ -1228,15 +1205,20 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
         }
       }
 
-      // Delete removed documents in batches of 400
+      // Safety guardrail: Convert removed documents to soft-deleted on Cloud to prevent physical data loss
       if (leadsToDelete.length > 0) {
+        console.log(`[Firestore Client] Converting ${leadsToDelete.length} removed leads to soft-deleted on Cloud...`);
         const CHUNK_SIZE = 400;
         for (let i = 0; i < leadsToDelete.length; i += CHUNK_SIZE) {
           const chunk = leadsToDelete.slice(i, i + CHUNK_SIZE);
           const batch = writeBatch(db);
           chunk.forEach(id => {
             const docRef = doc(db, 'leads', id);
-            batch.delete(docRef);
+            batch.set(docRef, { 
+              isDeleted: true, 
+              deletedAt: new Date().toISOString(), 
+              updatedAt: new Date().toISOString() 
+            }, { merge: true });
           });
           await runWithTimeout(batch.commit(), 5000);
         }
@@ -1278,13 +1260,8 @@ export async function addLead(lead: Lead): Promise<void> {
 export async function getStats(): Promise<StatSummary> {
   const rawLeads = await getLeads();
   // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
-  const leads = rawLeads.filter(lead => {
-    const isUnassigned = !lead.assignedTo || 
-      lead.assignedTo.toLowerCase() === 'unassigned' || 
-      lead.assignedTo.trim() === '';
-    const isRequesting = (lead.stage === 'new' && isUnassigned) || lead.intake === false;
-    return !isRequesting;
-  });
+  // as well as soft-deleted leads
+  const leads = rawLeads.filter(lead => !lead.isDeleted && getEffectiveIntake(lead));
   
   const totalLeads = leads.length;
   const newLeads = leads.filter(l => l.stage === 'new').length;
@@ -2415,13 +2392,8 @@ export async function createFullDatabaseBackup(sourceDescription: string = 'Manu
 export async function generateFullXLSXBuffer(): Promise<Buffer> {
   const rawLeads = await getLeads();
   // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
-  const leads = rawLeads.filter(lead => {
-    const isUnassigned = !lead.assignedTo || 
-      lead.assignedTo.toLowerCase() === 'unassigned' || 
-      lead.assignedTo.trim() === '';
-    const isRequesting = (lead.stage === 'new' && isUnassigned) || lead.intake === false;
-    return !isRequesting;
-  });
+  const leads = rawLeads.filter(lead => !lead.isDeleted && getEffectiveIntake(lead));
+  const deletedLeads = rawLeads.filter(lead => lead.isDeleted === true);
   const coordinators = await getCoordinators();
   const jobs = await getJobs();
   const updates = await getUpdates();
@@ -2595,6 +2567,29 @@ export async function generateFullXLSXBuffer(): Promise<Buffer> {
   if (rulesData.length > 0) {
     const sheetRules = XLSX.utils.json_to_sheet(rulesData);
     XLSX.utils.book_append_sheet(workbook, sheetRules, "Incentive Rules");
+  }
+
+  // 9. Sheet: "Archived & Deleted"
+  const archivedData = deletedLeads.map((lead, idx) => ({
+    'Serial': lead.serialNo || '',
+    'Lead ID': lead.id,
+    'Applicant Name': lead.name || '',
+    'Phone': lead.phone || '',
+    'Gender': lead.gender || 'M',
+    'Origin / City': lead.origin || '',
+    'Country Interest': lead.country || '',
+    'Job Position': lead.position || '',
+    'Pipeline Stage': lead.stage,
+    'Assigned Coordinator': lead.assignedTo || 'Unassigned',
+    'Deleted At': lead.deletedAt || '',
+    'Admin Remarks': lead.adminRemarks || '',
+    'Remarks 1 (First Call)': lead.remarks1 || '',
+    'Remarks 2 (Follow-up)': lead.remarks2 || '',
+    'Remarks 3 (Final Status)': lead.remarks3 || ''
+  }));
+  if (archivedData.length > 0) {
+    const sheetArchived = XLSX.utils.json_to_sheet(archivedData);
+    XLSX.utils.book_append_sheet(workbook, sheetArchived, "Archived & Deleted");
   }
 
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;

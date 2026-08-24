@@ -82,6 +82,8 @@ export interface Lead {
   reminderEnabled?: boolean;
   autoReplySent?: boolean;
   intake?: boolean;
+  isDeleted?: boolean;
+  deletedAt?: string | null;
   tasks?: {
     id: string;
     title: string;

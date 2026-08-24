@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
 import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Bell, Download, Sparkles, TrendingUp, X, UploadCloud, MessageSquare } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { getCountryFlagUrl, formatCandidateName } from '../utils';
+import { getCountryFlagUrl, formatCandidateName, getEffectiveIntake } from '../utils';
 import { SearchableSelect } from './SearchableSelect';
 
 interface LeadListProps {
@@ -704,11 +704,8 @@ export default function LeadList({
     }
     return leads.filter(lead => {
       // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
-      // OR leads that have not been intaken yet (intake === false)
-      const isUnassigned = !lead.assignedTo || 
-        lead.assignedTo.toLowerCase() === 'unassigned' || 
-        lead.assignedTo.trim() === '';
-      if ((lead.stage === 'new' && isUnassigned) || lead.intake === false) {
+      // OR leads that have not been intaken yet
+      if (!getEffectiveIntake(lead)) {
         return false;
       }
 

@@ -21,7 +21,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { getCountryFlagUrl, formatCandidateName } from '../utils';
+import { getCountryFlagUrl, formatCandidateName, getEffectiveIntake } from '../utils';
 import { SearchableSelect } from './SearchableSelect.tsx';
 
 interface LeadBoardProps {
@@ -67,6 +67,38 @@ export default function LeadBoard({
 
   // Remarks filter state
   const [remarksFilter, setRemarksFilter] = useState('All');
+
+  // Country, Position, and Gender Filters for selected stage
+  const [boardCountryFilter, setBoardCountryFilter] = useState('All');
+  const [boardPositionFilter, setBoardPositionFilter] = useState('All');
+  const [boardGenderFilter, setBoardGenderFilter] = useState('All');
+
+  const boardCountryOptions = React.useMemo(() => {
+    const countries = new Set<string>();
+    leads.forEach(lead => {
+      if (lead.country) {
+        countries.add(lead.country.toUpperCase().trim());
+      }
+    });
+    return ['All', ...Array.from(countries).sort()];
+  }, [leads]);
+
+  const boardPositionOptions = React.useMemo(() => {
+    const positions = new Set<string>();
+    leads.forEach(lead => {
+      if (lead.position) {
+        positions.add(lead.position.toUpperCase().trim());
+      }
+    });
+    return ['All', ...Array.from(positions).sort()];
+  }, [leads]);
+
+  // Reset stage filters when stage is switched
+  React.useEffect(() => {
+    setBoardCountryFilter('All');
+    setBoardPositionFilter('All');
+    setBoardGenderFilter('All');
+  }, [selectedStage]);
 
   // Memoized options list for searchable coordinator select
   const coordinatorOptions = React.useMemo(() => {
@@ -248,16 +280,8 @@ export default function LeadBoard({
     let filtered = leads;
 
     // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
-    // OR leads that have not been intaken yet (intake === false)
-    filtered = filtered.filter(lead => {
-      const isUnassigned = !lead.assignedTo || 
-        lead.assignedTo.toLowerCase() === 'unassigned' || 
-        lead.assignedTo.trim() === '';
-      if ((lead.stage === 'new' && isUnassigned) || lead.intake === false) {
-        return false;
-      }
-      return true;
-    });
+    // OR leads that have not been intaken yet
+    filtered = filtered.filter(lead => getEffectiveIntake(lead));
 
     // Search query filter
     if (searchQuery) {
@@ -350,6 +374,43 @@ export default function LeadBoard({
 
     return filtered;
   }, [leads, searchQuery, userRole, currentAgentId, coordinatorFilter, pipelineDateFilter, filterStartDate, filterEndDate, remarksFilter]);
+
+  // Dynamically filter active column leads by Country, Position, and Gender
+  const filteredStageLeads = React.useMemo(() => {
+    return visibleLeads.filter(l => {
+      // Stage matching
+      let inStage = false;
+      if (selectedStage === 'in_discussion' || selectedStage === 'negotiating') {
+        inStage = l.stage === 'in_discussion' || l.stage === 'negotiating';
+      } else if (selectedStage === 'office_visited' || selectedStage === 'proposal') {
+        inStage = l.stage === 'office_visited' || l.stage === 'proposal';
+      } else if (selectedStage === 'cold_leads' || selectedStage === 'rotations') {
+        inStage = l.stage === 'cold_leads' || l.stage === 'rotations';
+      } else {
+        inStage = l.stage === selectedStage;
+      }
+      if (!inStage) return false;
+
+      // Country filter
+      if (boardCountryFilter !== 'All') {
+        if (!l.country || l.country.toUpperCase().trim() !== boardCountryFilter) return false;
+      }
+
+      // Position filter
+      if (boardPositionFilter !== 'All') {
+        if (!l.position || l.position.toUpperCase().trim() !== boardPositionFilter) return false;
+      }
+
+      // Gender filter
+      if (boardGenderFilter !== 'All') {
+        const leadGender = String(l.gender || '').toUpperCase().trim();
+        const targetGender = boardGenderFilter === 'MALE' ? 'M' : 'F';
+        if (leadGender !== targetGender && leadGender !== boardGenderFilter) return false;
+      }
+
+      return true;
+    });
+  }, [visibleLeads, selectedStage, boardCountryFilter, boardPositionFilter, boardGenderFilter]);
 
   // Lead Card Render Helper to avoid duplicate JSX
   const renderLeadCard = (lead: Lead) => {
@@ -564,18 +625,6 @@ export default function LeadBoard({
 
   return (
     <div className="space-y-6" id="cgp-leads-pipeline">
-      
-      {/* Sub Agent Bucket Select Bar inside Kanban */}
-      {userRole === 'agent' && (
-        <div className="flex bg-slate-900 p-3.5 rounded-2xl border border-slate-800 justify-between items-center text-left">
-          <div className="text-xs">
-            <span className="font-extrabold text-slate-300 block uppercase tracking-wider font-mono">Coordinator Desk</span>
-          </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-accent-purple text-white rounded-xl text-[10px] font-black tracking-wider uppercase select-none shadow-md shadow-accent-purple/15">
-            <span>🔒 Private Bucket ({visibleLeads.length} Candidates)</span>
-          </div>
-        </div>
-      )}
 
       {/* Pipeline Border Card Container */}
       <div className="bg-slate-950/40 rounded-3xl border border-slate-700 p-6 shadow-xl text-left">
@@ -793,7 +842,7 @@ export default function LeadBoard({
                         onUpdateStage(leadId, col.id);
                       }
                     }}
-                    className={`group p-2 px-2.5 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-[96px] relative overflow-hidden ${
+                    className={`group p-2.5 px-3 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-[112px] min-h-[112px] relative overflow-hidden ${
                       isDraggedOver
                         ? 'border-accent-purple bg-accent-purple/10 scale-[1.03] ring-2 ring-accent-purple/40 shadow-lg'
                         : isSelected
@@ -802,30 +851,37 @@ export default function LeadBoard({
                     }`}
                   >
                     <div className="relative z-10 flex items-start justify-between w-full">
-                      <div className={`text-sm font-bold flex items-center justify-center w-6.5 h-6.5 rounded-lg border ${isSelected ? 'bg-slate-900/20 border-slate-700' : 'bg-slate-900 border-slate-800'}`}>
-                        <IconComponent className={`w-3.5 h-3.5 ${iconColor}`} />
+                      <div className={`text-sm font-bold flex items-center justify-center w-7.5 h-7.5 rounded-lg border ${isSelected ? 'bg-slate-900/20 border-slate-700' : 'bg-slate-900 border-slate-800'}`}>
+                        <IconComponent className={`w-4 h-4 ${iconColor}`} />
                       </div>
                       <div className="flex flex-col items-end gap-0.5">
-                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md font-mono border ${
-                          colUnreadCount > 0 
-                            ? 'bg-rose-600 dark:bg-rose-500 text-white border-rose-500/50 animate-pulse' 
-                            : badgeColor
-                        }`}>
-                          {colUnreadCount > 0 ? `(${colLeads.length} - ${colUnreadCount}) ✉` : `${colLeads.length} ${colLeads.length === 1 ? 'Lead' : 'Leads'}`}
+                        <span className={`text-xs sm:text-[13px] font-black px-2 py-0.5 rounded-md font-mono border ${badgeColor}`}>
+                          {colLeads.length} {colLeads.length === 1 ? 'Lead' : 'Leads'}
                         </span>
                         {col.id === 'in_discussion' && (
-                          <span className={`text-[8.5px] font-extrabold font-mono ${inDiscussionPctInfo.textColor}`} title={`In Discussion load: ${inDiscussionPctInfo.inDiscussionCount}/${inDiscussionPctInfo.totalAssignedLifetime} lifetime assigned leads (${inDiscussionPctInfo.percentage.toFixed(1)}%)`}>
+                          <span className={`text-[9px] font-extrabold font-mono ${inDiscussionPctInfo.textColor}`} title={`In Discussion load: ${inDiscussionPctInfo.inDiscussionCount}/${inDiscussionPctInfo.totalAssignedLifetime} lifetime assigned leads (${inDiscussionPctInfo.percentage.toFixed(1)}%)`}>
                             {inDiscussionPctInfo.percentage.toFixed(1)}%
                           </span>
                         )}
                       </div>
                     </div>
                     
-                    <div className="relative z-10 mt-1">
-                      <h3 className={`font-black text-[9.5px] tracking-wide uppercase leading-tight line-clamp-2 ${isSelected ? 'text-slate-100' : 'text-slate-200'}`}>
-                        {col.title}
-                      </h3>
-                      <p className={`text-[8.5px] font-bold mt-0.5 ${isSelected ? 'text-slate-100 opacity-90' : 'text-slate-400'}`}>
+                    <div className="relative z-10 mt-1.5 w-full">
+                      <div className="flex items-center justify-between gap-1 w-full">
+                        <h3 className={`font-black text-[11.5px] sm:text-[13px] tracking-wide uppercase leading-tight line-clamp-2 ${isSelected ? 'text-slate-100' : 'text-slate-200'}`}>
+                          {col.title}
+                        </h3>
+                        {colUnreadCount > 0 && (
+                          <span 
+                            className="shrink-0 flex items-center gap-1 bg-emerald-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-pulse shadow-xs"
+                            title={`${colUnreadCount} unread WhatsApp messages`}
+                          >
+                            <MessageSquare className="h-2.5 w-2.5 fill-current text-white" />
+                            <span>{colUnreadCount}</span>
+                          </span>
+                        )}
+                      </div>
+                      <p className={`text-[9px] font-bold mt-0.5 ${isSelected ? 'text-slate-100 opacity-90' : 'text-slate-400'}`}>
                         {isSelected ? '● Selected' : 'Click to view'}
                       </p>
                     </div>
@@ -837,26 +893,78 @@ export default function LeadBoard({
             {/* Active Stage Container (Active Jobs Hub style) */}
             {selectedStage && (
               <div className="bg-slate-950/40 border border-slate-700 rounded-3xl p-6 shadow-3xs text-left space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-700 pb-4 gap-3">
-                  <div>
-                    <h3 className="text-sm font-black text-slate-100 uppercase tracking-wide flex items-center gap-2">
-                      📂 {COLUMNS.find(c => c.id === selectedStage || (selectedStage === 'negotiating' && c.id === 'in_discussion') || (selectedStage === 'proposal' && c.id === 'office_visited') || (selectedStage === 'rotations' && c.id === 'cold_leads'))?.title} Candidates
-                    </h3>
-                    <p className="text-xs text-slate-500 font-bold">
-                      Showing {visibleLeads.filter(l => {
-                        if (selectedStage === 'in_discussion' || selectedStage === 'negotiating') return l.stage === 'in_discussion' || l.stage === 'negotiating';
-                        if (selectedStage === 'office_visited' || selectedStage === 'proposal') return l.stage === 'office_visited' || l.stage === 'proposal';
-                        if (selectedStage === 'cold_leads' || selectedStage === 'rotations') return l.stage === 'cold_leads' || l.stage === 'rotations';
-                        return l.stage === selectedStage;
-                      }).length} active records in pipeline phase
-                    </p>
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-slate-700 pb-4 gap-4">
+                  {/* Left Title, Stats AND Filters grouped beautifully with an increased generous gap */}
+                  <div className="flex flex-col md:flex-row md:items-center gap-14 md:gap-28 min-w-0 flex-1">
+                    <div>
+                      <h3 className="text-sm sm:text-base font-black text-slate-100 uppercase tracking-wide flex items-center gap-2">
+                        📂 {COLUMNS.find(c => c.id === selectedStage || (selectedStage === 'negotiating' && c.id === 'in_discussion') || (selectedStage === 'proposal' && c.id === 'office_visited') || (selectedStage === 'rotations' && c.id === 'cold_leads'))?.title} Candidates
+                      </h3>
+                      <p className="text-xs text-slate-400 font-bold mt-0.5">
+                        Showing <span className="text-emerald-400 font-mono font-extrabold">{filteredStageLeads.length}</span> active records in pipeline phase
+                      </p>
+                    </div>
+
+                    {/* Inline Premium Filters next to title with a nice gap */}
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      {/* Country Filter */}
+                      <select
+                        value={boardCountryFilter}
+                        onChange={(e) => setBoardCountryFilter(e.target.value)}
+                        className="bg-slate-900 hover:bg-slate-850 border border-slate-750 text-slate-200 text-xs font-black rounded-xl px-3 py-1.5 focus:outline-hidden focus:border-indigo-500 transition cursor-pointer"
+                      >
+                        <option value="All">All Countries</option>
+                        {boardCountryOptions.filter(c => c !== 'All').map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+
+                      {/* Position Filter */}
+                      <select
+                        value={boardPositionFilter}
+                        onChange={(e) => setBoardPositionFilter(e.target.value)}
+                        className="bg-slate-900 hover:bg-slate-850 border border-slate-750 text-slate-200 text-xs font-black rounded-xl px-3 py-1.5 focus:outline-hidden focus:border-indigo-500 transition cursor-pointer max-w-[160px] truncate"
+                      >
+                        <option value="All">All Positions</option>
+                        {boardPositionOptions.filter(p => p !== 'All').map(p => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+
+                      {/* Gender Filter */}
+                      <select
+                        value={boardGenderFilter}
+                        onChange={(e) => setBoardGenderFilter(e.target.value)}
+                        className="bg-slate-900 hover:bg-slate-850 border border-slate-750 text-slate-200 text-xs font-black rounded-xl px-3 py-1.5 focus:outline-hidden focus:border-indigo-500 transition cursor-pointer"
+                      >
+                        <option value="All">All Genders</option>
+                        <option value="MALE">Male (M)</option>
+                        <option value="FEMALE">Female (F)</option>
+                      </select>
+
+                      {/* Reset Filters button if any are active */}
+                      {(boardCountryFilter !== 'All' || boardPositionFilter !== 'All' || boardGenderFilter !== 'All') && (
+                        <button
+                          onClick={() => {
+                            setBoardCountryFilter('All');
+                            setBoardPositionFilter('All');
+                            setBoardGenderFilter('All');
+                          }}
+                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-black rounded-xl transition cursor-pointer border border-slate-700"
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Status Indicator Badge */}
                   {selectedStage === 'in_discussion' || selectedStage === 'negotiating' ? (
-                    <span className={`self-start sm:self-center text-[10px] uppercase font-black px-3 py-1.5 rounded-full font-mono border ${inDiscussionPctInfo.badgeColor}`}>
+                    <span className={`self-start lg:self-center text-[10px] uppercase font-black px-3 py-1.5 rounded-full font-mono border ${inDiscussionPctInfo.badgeColor}`}>
                       In Discussion Load: {inDiscussionPctInfo.percentage.toFixed(1)}% ({inDiscussionPctInfo.inDiscussionCount}/{inDiscussionPctInfo.totalAssignedLifetime} assigned)
                     </span>
                   ) : (
-                    <span className="self-start sm:self-center text-[10px] uppercase font-black text-accent-purple bg-purple-950/40 border border-purple-900/30 px-3 py-1.5 rounded-full font-mono">
+                    <span className="self-start lg:self-center text-[10px] uppercase font-black text-accent-purple bg-purple-950/40 border border-purple-900/30 px-3 py-1.5 rounded-full font-mono">
                       Active Directory
                     </span>
                   )}
@@ -864,24 +972,14 @@ export default function LeadBoard({
 
                 {/* Grid layout of lead cards under the selected stage */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 py-1">
-                  {visibleLeads.filter(l => {
-                    if (selectedStage === 'in_discussion' || selectedStage === 'negotiating') return l.stage === 'in_discussion' || l.stage === 'negotiating';
-                    if (selectedStage === 'office_visited' || selectedStage === 'proposal') return l.stage === 'office_visited' || l.stage === 'proposal';
-                    if (selectedStage === 'cold_leads' || selectedStage === 'rotations') return l.stage === 'cold_leads' || l.stage === 'rotations';
-                    return l.stage === selectedStage;
-                  }).length > 0 ? (
-                    visibleLeads.filter(l => {
-                      if (selectedStage === 'in_discussion' || selectedStage === 'negotiating') return l.stage === 'in_discussion' || l.stage === 'negotiating';
-                      if (selectedStage === 'office_visited' || selectedStage === 'proposal') return l.stage === 'office_visited' || l.stage === 'proposal';
-                      if (selectedStage === 'cold_leads' || selectedStage === 'rotations') return l.stage === 'cold_leads' || l.stage === 'rotations';
-                      return l.stage === selectedStage;
-                    }).map((lead) => renderLeadCard(lead))
+                  {filteredStageLeads.length > 0 ? (
+                    filteredStageLeads.map((lead) => renderLeadCard(lead))
                   ) : (
                     <div className="col-span-full border border-dashed border-slate-750 rounded-2xl flex flex-col items-center justify-center py-20 text-slate-500 space-y-2 bg-slate-900/20">
                       <Inbox className="h-10 w-10 opacity-30 text-slate-400" />
-                      <span className="text-sm font-bold text-slate-400">No candidates currently in this stage</span>
+                      <span className="text-sm font-bold text-slate-400">No candidates currently match filters in this stage</span>
                       <p className="text-xs text-slate-500 max-w-xs text-center">
-                        Drag candidates here from other columns or enroll a new inbound candidate directly.
+                        Try modifying your Country, Target Position, or Gender filter choices.
                       </p>
                     </div>
                   )}

@@ -8,7 +8,7 @@ import { Lead, LeadStage, StatSummary, Coordinator, WhatsAppTemplate } from './t
 import { 
   LayoutGrid, Table, BarChart3, Briefcase, ShieldAlert, Sparkles, 
   RefreshCw, MessageSquare, Plus, HelpCircle, Layers, Lock, User, Check, X, Shield,
-  LogOut, Users, UserCheck, Sun, Moon, PiggyBank, Menu, ChevronRight, Settings, ChevronDown, Download
+  LogOut, Users, UserCheck, Sun, Moon, PiggyBank, Menu, ChevronRight, Settings, ChevronDown, Download, Trash2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -30,6 +30,7 @@ import CGPLogo from './components/CGPLogo.tsx';
 import ImportantUpdatesBar from './components/ImportantUpdatesBar.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
 import { BackupManagerModal } from './components/BackupManagerModal.tsx';
+import RecycleBinModal from './components/RecycleBinModal.tsx';
 
 // Import local assets
 
@@ -48,6 +49,7 @@ export default function App() {
   const [isMetadataManagerOpen, setIsMetadataManagerOpen] = useState(false);
   const [isIncentiveRulesOpen, setIsIncentiveRulesOpen] = useState(false);
   const [isBackupManagerOpen, setIsBackupManagerOpen] = useState(false);
+  const [isRecycleBinOpen, setIsRecycleBinOpen] = useState(false);
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const adminMenuRef = useRef<HTMLDivElement>(null);
 
@@ -575,7 +577,7 @@ export default function App() {
                 <div className="text-left min-w-0">
                   <div className="flex items-center gap-1.5">
                     <h1 className="font-black text-slate-900 dark:text-slate-100 text-sm tracking-wider uppercase font-display leading-tight truncate">
-                      CAREER GROWTH
+                      CAREER GROWTH PLACEMENT
                     </h1>
                     <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="System Operational" />
                   </div>
@@ -662,20 +664,21 @@ export default function App() {
                           <Download className="h-4 w-4 text-cyan-500 shrink-0 animate-bounce" />
                           <span>📦 Backup & Restore Center</span>
                         </button>
+                        <button
+                          onClick={() => {
+                            setIsRecycleBinOpen(true);
+                            setIsAdminMenuOpen(false);
+                          }}
+                          className="w-full px-3.5 py-2 text-xs font-bold text-rose-600 dark:text-rose-450 hover:bg-rose-50 dark:hover:bg-rose-950/20 flex items-center gap-2.5 transition text-left cursor-pointer border-t border-slate-100 dark:border-slate-800"
+                          title="Open Safeguard Recycle Bin & Recovery Center to restore any soft-deleted candidates"
+                        >
+                          <Trash2 className="h-4 w-4 text-rose-500 shrink-0" />
+                          <span>🗑️ Recycle Bin (Recovery)</span>
+                        </button>
                       </div>
                     )}
                   </div>
                 )}
-
-                {/* 1-Click Whole CRM Database Backup Center Button */}
-                <button
-                  onClick={() => setIsBackupManagerOpen(true)}
-                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-950/30 dark:hover:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/60 transition cursor-pointer shadow-3xs"
-                  title="Automated Monday DB & XLSX Backups & 1-Click Restore Center"
-                >
-                  <Download className="h-3.5 w-3.5 text-cyan-500 shrink-0" />
-                  <span className="font-extrabold whitespace-nowrap">Backup & Restore</span>
-                </button>
 
                 {/* Theme Toggle */}
                 <button
@@ -731,7 +734,7 @@ export default function App() {
               <nav className="bg-slate-950 text-white rounded-2xl px-3.5 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3 overflow-x-auto no-scrollbar shadow-md border border-slate-800/80">
                 
                 {/* Left Navigation Buttons */}
-                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                <div className="flex items-center gap-3 sm:gap-4.5 shrink-0">
                   {navItems.map((tab) => {
                     const Icon = tab.icon;
                     const isSelected = activeTab === tab.id;
@@ -739,13 +742,13 @@ export default function App() {
                       <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id as any)}
-                        className={`group px-3 sm:px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
+                        className={`group px-3.5 sm:px-4.5 py-2.5 rounded-xl text-[13px] md:text-[14px] font-extrabold md:font-black flex items-center gap-2.5 transition-all cursor-pointer shrink-0 ${
                           isSelected
                             ? 'bg-indigo-600 text-white shadow-sm font-black'
                             : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
                         }`}
                       >
-                        <Icon className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
+                        <Icon className={`h-4 w-4 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
                         <span className="whitespace-nowrap">{tab.label}</span>
                         {tab.requestingBadge !== undefined && tab.requestingBadge > 0 && (
                           <span className={`text-[9.5px] font-mono font-black px-1.5 py-0.2 rounded-full ${
@@ -1461,6 +1464,15 @@ export default function App() {
               window.location.reload();
             }, 1000);
           }}
+        />
+      )}
+
+      {/* Soft-Deletes Recycle Bin & Safe Recovery Console */}
+      {isRecycleBinOpen && (
+        <RecycleBinModal
+          isOpen={isRecycleBinOpen}
+          onClose={() => setIsRecycleBinOpen(false)}
+          onRestoreSuccess={() => pullCrmData(true)}
         />
       )}
 

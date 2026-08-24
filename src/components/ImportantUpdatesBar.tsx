@@ -88,14 +88,23 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
     );
   }
 
-  if (updates.length === 0) {
-    return null; // Don't show if empty
-  }
+  const displayUpdates = updates.length > 0 ? updates : [
+    {
+      id: 'system_default_1',
+      text: "Welcome to CAREER GROWTH PLACEMENT CRM! All overseas and local recruitment pipelines are fully active and synchronized.",
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'system_default_2',
+      text: "Important Notice: Coordinators must verify candidate experience certificates and passport validity before stage updates.",
+      createdAt: new Date().toISOString()
+    }
+  ];
 
   return (
     <div 
       id="important-updates-bar" 
-      className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-500/20 rounded-2xl overflow-hidden flex items-center h-12 shadow-sm shadow-emerald-500/5 select-text relative"
+      className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-500/20 rounded-2xl overflow-hidden flex items-center h-12 shadow-sm shadow-emerald-500/5 select-text relative shrink-0"
     >
       {/* Left fixed banner label */}
       <div 
@@ -118,7 +127,7 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
         <div className="animate-marquee flex items-center gap-12 text-xs font-bold text-emerald-900 dark:text-emerald-300 tracking-wide hover:[animation-play-state:paused]">
           {/* Main updates content */}
           <div className="flex items-center gap-12 whitespace-nowrap">
-            {updates.map((update, idx) => {
+            {displayUpdates.map((update, idx) => {
               const isCopied = copiedId === `orig-${update.id || idx}`;
               return (
                 <span key={`orig-${update.id || idx}`} className="flex items-center gap-4 select-text group/update">
@@ -149,7 +158,7 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
           </div>
           {/* Duplicate content to create the continuous loop */}
           <div className="flex items-center gap-12 whitespace-nowrap" aria-hidden="true">
-            {updates.map((update, idx) => {
+            {displayUpdates.map((update, idx) => {
               const isCopied = copiedId === `dup-${update.id || idx}`;
               return (
                 <span key={`dup-${update.id || idx}`} className="flex items-center gap-4 select-text group/update-dup">

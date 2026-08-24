@@ -6,7 +6,7 @@ import {
   Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Bell, Plus, PhoneCall, Search, Copy
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { getCountryFlagUrl, formatCandidateName, isDefaultExperience, extractExperienceFromRemarks, getEffectiveExperience } from '../utils';
+import { getCountryFlagUrl, formatCandidateName, isDefaultExperience, extractExperienceFromRemarks, getEffectiveExperience, getEffectiveIntake } from '../utils';
 import { SearchableSelect } from './SearchableSelect.tsx';
 import LeadWhatsAppChat from './LeadWhatsAppChat.tsx';
 
@@ -210,7 +210,7 @@ export default function LeadModal({
     docOthers: initialLead.docOthers === true,
     reminderEnabled: !!initialLead.reminderEnabled,
     autoReplySent: initialLead.autoReplySent === true,
-    intake: initialLead.intake === true
+    intake: getEffectiveIntake(initialLead)
   });
 
   const [savingForm, setSavingForm] = useState(false);
@@ -258,7 +258,7 @@ export default function LeadModal({
       docOthers: initialLead.docOthers === true,
       reminderEnabled: !!initialLead.reminderEnabled,
       autoReplySent: initialLead.autoReplySent === true,
-      intake: initialLead.intake === true
+      intake: getEffectiveIntake(initialLead)
     });
     isFirstMountOrChangeRef.current = true;
   }, [initialLead.id]);

@@ -46,7 +46,7 @@ import {
   saveWhatsAppAutoReplySettings
 } from './src/server/db.ts';
 import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings } from './src/types.ts';
-import { isDefaultExperience, getEffectiveExperience } from './src/utils.ts';
+import { isDefaultExperience, getEffectiveExperience, getEffectiveIntake } from './src/utils.ts';
 import { DEFAULT_WHATSAPP_TEMPLATES, sendWhatsAppMessage, replaceTemplatePlaceholders, formatPhoneForWhatsApp } from './src/server/whatsapp.ts';
 
 const app = express();
@@ -275,15 +275,19 @@ app.get('/api/backup/download-file', (req, res) => {
 app.get('/api/leads', async (req, res) => {
   try {
     const forceRefresh = req.query.forceRefresh === 'true';
+    const showDeleted = req.query.showDeleted === 'true';
     const rawLeads = await getLeads(forceRefresh);
 
-    // 1. Compute dynamic metadata from all unfiltered leads
+    // 1. Compute dynamic metadata from all unfiltered active leads (excluding soft-deleted)
     const countriesMap = new Map<string, string>(); // lowercase -> original casing
     const projectsMap = new Map<string, string>();
     const tagsMap = new Map<string, string>();
     const positionsMap = new Map<string, string>();
 
     rawLeads.forEach(l => {
+      if (!showDeleted && l.isDeleted) return;
+      if (showDeleted && !l.isDeleted) return;
+
       if (l.country && l.country.trim()) {
         const trimmed = l.country.trim();
         const lower = trimmed.toLowerCase();
@@ -355,14 +359,19 @@ app.get('/api/leads', async (req, res) => {
 
     // 3. Apply multi-layer filters
     let filteredLeads = rawLeads.filter(lead => {
+      // Filter by deletion status
+      if (!showDeleted && lead.isDeleted) {
+        return false;
+      }
+      if (showDeleted && !lead.isDeleted) {
+        return false;
+      }
+
       // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
       // OR leads that have not been intaken yet (intake === false)
       // unless we are specifically inside the 'messages' (WhatsApp Chats) tab view!
       if (activeTab !== 'messages') {
-        const isUnassigned = !lead.assignedTo || 
-          lead.assignedTo.toLowerCase() === 'unassigned' || 
-          lead.assignedTo.trim() === '';
-        if ((lead.stage === 'new' && isUnassigned) || lead.intake === false) {
+        if (!getEffectiveIntake(lead)) {
           return false;
         }
       }
@@ -2407,17 +2416,47 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 });
 
 
-// DELETE a lead
+// DELETE a lead (Soft Delete to prevent any accidental permanent data loss)
 app.delete('/api/leads/:id', async (req, res) => {
   try {
     const leads = await getLeads();
-    const filtered = leads.filter(l => l.id !== req.params.id);
-    if (leads.length === filtered.length) {
+    const leadIndex = leads.findIndex(l => l.id === req.params.id);
+    if (leadIndex === -1) {
       res.status(404).json({ error: 'Lead not found' });
       return;
     }
-    await saveLeads(filtered);
-    res.json({ success: true });
+    
+    // Mark as soft-deleted so it can be fully recovered anytime by an administrator
+    leads[leadIndex].isDeleted = true;
+    leads[leadIndex].deletedAt = new Date().toISOString();
+    leads[leadIndex].updatedAt = new Date().toISOString();
+    
+    await saveLeads(leads);
+    console.log(`[Backup System] Lead ${leads[leadIndex].name || req.params.id} was soft-deleted instead of being permanently removed.`);
+    res.json({ success: true, message: 'Candidate soft-deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST restore a soft-deleted lead
+app.post('/api/leads/:id/restore', async (req, res) => {
+  try {
+    const leads = await getLeads();
+    const leadIndex = leads.findIndex(l => l.id === req.params.id);
+    if (leadIndex === -1) {
+      res.status(404).json({ error: 'Lead not found' });
+      return;
+    }
+    
+    // Restore
+    leads[leadIndex].isDeleted = false;
+    leads[leadIndex].deletedAt = null;
+    leads[leadIndex].updatedAt = new Date().toISOString();
+    
+    await saveLeads(leads);
+    console.log(`[Backup System] Lead ${leads[leadIndex].name || req.params.id} was successfully restored.`);
+    res.json({ success: true, message: 'Candidate successfully restored' });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
