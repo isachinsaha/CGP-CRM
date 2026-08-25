@@ -174,6 +174,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
   const [customCountry, setCustomCountry] = useState('');
   const [salaryRange, setSalaryRange] = useState('');
   const [requirement, setRequirement] = useState('');
+  const [positions, setPositions] = useState<{ title: string; salary: string }[]>([{ title: '', salary: '' }]);
   const [processingFeeMale, setProcessingFeeMale] = useState('');
   const [processingFeeFemale, setProcessingFeeFemale] = useState('');
   const [accommodation, setAccommodation] = useState('');
@@ -262,6 +263,23 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
   }, [currentUser?.role]);
 
 
+  // Smart helper to parse old requirements into structured dynamic array
+  const parseLegacyRequirements = React.useCallback((reqString: string, salRange: string): { title: string; salary: string }[] => {
+    if (!reqString || !reqString.trim()) {
+      return [{ title: '', salary: '' }];
+    }
+    const parts = reqString.split(',').map(p => p.trim()).filter(Boolean);
+    const parsed = parts.map(part => {
+      // Matches "Waiter (1400 AED)" or similar brackets
+      const match = part.match(/^([^(]+)\(([^)]+)\)$/) || part.match(/^([^-]+)-\s*(.+)$/);
+      if (match) {
+        return { title: match[1].trim(), salary: match[2].trim() };
+      }
+      return { title: part, salary: parts.length === 1 ? salRange || '' : '' };
+    });
+    return parsed.length > 0 ? parsed : [{ title: '', salary: '' }];
+  }, []);
+
   // Handle open form for creating new job
   const handleOpenCreate = (e?: React.MouseEvent) => {
     if (e) {
@@ -275,6 +293,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     setCustomCountry('');
     setSalaryRange('');
     setRequirement('');
+    setPositions([{ title: '', salary: '' }]);
     setProcessingFeeMale('');
     setProcessingFeeFemale('');
     setAccommodation('');
@@ -312,6 +331,13 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
 
     setSalaryRange(job.salaryRange || '');
     setRequirement(job.requirement || '');
+    
+    if (job.positions && Array.isArray(job.positions) && job.positions.length > 0) {
+      setPositions(job.positions);
+    } else {
+      setPositions(parseLegacyRequirements(job.requirement || '', job.salaryRange || ''));
+    }
+
     setProcessingFeeMale(job.processingFeeMale || '');
     setProcessingFeeFemale(job.processingFeeFemale || '');
     setAccommodation(job.accommodation || '');
@@ -335,6 +361,18 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
       return;
     }
 
+    const validPositions = positions
+      .map(p => ({ title: p.title.trim(), salary: p.salary.trim() }))
+      .filter(p => p.title.length > 0);
+
+    if (validPositions.length === 0) {
+      setFormError('Please specify at least one requirement & salary structure position.');
+      return;
+    }
+
+    const finalRequirement = validPositions.map(p => p.title + (p.salary ? ` (${p.salary})` : '')).join(', ');
+    const finalSalaryRange = validPositions.map(p => p.salary).filter(Boolean).join(' / ');
+
     const parsedConditions = (conditionsText || '')
       .split('\n')
       .map(line => line.trim())
@@ -343,8 +381,9 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     const payload = {
       title: title.trim(),
       country: selectedCountry,
-      salaryRange: (salaryRange || '').trim(),
-      requirement: (requirement || '').trim(),
+      salaryRange: finalSalaryRange,
+      requirement: finalRequirement,
+      positions: validPositions,
       processingFeeMale: (processingFeeMale || '').trim(),
       processingFeeFemale: (processingFeeFemale || '').trim(),
       accommodation: (accommodation || '').trim(),
@@ -523,6 +562,102 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     return jobs.filter(job => job && (currentUser?.role === 'admin' || job.isActive !== false));
   }, [jobs, currentUser]);
 
+  const getRegionForCountry = React.useCallback((countryName: string): 'Europe' | 'Middle East' | 'Asia' | 'Other' => {
+    const name = String(countryName).toLowerCase().trim();
+    if (['albania', 'malta', 'greece', 'poland', 'germany', 'croatia', 'romania', 'bulgaria', 'serbia', 'italy', 'france', 'spain', 'portugal', 'hungary', 'greece', 'europe'].some(c => name.includes(c))) {
+      return 'Europe';
+    }
+    if (['kuwait', 'dubai', 'qatar', 'u.a.e', 'oman', 'abu dhabi', 'israel', 'bahrain', 'saudi', 'jordan', 'yemen', 'lebanon', 'middle east'].some(c => name.includes(c))) {
+      return 'Middle East';
+    }
+    if (['japan', 'singapore', 'malaysia', 'maldives', 'thailand', 'vietnam', 'india', 'nepal', 'bhutan', 'cambodia', 'korea', 'china', 'philippines', 'taiwan', 'asia'].some(c => name.includes(c))) {
+      return 'Asia';
+    }
+    return 'Other';
+  }, []);
+
+  const countriesByRegion = React.useMemo(() => {
+    const regions: Record<'Europe' | 'Middle East' | 'Asia' | 'Other', string[]> = {
+      'Europe': [],
+      'Middle East': [],
+      'Asia': [],
+      'Other': []
+    };
+    
+    uniqueCountriesWithJobs.forEach(countryName => {
+      const reg = getRegionForCountry(countryName);
+      regions[reg].push(countryName);
+    });
+    
+    return regions;
+  }, [uniqueCountriesWithJobs, getRegionForCountry]);
+
+  const regionalJobCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {
+      'ALL': allJobsList.length,
+      'Europe': 0,
+      'Middle East': 0,
+      'Asia': 0,
+      'Other': 0
+    };
+    
+    Object.entries(groupedJobs).forEach(([countryName, jobList]) => {
+      const region = getRegionForCountry(countryName);
+      counts[region] += jobList.length;
+    });
+    
+    return counts;
+  }, [groupedJobs, allJobsList.length, getRegionForCountry]);
+
+  const activeRegions = React.useMemo(() => {
+    return (['Europe', 'Middle East', 'Asia', 'Other'] as const).filter(r => {
+      return countriesByRegion[r].length > 0 || regionalJobCounts[r] > 0;
+    });
+  }, [countriesByRegion, regionalJobCounts]);
+
+  const regionConfig = {
+    'Europe': {
+      label: 'Europe',
+      icon: '🇪🇺',
+      badgeClass: 'bg-blue-950/70 text-blue-400 border border-blue-900/40',
+      activeBadgeClass: 'bg-white/20 text-white border border-white/30',
+      textAccent: 'text-blue-400',
+      borderAccent: 'group-hover:border-blue-500/50',
+      gradient: 'from-blue-600 via-indigo-600 to-blue-700',
+      ringColor: 'ring-blue-400/30'
+    },
+    'Middle East': {
+      label: 'Middle East',
+      icon: '🕌',
+      badgeClass: 'bg-amber-950/70 text-amber-400 border border-amber-900/40',
+      activeBadgeClass: 'bg-white/20 text-white border border-white/30',
+      textAccent: 'text-amber-400',
+      borderAccent: 'group-hover:border-amber-500/50',
+      gradient: 'from-amber-600 via-orange-600 to-amber-700',
+      ringColor: 'ring-amber-400/30'
+    },
+    'Asia': {
+      label: 'Asia',
+      icon: '🌏',
+      badgeClass: 'bg-emerald-950/70 text-emerald-400 border border-emerald-900/40',
+      activeBadgeClass: 'bg-white/20 text-white border border-white/30',
+      textAccent: 'text-emerald-400',
+      borderAccent: 'group-hover:border-emerald-500/50',
+      gradient: 'from-emerald-600 via-teal-600 to-emerald-700',
+      ringColor: 'ring-emerald-400/30'
+    },
+    'Other': {
+      label: 'Other Regions',
+      icon: '🌐',
+      badgeClass: 'bg-purple-950/70 text-purple-400 border border-purple-900/40',
+      activeBadgeClass: 'bg-white/20 text-white border border-white/30',
+      textAccent: 'text-purple-400',
+      borderAccent: 'group-hover:border-purple-500/50',
+      gradient: 'from-purple-600 via-pink-600 to-purple-700',
+      ringColor: 'ring-purple-400/30'
+    }
+  };
+
   return (
     <div id="active-jobs-container" className="space-y-8 animate-fade-in pb-16">
       
@@ -687,126 +822,135 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
         </div>
       ) : (
         <div className="space-y-8 animate-fade-in">
-          {/* Country Selection Header/Title */}
-          <div className="text-left">
-            <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-              <Globe className="h-4 w-4 text-emerald-600" /> Country Wise Demand Directory
+          {/* Country Selection Header/Title with reset button */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+              <Globe className="h-4 w-4 text-emerald-600 animate-spin" style={{ animationDuration: '8s' }} /> Country Wise Demand Directory
             </h2>
-          </div>
-
-          {/* Country Cards Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
-            {/* ALL COUNTRIES CARD */}
             <button
               type="button"
               onClick={() => setSelectedCountry('ALL')}
-              className={`group p-3 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-22 relative overflow-hidden ${
+              className={`px-4.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer flex items-center gap-2 border select-none ${
                 selectedCountry === 'ALL'
-                  ? 'bg-gradient-to-br from-emerald-600 via-teal-600 to-emerald-700 text-white border-emerald-400 shadow-md shadow-emerald-950/40 ring-2 ring-emerald-400/30 scale-[1.02]'
-                  : 'bg-slate-900/90 border-slate-800 hover:border-emerald-500/50 hover:bg-slate-850 text-slate-200 shadow-2xs'
+                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white border-emerald-400 shadow-md ring-2 ring-emerald-400/25 scale-[1.02]'
+                  : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-750 hover:bg-slate-850'
               }`}
             >
-              <span className="absolute -right-3 -bottom-3 text-5xl opacity-[0.08] select-none pointer-events-none transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
-                🌐
-              </span>
-
-              <div className="relative z-10 flex items-start justify-between w-full">
-                <div className={`w-8 h-6 rounded-md overflow-hidden border flex items-center justify-center shadow-2xs ${
-                  selectedCountry === 'ALL' ? 'bg-white/20 border-white/30 text-white' : 'bg-slate-800 border-slate-700 text-emerald-400'
-                }`}>
-                  <span className="text-xs">🌐</span>
-                </div>
-                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full font-mono ${
-                  selectedCountry === 'ALL'
-                    ? 'bg-white/25 text-white border border-white/40 shadow-2xs'
-                    : 'bg-emerald-950/70 text-emerald-400 border border-emerald-800/60'
-                }`}>
-                  {allJobsList.length} {allJobsList.length === 1 ? 'Job' : 'Jobs'}
-                </span>
-              </div>
-              <div className="relative z-10">
-                <h3 className="font-black text-xs tracking-wider uppercase leading-tight truncate">
-                  ALL COUNTRIES
-                </h3>
-                <p className={`text-[9px] font-bold mt-1 ${selectedCountry === 'ALL' ? 'text-emerald-100' : 'text-slate-400 group-hover:text-slate-300'}`}>
-                  {selectedCountry === 'ALL' ? '● Filter Active' : 'Show All Jobs'}
-                </p>
-              </div>
+              <span>🌐</span> Show All Regions ({allJobsList.length} Jobs)
             </button>
+          </div>
 
-            {uniqueCountriesWithJobs.map((countryName) => {
-              const countryJobs = groupedJobs[countryName] || [];
-              const isSelected = selectedCountry === countryName;
-              const flagUrl = getCountryFlagUrl(countryName);
+          {/* Regional Mother Containers with Child Countries */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {activeRegions.map((regionName) => {
+              const config = regionConfig[regionName];
+              const regionJobsCount = regionalJobCounts[regionName];
+              const childCountries = countriesByRegion[regionName];
+              const isRegionSelected = selectedCountry === `REGION_${regionName}`;
 
               return (
-                <button
-                  key={countryName}
-                  type="button"
-                  onClick={() => setSelectedCountry(countryName)}
-                  className={`group p-3 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-22 relative overflow-hidden ${
-                    isSelected
-                      ? 'bg-gradient-to-br from-emerald-600 via-teal-600 to-emerald-700 text-white border-emerald-400 shadow-md shadow-emerald-950/40 ring-2 ring-emerald-400/30 scale-[1.02]'
-                      : 'bg-slate-900/90 border-slate-800 hover:border-emerald-500/50 hover:bg-slate-850 text-slate-200 shadow-2xs'
+                <div 
+                  key={regionName} 
+                  className={`bg-slate-900/60 rounded-3xl p-5 border transition-all duration-250 flex flex-col gap-4 ${
+                    isRegionSelected 
+                      ? 'border-emerald-500/50 bg-slate-900/95 shadow-lg shadow-emerald-950/20' 
+                      : 'border-slate-800 hover:border-slate-750/80'
                   }`}
                 >
-                  {/* Background Country Flag Watermark */}
-                  {flagUrl ? (
-                    <img 
-                      src={flagUrl} 
-                      alt="" 
-                      className="absolute -right-3 -bottom-3 w-20 h-14 object-cover opacity-[0.09] filter blur-[0.5px] select-none pointer-events-none transition-all duration-300 group-hover:scale-110 group-hover:opacity-[0.14] rounded-lg"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span className="absolute -right-3 -bottom-3 text-5xl opacity-[0.08] select-none pointer-events-none transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
-                      🌐
-                    </span>
-                  )}
-
-                  <div className="relative z-10 flex items-start justify-between w-full">
-                    <div className={`w-8 h-6 rounded-md overflow-hidden border shadow-2xs shrink-0 group-hover:scale-105 transition-transform duration-200 ${
-                      isSelected ? 'bg-white/20 border-white/40' : 'bg-slate-800 border-slate-700/80'
-                    }`}>
-                      {flagUrl ? (
-                        <img 
-                          src={flagUrl} 
-                          alt="" 
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <span className="text-xs">🌐</span>
-                        </div>
-                      )}
+                  {/* Mother Card / Header Row */}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCountry(`REGION_${regionName}`)}
+                    className={`w-full group/mother p-3.5 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex items-center justify-between relative overflow-hidden ${
+                      isRegionSelected
+                        ? 'bg-gradient-to-br ' + config.gradient + ' text-white border-white/20 shadow-sm ring-2 ' + config.ringColor + ' scale-[1.01]'
+                        : 'bg-slate-950/80 border-slate-800/80 hover:border-slate-700 text-slate-200 hover:bg-slate-950'
+                    }`}
+                  >
+                    <div className="relative z-10 flex items-center gap-2.5">
+                      <span className="text-xl filter drop-shadow-sm select-none">{config.icon}</span>
+                      <div>
+                        <h3 className="font-black text-xs tracking-wider uppercase leading-tight">
+                          {config.label}
+                        </h3>
+                        <p className={`text-[8px] font-bold mt-0.5 ${isRegionSelected ? 'text-white/80' : 'text-slate-400 group-hover/mother:text-slate-300'}`}>
+                          {isRegionSelected ? '● Region Active' : 'Click to view all'}
+                        </p>
+                      </div>
                     </div>
-                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full font-mono ${
-                      isSelected
-                        ? 'bg-white/25 text-white border border-white/40 shadow-2xs'
-                        : 'bg-emerald-950/70 text-emerald-400 border border-emerald-800/60'
+
+                    <span className={`relative z-10 text-[9px] font-mono font-black uppercase px-2 py-0.5 rounded-full ${
+                      isRegionSelected
+                        ? 'bg-white/20 text-white border border-white/30'
+                        : config.badgeClass
                     }`}>
-                      {countryJobs.length} {countryJobs.length === 1 ? 'Job' : 'Jobs'}
+                      {regionJobsCount} {regionJobsCount === 1 ? 'Job' : 'Jobs'}
                     </span>
+                  </button>
+
+                  {/* Child Countries inside Mother Region */}
+                  <div className="flex flex-col gap-2">
+                    {childCountries.map((countryName) => {
+                      const countryJobs = groupedJobs[countryName] || [];
+                      const isChildSelected = selectedCountry === countryName;
+                      const flagUrl = getCountryFlagUrl(countryName);
+
+                      return (
+                        <button
+                          key={countryName}
+                          type="button"
+                          onClick={() => setSelectedCountry(countryName)}
+                          className={`group/child p-2 rounded-xl border text-left transition-all duration-150 select-none cursor-pointer flex items-center justify-between relative overflow-hidden ${
+                            isChildSelected
+                              ? 'bg-emerald-600/15 text-emerald-300 border-emerald-500/40 shadow-2xs ring-1 ring-emerald-500/20'
+                              : 'bg-slate-950/40 border-slate-850 hover:border-slate-750 text-slate-300 hover:bg-slate-950/70'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-6 h-4 rounded-xs overflow-hidden border border-slate-800 shrink-0">
+                              {flagUrl ? (
+                                <img 
+                                  src={flagUrl} 
+                                  alt="" 
+                                  className="w-full h-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <span className="text-[10px] flex items-center justify-center h-full">🌐</span>
+                              )}
+                            </div>
+                            <span className="font-black text-[10px] uppercase tracking-wider truncate group-hover/child:text-white transition-colors">
+                              {countryName}
+                            </span>
+                          </div>
+
+                          <span className={`text-[8.5px] font-mono font-black shrink-0 px-1.5 py-0.5 rounded-md ${
+                            isChildSelected
+                              ? 'bg-emerald-500 text-zinc-950'
+                              : 'bg-slate-900 text-slate-400 group-hover/child:text-slate-200 group-hover/child:bg-slate-800'
+                          }`}>
+                            {countryJobs.length}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
-                  <div className="relative z-10">
-                    <h3 className="font-black text-xs tracking-wider uppercase leading-tight truncate group-hover:text-emerald-300 transition-colors">
-                      {countryName}
-                    </h3>
-                    <p className={`text-[9px] font-bold mt-1 ${isSelected ? 'text-emerald-100' : 'text-slate-400 group-hover:text-slate-300'}`}>
-                      {isSelected ? '● Filter Active' : 'Click to view'}
-                    </p>
-                  </div>
-                </button>
+                </div>
               );
             })}
           </div>
 
           {/* Jobs display area */}
           {selectedCountry && (() => {
-            const displayedJobs = selectedCountry === 'ALL'
-              ? allJobsList
-              : (groupedJobs[selectedCountry] || []);
+            let displayedJobs: Job[] = [];
+            if (selectedCountry === 'ALL') {
+              displayedJobs = allJobsList;
+            } else if (selectedCountry.startsWith('REGION_')) {
+              const regionName = selectedCountry.replace('REGION_', '');
+              displayedJobs = allJobsList.filter(job => getRegionForCountry(job.country || '') === regionName);
+            } else {
+              displayedJobs = groupedJobs[selectedCountry] || [];
+            }
 
             if (displayedJobs.length === 0) return null;
 
@@ -818,6 +962,15 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                       {selectedCountry === 'ALL' ? (
                         <>
                           <span className="text-xl">🌐</span> ALL ACTIVE INTERNATIONAL VACANCIES
+                        </>
+                      ) : selectedCountry.startsWith('REGION_') ? (
+                        <>
+                          <span className="text-xl">
+                            {selectedCountry.replace('REGION_', '') === 'Europe' ? '🇪🇺' :
+                             selectedCountry.replace('REGION_', '') === 'Middle East' ? '🕌' :
+                             selectedCountry.replace('REGION_', '') === 'Asia' ? '🌏' : '🌐'}
+                          </span>{' '}
+                          {selectedCountry.replace('REGION_', '').toUpperCase()} ACTIVE VACANCIES
                         </>
                       ) : (
                         <>
@@ -839,6 +992,8 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                     <p className="text-xs text-slate-500 font-bold mt-1">
                       {selectedCountry === 'ALL'
                         ? `Showing ${displayedJobs.length} official career opportunities listed across ${uniqueCountriesWithJobs.length} destinations`
+                        : selectedCountry.startsWith('REGION_')
+                        ? `Showing ${displayedJobs.length} official career opportunities listed for the ${selectedCountry.replace('REGION_', '')} region`
                         : `Showing ${displayedJobs.length} official career opportunities listed for ${selectedCountry}`}
                     </p>
                   </div>
@@ -989,13 +1144,26 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                         </div>
                       </div>
 
-                      {/* 2. Core specs list */}
+                       {/* 2. Core specs list */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-y-3.5 gap-x-4 text-xs">
-                        <div className="flex items-start gap-2">
+                        <div className="flex items-start gap-2 md:col-span-2">
                           <Briefcase className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
-                          <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Position & Salary</p>
-                            <p className="text-slate-200 font-bold">{job.requirement}</p>
+                          <div className="w-full">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Positions & Salary Structure</p>
+                            {job.positions && Array.isArray(job.positions) && job.positions.length > 0 ? (
+                              <div className="space-y-1.5 mt-2">
+                                {job.positions.map((pos, idx) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs bg-slate-950/60 hover:bg-slate-950 p-2.5 rounded-xl border border-slate-850">
+                                    <span className="font-extrabold text-slate-200">{pos.title}</span>
+                                    <span className="text-[9.5px] font-mono font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-lg">
+                                      {pos.salary || 'Commission based'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-slate-200 font-bold mt-0.5">{job.requirement}</p>
+                            )}
                           </div>
                         </div>
                         
@@ -1491,16 +1659,74 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                   )}
                 </div>
 
-                {/* Requirement / Salary */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Requirements & Salary Structure</label>
-                  <input
-                    type="text"
-                    value={requirement}
-                    onChange={(e) => setRequirement(e.target.value)}
-                    placeholder="e.g. Sales (1400 AED) or Guest Relations (2000 - 2700 AED)"
-                    className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                  />
+                {/* Requirements & Salary Structure - Multi position support */}
+                <div className="space-y-2 bg-slate-900/30 p-4.5 rounded-2xl border border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-wider">
+                      Requirements & Salary Structure
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setPositions([...positions, { title: '', salary: '' }])}
+                      className="px-2.5 py-1 bg-emerald-600/15 text-emerald-400 hover:bg-emerald-600/25 text-[10px] font-black uppercase tracking-wider rounded-lg border border-emerald-500/20 transition-all cursor-pointer select-none"
+                    >
+                      + Add Position
+                    </button>
+                  </div>
+                  
+                  <p className="text-[10px] text-slate-500 font-semibold leading-relaxed">
+                    Specify positions and salaries below. These are automatically unified into a single list for cross-agent compatibility.
+                  </p>
+
+                  <div className="space-y-3.5 mt-2.5 max-h-[190px] overflow-y-auto pr-1">
+                    {positions.map((pos, idx) => (
+                      <div key={idx} className="flex items-center gap-3.5 animate-fade-in">
+                        <div className="flex-grow grid grid-cols-2 gap-3">
+                          <div>
+                            <input
+                              type="text"
+                              required
+                              value={pos.title}
+                              onChange={(e) => {
+                                const updated = [...positions];
+                                updated[idx].title = e.target.value;
+                                setPositions(updated);
+                              }}
+                              placeholder="Position e.g. Waiter"
+                              className="w-full px-3 py-2 rounded-xl text-xs border border-slate-750 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-950 text-slate-100 font-bold placeholder-slate-600"
+                            />
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              value={pos.salary}
+                              onChange={(e) => {
+                                const updated = [...positions];
+                                updated[idx].salary = e.target.value;
+                                setPositions(updated);
+                              }}
+                              placeholder="Salary e.g. 1400 AED"
+                              className="w-full px-3 py-2 rounded-xl text-xs border border-slate-750 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-950 text-slate-100 font-bold placeholder-slate-600"
+                            />
+                          </div>
+                        </div>
+
+                        {positions.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = positions.filter((_, i) => i !== idx);
+                              setPositions(updated);
+                            }}
+                            className="p-2 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 hover:bg-rose-500/20 transition hover:text-rose-300 shrink-0 cursor-pointer"
+                            title="Remove this position"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Processing Fee Grid */}

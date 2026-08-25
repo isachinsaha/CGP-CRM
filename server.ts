@@ -1132,12 +1132,20 @@ app.put('/api/leads/:id', async (req, res) => {
             tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Closed Won')
           );
           if (!alreadyCredited) {
-            // Dynamic Rule Match
+            // Dynamic Rule Match with direct country fallbacks
             const rules = await getIncentiveRules();
             let incentiveAmount = 400; // Ultimate fallback default
             const pName = String(project !== undefined ? project : (lead.project || '')).trim().toLowerCase();
             const cName = String(country !== undefined ? country : (lead.country || '')).trim().toLowerCase();
+            const cNameLower = cName.trim();
             
+            // Set regional baseline defaults first
+            if (['japan', 'albania', 'europe', 'malta', 'greece'].includes(cNameLower)) {
+              incentiveAmount = 1000;
+            } else if (['kuwait', 'dubai', 'qatar', 'u.a.e', 'oman'].includes(cNameLower)) {
+              incentiveAmount = 400;
+            }
+
             const matchedRules = rules.filter(r => {
               const rProject = (r.projectName || '').trim().toLowerCase();
               const rCountry = (r.country || '').trim().toLowerCase();
@@ -1161,7 +1169,22 @@ app.put('/api/leads/:id', async (req, res) => {
                 
                 return bScore - aScore; // highest score first
               });
-              incentiveAmount = matchedRules[0].amount;
+              
+              const bestRule = matchedRules[0];
+              const bestRuleCtrySpecific = !['all', 'any', '', 'all countries'].includes((bestRule.country || '').trim().toLowerCase());
+              
+              // Apply matched rule if it is specific to the country. Otherwise, fall back to our premium regions first.
+              if (bestRuleCtrySpecific) {
+                incentiveAmount = bestRule.amount;
+              } else {
+                if (['japan', 'albania', 'europe', 'malta', 'greece'].includes(cNameLower)) {
+                  incentiveAmount = 1000;
+                } else if (['kuwait', 'dubai', 'qatar', 'u.a.e', 'oman'].includes(cNameLower)) {
+                  incentiveAmount = 400;
+                } else {
+                  incentiveAmount = bestRule.amount;
+                }
+              }
             }
             
             await addWalletTransaction(
@@ -1171,6 +1194,28 @@ app.put('/api/leads/:id', async (req, res) => {
               `Closed Won incentive for candidate: ${name || lead.name} (Project: ${project !== undefined ? project : (lead.project || 'General')}, Country: ${country !== undefined ? country : (lead.country || 'Unknown')})`,
               lead.id
             );
+
+            // Sachin Saha override bonus credit
+            if (incentiveAmount === 400 || incentiveAmount === 1000) {
+              const sachinBonus = incentiveAmount === 400 ? 100 : 200;
+              try {
+                const sachinWallet = await getWalletByUsername('sachinsaha');
+                const sachinAlreadyCredited = (sachinWallet.transactions || []).some(
+                  tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Sachin Saha Override Bonus')
+                );
+                if (!sachinAlreadyCredited) {
+                  await addWalletTransaction(
+                    'sachinsaha',
+                    'credit',
+                    sachinBonus,
+                    `Sachin Saha Override Bonus (Sale by: ${cleanCoord}) for candidate: ${name || lead.name} (Project: ${project !== undefined ? project : (lead.project || 'General')}, Country: ${country !== undefined ? country : (lead.country || 'Unknown')})`,
+                    lead.id
+                  );
+                }
+              } catch (sachinErr) {
+                console.error('Failed to auto-credit Sachin override bonus:', sachinErr);
+              }
+            }
           }
         } catch (walletErr) {
           console.error('Failed to auto-credit Closed Won incentive:', walletErr);
@@ -1201,6 +1246,29 @@ app.put('/api/leads/:id', async (req, res) => {
               `Reversal: Closed Won stage corrected/removed. Candidate: ${name || lead.name} (moved to ${stage})`,
               lead.id
             );
+          }
+
+          // Sachin Saha override reversal
+          try {
+            const sachinWallet = await getWalletByUsername('sachinsaha');
+            const sachinCredits = (sachinWallet.transactions || []).filter(
+              tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Sachin Saha Override Bonus')
+            );
+            const sachinReversals = (sachinWallet.transactions || []).filter(
+              tx => tx.leadId === lead.id && tx.type === 'debit' && tx.reason.includes('Reversal: Sachin Saha Override Bonus')
+            );
+            if (sachinCredits.length > sachinReversals.length) {
+              const amountToDebitSachin = sachinCredits[0].amount;
+              await addWalletTransaction(
+                'sachinsaha',
+                'debit',
+                amountToDebitSachin,
+                `Reversal: Sachin Saha Override Bonus (Stage corrected/removed for candidate: ${name || lead.name})`,
+                lead.id
+              );
+            }
+          } catch (sachinErr) {
+            console.error('Failed to auto-debit Sachin override bonus reversal:', sachinErr);
           }
         } catch (walletErr) {
           console.error('Failed to auto-debit Closed Won reversal:', walletErr);
@@ -2706,7 +2774,7 @@ app.get('/api/jobs', async (req, res) => {
 // POST add a new job
 app.post('/api/jobs', async (req, res) => {
   try {
-    const { title, country, salaryRange, requirement, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
+    const { title, country, salaryRange, requirement, positions, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
     if (!title) {
       res.status(400).json({ error: 'Job title is required.' });
       return;
@@ -2719,6 +2787,7 @@ app.post('/api/jobs', async (req, res) => {
       country: country ? String(country).trim() : 'Kuwait',
       salaryRange: salaryRange ? String(salaryRange).trim() : '',
       requirement: requirement ? String(requirement).trim() : 'General Requirement',
+      positions: Array.isArray(positions) ? positions : undefined,
       processingFeeMale: processingFeeMale ? String(processingFeeMale).trim() : 'No fee listed',
       processingFeeFemale: processingFeeFemale ? String(processingFeeFemale).trim() : 'No fee listed',
       accommodation: accommodation ? String(accommodation).trim() : 'No details provided',
@@ -2744,7 +2813,7 @@ app.post('/api/jobs', async (req, res) => {
 app.put('/api/jobs/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, country, salaryRange, requirement, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
+    const { title, country, salaryRange, requirement, positions, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
 
     const jobs = await getJobs();
     const idx = jobs.findIndex(j => j.id === id);
@@ -2759,6 +2828,7 @@ app.put('/api/jobs/:id', async (req, res) => {
       country: country !== undefined ? String(country).trim() : (jobs[idx].country || 'Kuwait'),
       salaryRange: salaryRange !== undefined ? String(salaryRange).trim() : (jobs[idx].salaryRange || ''),
       requirement: requirement !== undefined ? String(requirement).trim() : (jobs[idx].requirement || 'General Requirement'),
+      positions: positions !== undefined ? (Array.isArray(positions) ? positions : undefined) : jobs[idx].positions,
       processingFeeMale: processingFeeMale !== undefined ? String(processingFeeMale).trim() : (jobs[idx].processingFeeMale || 'No fee listed'),
       processingFeeFemale: processingFeeFemale !== undefined ? String(processingFeeFemale).trim() : (jobs[idx].processingFeeFemale || 'No fee listed'),
       accommodation: accommodation !== undefined ? String(accommodation).trim() : (jobs[idx].accommodation || 'No details provided'),
