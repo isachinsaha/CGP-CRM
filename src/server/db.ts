@@ -269,7 +269,7 @@ async function verifyDatabaseAccess(): Promise<boolean> {
         db = getFirestore(firebaseApp, '(default)');
         currentDbId = '(default)';
         const testRef = doc(db, 'metadata', 'test_connection');
-        await runWithTimeout(getDoc(testRef), 2500);
+        await runWithTimeout(getDoc(testRef), 10000);
         dbVerified = true;
         cloudSyncEnabled = true;
         console.log(`[Firestore Client] Successfully connected to "(default)" database.`);
@@ -1025,7 +1025,7 @@ export async function getLeadById(id: string): Promise<Lead | undefined> {
 
   if (checkCloudStatus()) {
     try {
-      const docSnap = await runWithTimeout(getDoc(doc(db, 'leads', id)), 2000);
+      const docSnap = await runWithTimeout(getDoc(doc(db, 'leads', id)), 10000);
       if (docSnap.exists()) {
         return normalizeSingleLeadMediaUrls(docSnap.data() as Lead);
       }
@@ -1702,7 +1702,7 @@ export async function initializeJobsDatabase() {
   if (checkCloudStatus()) {
     try {
       const statusRef = doc(db, 'metadata', 'jobs_status');
-      const statusSnap = await runWithTimeout(getDoc(statusRef), 2000);
+      const statusSnap = await runWithTimeout(getDoc(statusRef), 10000);
       if (!statusSnap.exists()) {
         console.log('[Firestore Client] Seeding default jobs to cloud...');
         const batch = writeBatch(db);
@@ -1711,7 +1711,7 @@ export async function initializeJobsDatabase() {
           batch.set(docRef, cleanForFirestore(j));
         });
         batch.set(statusRef, { seeded: true, updatedAt: new Date().toISOString() });
-        await runWithTimeout(batch.commit(), 2000);
+        await runWithTimeout(batch.commit(), 10000);
         console.log('[Firestore Client] Seeded jobs successfully.');
       }
     } catch (err: any) {
@@ -1732,7 +1732,7 @@ export async function getJobs(): Promise<Job[]> {
 
   if (checkCloudStatus()) {
     try {
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 2000);
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 10000);
       const jobs: Job[] = [];
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
@@ -1815,10 +1815,10 @@ export async function saveJobs(jobs: Job[]): Promise<void> {
         const docRef = doc(db, 'jobs', j.id);
         batch.set(docRef, cleanForFirestore(j));
       });
-      await runWithTimeout(batch.commit(), 2000);
+      await runWithTimeout(batch.commit(), 10000);
 
       // Delete any removed jobs
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 2000);
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 10000);
       const deleteBatch = writeBatch(db);
       let hasDeletes = false;
       snapshot.forEach(docSnap => {
@@ -1828,7 +1828,7 @@ export async function saveJobs(jobs: Job[]): Promise<void> {
         }
       });
       if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 2000);
+        await runWithTimeout(deleteBatch.commit(), 10000);
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save jobs to cloud:', err);
@@ -1860,7 +1860,7 @@ export async function initializeUpdatesDatabase() {
   if (checkCloudStatus()) {
     try {
       const statusRef = doc(db, 'metadata', 'updates_status');
-      const statusSnap = await runWithTimeout(getDoc(statusRef), 2000);
+      const statusSnap = await runWithTimeout(getDoc(statusRef), 10000);
       if (!statusSnap.exists()) {
         console.log('[Firestore Client] Seeding default updates to cloud...');
         const batch = writeBatch(db);
@@ -1869,7 +1869,7 @@ export async function initializeUpdatesDatabase() {
           batch.set(docRef, cleanForFirestore(upd));
         });
         batch.set(statusRef, { seeded: true, updatedAt: new Date().toISOString() });
-        await runWithTimeout(batch.commit(), 2000);
+        await runWithTimeout(batch.commit(), 10000);
         console.log('[Firestore Client] Seeded updates successfully.');
       }
     } catch (err: any) {
@@ -1890,7 +1890,7 @@ export async function getUpdates(): Promise<ImportantUpdate[]> {
 
   if (checkCloudStatus()) {
     try {
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 2000);
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 10000);
       const updates: ImportantUpdate[] = [];
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
@@ -1943,10 +1943,10 @@ export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
         const docRef = doc(db, 'updates', u.id);
         batch.set(docRef, cleanForFirestore(u));
       });
-      await runWithTimeout(batch.commit(), 2000);
+      await runWithTimeout(batch.commit(), 10000);
 
       // Delete any removed updates
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 2000);
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 10000);
       const deleteBatch = writeBatch(db);
       let hasDeletes = false;
       snapshot.forEach(docSnap => {
@@ -1956,7 +1956,7 @@ export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
         }
       });
       if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 2000);
+        await runWithTimeout(deleteBatch.commit(), 10000);
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save updates to cloud:', err);
@@ -1991,10 +1991,10 @@ export async function initializeMetadataDatabase() {
   if (checkCloudStatus()) {
     try {
       const docRef = doc(db, 'metadata', 'options');
-      const docSnap = await runWithTimeout(getDoc(docRef), 2000);
+      const docSnap = await runWithTimeout(getDoc(docRef), 10000);
       if (!docSnap.exists()) {
         console.log('[Firestore Client] Seeding default metadata to cloud...');
-        await runWithTimeout(setDoc(docRef, cleanForFirestore(defaultMetadata)), 2000);
+        await runWithTimeout(setDoc(docRef, cleanForFirestore(defaultMetadata)), 10000);
         console.log('[Firestore Client] Seeded metadata successfully.');
       }
     } catch (err: any) {
@@ -2025,7 +2025,7 @@ export async function getMetadata(): Promise<CgpMetadata> {
 
   if (checkCloudStatus()) {
     try {
-      const docSnap = await runWithTimeout(getDoc(doc(db, 'metadata', 'options')), 2000);
+      const docSnap = await runWithTimeout(getDoc(doc(db, 'metadata', 'options')), 10000);
       if (docSnap.exists()) {
         const data = docSnap.data();
         const metadata: CgpMetadata = {
@@ -2064,7 +2064,7 @@ export async function saveMetadata(metadata: CgpMetadata): Promise<void> {
   if (checkCloudStatus()) {
     // Await cloud sync to guarantee data persistence under Cloud Run
     try {
-      await runWithTimeout(setDoc(doc(db, 'metadata', 'options'), cleanForFirestore(metadata)), 2000);
+      await runWithTimeout(setDoc(doc(db, 'metadata', 'options'), cleanForFirestore(metadata)), 10000);
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save metadata to cloud:', err);
       handleCloudError(err);
@@ -2082,7 +2082,7 @@ export async function initializeWalletsDatabase() {
   if (checkCloudStatus()) {
     try {
       const q = query(collection(db, 'wallets'), limit(1));
-      const snapshot = await runWithTimeout(getDocs(q), 2000);
+      const snapshot = await runWithTimeout(getDocs(q), 10000);
       if (snapshot.empty) {
         console.log('[Firestore Client] Seeding default wallets from coordinators...');
         const coords = await getCoordinators();
@@ -2099,7 +2099,7 @@ export async function initializeWalletsDatabase() {
           const docRef = doc(db, 'wallets', w.id);
           batch.set(docRef, cleanForFirestore(w));
         });
-        await runWithTimeout(batch.commit(), 2000);
+        await runWithTimeout(batch.commit(), 10000);
         console.log('[Firestore Client] Seeded wallets successfully.');
       }
     } catch (err: any) {
@@ -2118,7 +2118,7 @@ export async function getWallets(): Promise<Wallet[]> {
 
   if (checkCloudStatus()) {
     try {
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'wallets')), 2000);
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'wallets')), 10000);
       const wallets: Wallet[] = [];
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
@@ -2163,7 +2163,7 @@ export async function saveWallets(wallets: Wallet[]): Promise<void> {
         const docRef = doc(db, 'wallets', w.id);
         batch.set(docRef, cleanForFirestore(w));
       });
-      await runWithTimeout(batch.commit(), 2000);
+      await runWithTimeout(batch.commit(), 10000);
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save wallets to cloud:', err);
       handleCloudError(err);
@@ -2278,7 +2278,7 @@ export async function initializeIncentiveRulesDatabase() {
   if (checkCloudStatus()) {
     try {
       const statusRef = doc(db, 'metadata', 'incentive_rules_status');
-      const statusSnap = await runWithTimeout(getDoc(statusRef), 2000);
+      const statusSnap = await runWithTimeout(getDoc(statusRef), 10000);
       if (!statusSnap.exists()) {
         console.log('[Firestore Client] Seeding default incentive rules to cloud...');
         const batch = writeBatch(db);
@@ -2287,7 +2287,7 @@ export async function initializeIncentiveRulesDatabase() {
           batch.set(docRef, cleanForFirestore(rule));
         });
         batch.set(statusRef, { seeded: true, updatedAt: new Date().toISOString() });
-        await runWithTimeout(batch.commit(), 2000);
+        await runWithTimeout(batch.commit(), 10000);
         console.log('[Firestore Client] Seeded incentive rules successfully.');
       }
     } catch (err: any) {
@@ -2306,7 +2306,7 @@ async function getIncentiveRulesInternal(): Promise<IncentiveRule[]> {
 
   if (checkCloudStatus()) {
     try {
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'incentive_rules')), 2000);
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'incentive_rules')), 10000);
       const rules: IncentiveRule[] = [];
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
@@ -2352,9 +2352,9 @@ async function saveIncentiveRulesInternal(rules: IncentiveRule[]): Promise<void>
         const docRef = doc(db, 'incentive_rules', r.id);
         batch.set(docRef, cleanForFirestore(r));
       });
-      await runWithTimeout(batch.commit(), 2000);
+      await runWithTimeout(batch.commit(), 10000);
 
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'incentive_rules')), 2000);
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'incentive_rules')), 10000);
       const deleteBatch = writeBatch(db);
       let hasDeletes = false;
       snapshot.forEach(docSnap => {
@@ -2364,7 +2364,7 @@ async function saveIncentiveRulesInternal(rules: IncentiveRule[]): Promise<void>
         }
       });
       if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 2000);
+        await runWithTimeout(deleteBatch.commit(), 10000);
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save incentive rules to cloud:', err);

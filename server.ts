@@ -1297,6 +1297,7 @@ app.put('/api/leads/:id', async (req, res) => {
     }
 
     // Log Coordinator assignments
+    let isAssignDateSetByServer = false;
     if (assignedTo !== undefined && lead.assignedTo !== assignedTo) {
       const isFromWa = assignedFrom === 'whatsapp_chat_menu' || req.headers['x-assigned-from'] === 'whatsapp_chat_menu';
       const suffix = isFromWa ? ' via WhatsApp Chat Menu' : '';
@@ -1309,6 +1310,7 @@ app.put('/api/leads/:id', async (req, res) => {
       });
       lead.assignedTo = assignedTo;
       lead.assignDate = new Date().toISOString().split('T')[0];
+      isAssignDateSetByServer = true;
       if (isFromWa) {
         lead.assignedFrom = 'whatsapp_chat_menu';
       }
@@ -1411,7 +1413,7 @@ app.put('/api/leads/:id', async (req, res) => {
     if (alternateNo !== undefined) lead.alternateNo = alternateNo;
     if (serialNo !== undefined) lead.serialNo = serialNo;
     if (entryDate !== undefined) lead.entryDate = entryDate;
-    if (assignDate !== undefined) lead.assignDate = assignDate;
+    if (assignDate !== undefined && !isAssignDateSetByServer) lead.assignDate = assignDate;
     if (gender !== undefined) lead.gender = gender;
     if (age !== undefined) lead.age = age;
     if (origin !== undefined) lead.origin = origin;
@@ -1451,6 +1453,11 @@ app.put('/api/leads/:id', async (req, res) => {
       if (!isDefaultExperience(autoExp)) {
         lead.experience = autoExp;
       }
+    }
+
+    // Self-healing fallback: Ensure leads with active coordinators always have a valid assignDate
+    if (lead.assignedTo && lead.assignedTo.trim() !== '' && lead.assignedTo.toLowerCase() !== 'unassigned' && (!lead.assignDate || lead.assignDate.trim() === '')) {
+      lead.assignDate = (lead.createdAt || new Date().toISOString()).split('T')[0];
     }
 
     lead.updatedAt = new Date().toISOString();

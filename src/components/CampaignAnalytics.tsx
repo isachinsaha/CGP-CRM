@@ -55,6 +55,16 @@ const isAssignedToday = (dateStr?: string) => {
   return false;
 };
 
+const getLocalDateString = (dateInput?: Date | string) => {
+  if (!dateInput) return '';
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function CampaignAnalytics({ 
   stats, 
   leads = [], 
@@ -472,7 +482,8 @@ export default function CampaignAnalytics({
 
     leadsList.forEach(l => {
       // 1. Check for initial/registration assignment done on targetDate
-      if (l.assignDate === targetDate && l.assignedTo && l.assignedTo.trim() !== '' && l.assignedTo.toLowerCase() !== 'unassigned') {
+      const leadAssignDate = l.assignDate || (l.assignedTo && l.assignedTo.toLowerCase() !== 'unassigned' ? getLocalDateString(l.createdAt || l.entryDate) : '');
+      if (leadAssignDate === targetDate && l.assignedTo && l.assignedTo.trim() !== '' && l.assignedTo.toLowerCase() !== 'unassigned') {
         const matchesCoord = dprCoord === 'All' || (l.assignedTo || '').toLowerCase() === dprCoord.toLowerCase();
         if (matchesCoord) {
           uniqueAssignmentsMap.set(l.id, {
@@ -657,7 +668,8 @@ export default function CampaignAnalytics({
       const touchedSet = new Set<string>();
 
       leadsList.forEach(l => {
-        if (l.assignDate === dprDate && (l.assignedTo || '').toLowerCase() === name.toLowerCase()) {
+        const leadAssignDate = l.assignDate || (l.assignedTo && l.assignedTo.toLowerCase() !== 'unassigned' ? getLocalDateString(l.createdAt || l.entryDate) : '');
+        if (leadAssignDate === dprDate && (l.assignedTo || '').toLowerCase() === name.toLowerCase()) {
           assignedSet.add(l.id);
           touchedSet.add(l.id);
         }
