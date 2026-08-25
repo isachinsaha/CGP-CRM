@@ -421,6 +421,22 @@ const dbCache = {
 };
 
 let lastFullLeadsSyncTime = 0;
+let lastReadLeadsTimestamp = '';
+
+// Helper to update metadata sync timestamp
+async function markDatabaseUpdated(key: string): Promise<string> {
+  if (!checkCloudStatus()) return '';
+  try {
+    const timestamp = new Date().toISOString();
+    const docRef = doc(db, 'metadata', 'sync');
+    await runWithTimeout(setDoc(docRef, { [key]: timestamp, lastUpdatedAt: timestamp }, { merge: true }), 5000);
+    console.log(`[Firestore Client] Marked database updated for "${key}" at ${timestamp}`);
+    return timestamp;
+  } catch (err) {
+    console.error('[Firestore Client] Failed to mark database updated:', err);
+    return '';
+  }
+}
 
 // Helper to recursively strip or replace undefined values with empty/null for Firestore compatibility
 function cleanForFirestore(obj: any): any {
@@ -1048,6 +1064,27 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
     return dbCache.leads.data;
   }
 
+  // Smart Metadata Sync Check
+  let remoteLeadsTimestamp = '';
+  if (checkCloudStatus()) {
+    try {
+      const syncSnap = await runWithTimeout(getDoc(doc(db, 'metadata', 'sync')), 5000);
+      if (syncSnap.exists()) {
+        const syncData = syncSnap.data();
+        remoteLeadsTimestamp = syncData?.leads || '';
+        
+        // If we have cached leads AND the cloud leads timestamp hasn't changed,
+        // we can return the cache immediately and skip the full/delta reads entirely!
+        if (dbCache.leads && remoteLeadsTimestamp && remoteLeadsTimestamp === lastReadLeadsTimestamp) {
+          console.log('[Firestore Client] Cache is still fresh (metadata sync timestamps match). Skipping full/delta read.');
+          return dbCache.leads.data;
+        }
+      }
+    } catch (err) {
+      console.warn('[Firestore Client] Failed to read sync metadata:', err);
+    }
+  }
+
   // 1. Read existing local leads safely with auto-recovery
   const localLeads: Lead[] = safeReadJsonSync<Lead[]>(DATA_FILE, []);
 
@@ -1163,6 +1200,15 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
       // Since cloud synchronization was fully successful, we update local and synced files with final merged state!
       safeWriteJsonSync(DATA_FILE, finalLeads);
       safeWriteJsonSync(DATA_FILE_SYNCED, finalLeads);
+
+      if (remoteLeadsTimestamp) {
+        lastReadLeadsTimestamp = remoteLeadsTimestamp;
+      } else {
+        // If there was no remote timestamp, initialize it on Firestore and update our local timestamp
+        markDatabaseUpdated('leads').then(ts => {
+          if (ts) lastReadLeadsTimestamp = ts;
+        }).catch(() => {});
+      }
 
     } catch (err: any) {
       console.error('[Firestore Client] Failed to get/sync leads with cloud, using local-only state:', err);
@@ -1303,6 +1349,12 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
       // Since all Firestore operations succeeded, we can safely update the local DATA_FILE_SYNCED cache
       safeWriteJsonSync(DATA_FILE_SYNCED, normalizedLeads);
 
+      // Update remote metadata sync document and local tracking timestamp
+      const newTimestamp = await markDatabaseUpdated('leads');
+      if (newTimestamp) {
+        lastReadLeadsTimestamp = newTimestamp;
+      }
+
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save leads delta to cloud:', err);
       handleCloudError(err);
@@ -1319,6 +1371,7 @@ export async function getLeads(forceRefresh = false): Promise<Lead[]> {
 export function clearLeadsCache(): void {
   dbCache.leads = null;
   lastFullLeadsSyncTime = 0;
+  lastReadLeadsTimestamp = '';
 }
 
 export async function saveLeads(leads: Lead[]): Promise<void> {

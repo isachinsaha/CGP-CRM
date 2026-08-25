@@ -416,11 +416,13 @@ export default function App() {
     pullCrmData();
   }, [currentPage, filterKey, activeTab]);
 
-  // Set up background polling to fetch new WhatsApp replies or lead modifications every 5 seconds
+  // Set up background polling to fetch new WhatsApp replies or lead modifications every 5 seconds only when tab is active
   useEffect(() => {
     const timer = setInterval(() => {
-      // Pass silent = true, forceRefresh = true to bypass memory cache on the server
-      pullCrmData(true, true);
+      if (document.visibilityState === 'visible') {
+        // Pass silent = true, forceRefresh = true to bypass memory cache on the server
+        pullCrmData(true, true);
+      }
     }, 5000);
 
     return () => clearInterval(timer);
