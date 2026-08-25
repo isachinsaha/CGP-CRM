@@ -38,6 +38,13 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'board' | 'list' | 'messages' | 'analytics' | 'jobs' | 'ai-matcher' | 'wallet'>('board');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const selectedLeadRef = useRef<Lead | null>(null);
+
+  // Sync selectedLeadRef with selectedLead state instantly to avoid stale closures in background polling
+  useEffect(() => {
+    selectedLeadRef.current = selectedLead;
+  }, [selectedLead]);
+
   const [stats, setStats] = useState<StatSummary | null>(null);
   
   // Dynamic coordinators list loaded from server
@@ -388,9 +395,9 @@ export default function App() {
           setTotalPagesCount(1);
         }
         
-        // Match active modal with fresh server changes
-        if (selectedLead) {
-          const updated = leadsArray.find((l: Lead) => l.id === selectedLead.id);
+        // Match active modal with fresh server changes if and only if the modal is still open in the UI
+        if (selectedLeadRef.current) {
+          const updated = leadsArray.find((l: Lead) => l.id === selectedLeadRef.current?.id);
           if (updated) setSelectedLead(updated);
         }
       }
