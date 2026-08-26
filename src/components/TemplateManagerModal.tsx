@@ -72,14 +72,14 @@ export default function TemplateManagerModal({ isOpen, onClose, templates, onRef
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
       <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-2xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]">
         <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col gap-2">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">Manage {activeTab === 'template' ? 'Templates' : 'Quick Replies'}</h2>
+            <h2 className="text-sm font-black text-slate-100 dark:text-white uppercase tracking-wider">Manage {activeTab === 'template' ? 'Templates' : 'Quick Replies'}</h2>
             <div className="flex gap-2">
               <button onClick={syncTemplates} className="text-xs bg-emerald-100 dark:bg-emerald-900 px-2 rounded cursor-pointer">Sync Meta</button>
-              <button onClick={onClose} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 cursor-pointer">
+              <button onClick={onClose} className="p-1 hover:bg-slate-800 dark:hover:bg-slate-800 rounded-full text-slate-500 cursor-pointer">
                 <X className="h-4 w-4" />
               </button>
             </div>

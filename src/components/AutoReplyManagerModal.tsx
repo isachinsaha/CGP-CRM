@@ -79,7 +79,7 @@ export default function AutoReplyManagerModal({ isOpen, onClose }: AutoReplyMana
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
       <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-lg shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
@@ -88,13 +88,13 @@ export default function AutoReplyManagerModal({ isOpen, onClose }: AutoReplyMana
               <Sparkles className="h-4 w-4" />
             </div>
             <div>
-              <h2 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">WhatsApp Auto-Reply</h2>
+              <h2 className="text-sm font-black text-slate-100 dark:text-white uppercase tracking-wider">WhatsApp Auto-Reply</h2>
               <p className="text-xxs text-slate-500 dark:text-slate-400">Configure automated replies to incoming WhatsApp inquiries</p>
             </div>
           </div>
           <button 
             onClick={onClose} 
-            className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
+            className="p-1.5 hover:bg-slate-800 dark:hover:bg-slate-800 rounded-full text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
             id="close-auto-reply-modal-btn"
           >
             <X className="h-4 w-4" />
@@ -155,7 +155,7 @@ export default function AutoReplyManagerModal({ isOpen, onClose }: AutoReplyMana
                 max="3600"
                 value={settings.delay}
                 onChange={e => setSettings(s => ({ ...s, delay: parseInt(e.target.value) || 0 }))}
-                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-shadow"
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-100 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-shadow"
                 placeholder="e.g. 5"
                 required
                 disabled={!settings.enabled}
@@ -174,7 +174,7 @@ export default function AutoReplyManagerModal({ isOpen, onClose }: AutoReplyMana
                 rows={5}
                 value={settings.text}
                 onChange={e => setSettings(s => ({ ...s, text: e.target.value }))}
-                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-shadow resize-none"
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-100 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-shadow resize-none"
                 placeholder="Write your automated message here..."
                 required
                 disabled={!settings.enabled}

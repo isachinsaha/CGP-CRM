@@ -94,7 +94,7 @@ export default function RecycleBinModal({ isOpen, onClose, onRestoreSuccess }: R
   });
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-[999] p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-[999] p-4 animate-in fade-in duration-200">
       <div 
         className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200"
         id="recycle-bin-modal-container"
@@ -106,7 +106,7 @@ export default function RecycleBinModal({ isOpen, onClose, onRestoreSuccess }: R
               <ShieldAlert className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+              <h2 className="text-base font-black text-slate-100 dark:text-white flex items-center gap-2">
                 Recycle Bin & Recovery Console
                 <span className="text-[10px] font-mono font-bold bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 px-2 py-0.5 rounded-full">
                   Foolproof Safe Guard
@@ -119,7 +119,7 @@ export default function RecycleBinModal({ isOpen, onClose, onRestoreSuccess }: R
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer"
+            className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-800 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>

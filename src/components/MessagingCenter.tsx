@@ -630,7 +630,7 @@ export default function MessagingCenter({
               <MessageSquare className="h-3.5 w-3.5" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-tight truncate">
+              <h3 className="text-xs font-black text-slate-100 dark:text-white uppercase tracking-tight truncate">
                 WhatsApp Chats
               </h3>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
@@ -664,7 +664,7 @@ export default function MessagingCenter({
               <button
                 onClick={onRefreshData}
                 disabled={isRefreshing}
-                className="p-1.5 rounded-lg text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition cursor-pointer shadow-2xs disabled:opacity-60"
+                className="p-1.5 rounded-lg text-slate-100 dark:text-slate-300 bg-slate-800 dark:bg-slate-800 hover:bg-slate-750 dark:hover:bg-slate-700 border border-slate-750 dark:border-slate-700 transition cursor-pointer shadow-2xs disabled:opacity-60"
                 title="Refresh Chats"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -677,29 +677,29 @@ export default function MessagingCenter({
         <div className="p-2.5 border-b border-slate-200 dark:border-slate-800 space-y-2 bg-white dark:bg-slate-900">
           {/* Search Input */}
           <div className="relative">
-            <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
+            <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-500" />
             <input
               type="text"
               placeholder="Search by name, phone, state, trade..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
+              className="w-full pl-8 pr-3 py-1.5 bg-slate-800 border border-slate-750 rounded-xl text-xs text-slate-100 placeholder-slate-600 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
             />
           </div>
 
           {/* Coordinator Filter (Admin only) */}
           {userRole === 'admin' && (
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1.5 px-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-1.5 bg-slate-800 p-1.5 px-2.5 rounded-xl border border-slate-750">
               <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase shrink-0">Coordinator:</span>
               <select
                 value={selectedCoordinatorFilter}
                 onChange={(e) => setSelectedCoordinatorFilter(e.target.value)}
-                className="flex-1 bg-transparent border-none p-0 focus:ring-0 text-xs font-black text-slate-700 dark:text-slate-300 focus:outline-hidden cursor-pointer"
+                className="flex-1 bg-transparent border-none p-0 focus:ring-0 text-xs font-black text-slate-200 focus:outline-hidden cursor-pointer"
               >
-                <option value="" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans font-medium text-xs">👤 All Coordinators</option>
-                <option value="unassigned" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans font-medium text-xs">⚠️ Unassigned</option>
+                <option value="" className="bg-slate-900 text-slate-100 font-sans font-medium text-xs">👤 All Coordinators</option>
+                <option value="unassigned" className="bg-slate-900 text-slate-100 font-sans font-medium text-xs">⚠️ Unassigned</option>
                 {coordinators.map(c => (
-                  <option key={c.id} value={c.displayName || c.username} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans font-medium text-xs">
+                  <option key={c.id} value={c.displayName || c.username} className="bg-slate-900 text-slate-100 font-sans font-medium text-xs">
                     👤 {c.displayName || c.username}
                   </option>
                 ))}
@@ -722,7 +722,7 @@ export default function MessagingCenter({
                 <span>📥 Requesting</span>
                 {requestingLeadsCount > 0 && (
                   <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
-                    filterType === 'requesting' ? 'bg-white text-amber-700' : 'bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200'
+                    filterType === 'requesting' ? 'bg-white text-amber-700' : 'bg-amber-100 dark:bg-amber-900 text-amber-400 dark:text-amber-200'
                   }`}>
                     {requestingLeadsCount}
                   </span>
@@ -748,7 +748,7 @@ export default function MessagingCenter({
               <span>Active Chats</span>
               {activeLeadsCount > 0 && (
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
-                  filterType === 'active' ? 'bg-white text-emerald-700' : 'bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-200'
+                  filterType === 'active' ? 'bg-white text-emerald-700' : 'bg-emerald-100 dark:bg-emerald-900 text-emerald-400 dark:text-emerald-200'
                 }`}>
                   {activeLeadsCount}
                 </span>
@@ -766,14 +766,14 @@ export default function MessagingCenter({
               className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                 filterType === 'history'
                   ? 'bg-slate-800 dark:bg-slate-700 text-white border-slate-800 shadow-2xs font-black'
-                  : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  : 'bg-slate-800 dark:bg-slate-850 border-slate-750 dark:border-slate-700 text-slate-400 dark:text-slate-300 hover:bg-slate-750'
               }`}
             >
               <Clock className="h-3 w-3" />
               <span>History (&gt;24h)</span>
               {historyLeadsCount > 0 && (
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
-                  filterType === 'history' ? 'bg-white text-slate-900' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                  filterType === 'history' ? 'bg-white text-slate-100' : 'bg-slate-900 dark:bg-slate-700 text-slate-300 dark:text-slate-300'
                 }`}>
                   {historyLeadsCount}
                 </span>
@@ -820,7 +820,7 @@ export default function MessagingCenter({
                   <div
                     key={lead.id}
                     onClick={() => handleSelectChat(lead)}
-                    className={`p-3 transition-all cursor-pointer flex items-start gap-2.5 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 ${
+                    className={`p-3 transition-all cursor-pointer flex items-start gap-2.5 hover:bg-slate-800 dark:hover:bg-slate-800/60 ${
                       isSelected
                         ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-l-4 border-l-emerald-600'
                         : 'border-l-4 border-l-transparent'
@@ -839,7 +839,7 @@ export default function MessagingCenter({
                     {/* Chat Thread Details */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1 mb-0.5">
-                        <h4 className="text-xs font-black text-slate-900 dark:text-slate-100 truncate uppercase tracking-tight">
+                        <h4 className="text-xs font-black text-slate-100 dark:text-slate-100 truncate uppercase tracking-tight">
                           {formatCandidateName(lead.name)}
                         </h4>
                         <span className="text-[9.5px] font-mono text-slate-500 dark:text-slate-400 shrink-0 font-medium">
@@ -867,7 +867,7 @@ export default function MessagingCenter({
                       {lead.tags && lead.tags.length > 0 && (
                         <div className="flex items-center gap-1 flex-wrap mb-1">
                           {lead.tags.slice(0, 2).map((t, idx) => (
-                            <span key={idx} className="bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-1.5 py-0.2 rounded text-[8.5px] font-bold">
+                            <span key={idx} className="bg-slate-800 dark:bg-slate-800 text-slate-400 dark:text-slate-300 px-1.5 py-0.2 rounded text-[8.5px] font-bold">
                               {t}
                             </span>
                           ))}
@@ -881,7 +881,7 @@ export default function MessagingCenter({
                       <div className="flex items-center justify-between gap-2">
                         <p className={`text-[11px] truncate leading-tight ${
                           isLatestFromLead 
-                            ? 'font-bold text-slate-900 dark:text-emerald-300' 
+                            ? 'font-bold text-slate-100 dark:text-emerald-300' 
                             : 'text-slate-600 dark:text-slate-400'
                         }`}>
                           {latestMsg ? (
@@ -956,7 +956,7 @@ export default function MessagingCenter({
                   {/* Mobile Back to List Button */}
                   <button
                     onClick={() => setMobileView('list')}
-                    className="md:hidden p-1 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0"
+                    className="md:hidden p-1 rounded-lg text-slate-500 hover:text-slate-100 dark:hover:text-white bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0"
                     title="Back to conversation list"
                   >
                     <ArrowLeft className="h-4 w-4" />
@@ -972,12 +972,12 @@ export default function MessagingCenter({
                   <div className="min-w-0 flex-1 text-left">
                     <div className="flex items-center gap-2 flex-wrap">
                       {/* Candidate Name */}
-                      <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white tracking-tight uppercase truncate">
+                      <h3 className="text-xs sm:text-sm font-black text-slate-100 dark:text-white tracking-tight uppercase truncate">
                         {formatCandidateName(currentChatLead.name)}
                       </h3>
 
                       {/* Phone Number with INCREASED size */}
-                      <span className="text-xs sm:text-sm font-mono font-black text-slate-900 dark:text-slate-100 bg-slate-200/80 dark:bg-slate-800 px-2.5 py-0.5 rounded-lg border border-slate-300 dark:border-slate-700 tracking-wider shadow-2xs">
+                      <span className="text-xs sm:text-sm font-mono font-black text-slate-100 dark:text-slate-100 bg-slate-800 dark:bg-slate-800 px-2.5 py-0.5 rounded-lg border border-slate-750 dark:border-slate-700 tracking-wider shadow-2xs">
                         {currentChatLead.phone}
                       </span>
 
@@ -1026,7 +1026,7 @@ export default function MessagingCenter({
                       className={`text-xs font-bold px-2.5 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs border ${
                         showLeadDetailsPanel
                           ? 'bg-emerald-600 text-white border-emerald-600'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200'
+                          : 'bg-slate-800 dark:bg-slate-800 text-slate-100 dark:text-slate-300 border-slate-750 dark:border-slate-700 hover:bg-slate-750'
                       }`}
                       title="Toggle Lead Intake & Assignment Panel"
                     >
@@ -1049,7 +1049,7 @@ export default function MessagingCenter({
                   <button
                     onClick={handleRefreshActiveChat}
                     disabled={isRefreshingChat}
-                    className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap disabled:opacity-50"
+                    className="text-xs font-bold text-slate-100 dark:text-slate-300 bg-slate-800 dark:bg-slate-800 hover:bg-slate-750 dark:hover:bg-slate-700 border border-slate-750 dark:border-slate-700 px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap disabled:opacity-50"
                     title="Refresh Chat"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingChat ? 'animate-spin' : ''}`} />
@@ -1082,7 +1082,7 @@ export default function MessagingCenter({
                       <div className="text-left">
                         <div className="flex items-center gap-1.5">
                           <FileText className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                          <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                          <h4 className="text-xs font-black text-slate-100 dark:text-white uppercase tracking-wider">
                             Lead Intake & Transfer
                           </h4>
                         </div>
@@ -1137,7 +1137,7 @@ export default function MessagingCenter({
                           type="text"
                           value={leadFormData.name}
                           onChange={(e) => setLeadFormData({ ...leadFormData, name: e.target.value })}
-                          className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                           placeholder="e.g. Rahul Sharma"
                         />
                       </div>
@@ -1152,7 +1152,7 @@ export default function MessagingCenter({
                             type="text"
                             value={leadFormData.phone}
                             onChange={(e) => setLeadFormData({ ...leadFormData, phone: e.target.value })}
-                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-mono font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-mono font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                             placeholder="+91..."
                           />
                         </div>
@@ -1165,7 +1165,7 @@ export default function MessagingCenter({
                             type="text"
                             value={leadFormData.alternateNo}
                             onChange={(e) => setLeadFormData({ ...leadFormData, alternateNo: e.target.value })}
-                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-mono font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-mono font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                             placeholder="Optional phone"
                           />
                         </div>
@@ -1180,7 +1180,7 @@ export default function MessagingCenter({
                           <select
                             value={leadFormData.gender}
                             onChange={(e) => setLeadFormData({ ...leadFormData, gender: e.target.value })}
-                            className="w-full px-2 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
+                            className="w-full px-2 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                           >
                             <option value="M">Male (M)</option>
                             <option value="F">Female (F)</option>
@@ -1196,7 +1196,7 @@ export default function MessagingCenter({
                             type="text"
                             value={leadFormData.age}
                             onChange={(e) => setLeadFormData({ ...leadFormData, age: e.target.value })}
-                            className="w-full px-2.5 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
+                            className="w-full px-2.5 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                             placeholder="e.g. 26"
                           />
                         </div>
@@ -1209,7 +1209,7 @@ export default function MessagingCenter({
                             type="text"
                             value={leadFormData.origin}
                             onChange={(e) => setLeadFormData({ ...leadFormData, origin: e.target.value })}
-                            className="w-full px-2 py-2 bg-white dark:bg-slate-950 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
+                            className="w-full px-2 py-2 bg-white dark:bg-slate-950 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                             placeholder="e.g. Darjeeling"
                           />
                         </div>
@@ -1239,7 +1239,7 @@ export default function MessagingCenter({
                                 value={newCountryInput}
                                 onChange={(e) => setNewCountryInput(e.target.value)}
                                 placeholder="New Country..."
-                                className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100"
+                                className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100"
                               />
                               <button
                                 type="button"
@@ -1260,7 +1260,7 @@ export default function MessagingCenter({
                             <select
                               value={leadFormData.country}
                               onChange={(e) => setLeadFormData({ ...leadFormData, country: e.target.value })}
-                              className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
+                              className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                             >
                               <option value="">Select Country (Leave Blank)</option>
                               {countries.map(c => (
@@ -1292,7 +1292,7 @@ export default function MessagingCenter({
                                 value={newPositionInput}
                                 onChange={(e) => setNewPositionInput(e.target.value)}
                                 placeholder="New Position..."
-                                className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100"
+                                className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100"
                               />
                               <button
                                 type="button"
@@ -1314,7 +1314,7 @@ export default function MessagingCenter({
                               type="text"
                               value={leadFormData.position}
                               onChange={(e) => setLeadFormData({ ...leadFormData, position: e.target.value })}
-                              className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
+                              className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                               placeholder="e.g. Nurse, Welder, Cook, Waiter..."
                             />
                           )}
@@ -1331,7 +1331,7 @@ export default function MessagingCenter({
                             type="text"
                             value={leadFormData.experience}
                             onChange={(e) => setLeadFormData({ ...leadFormData, experience: e.target.value })}
-                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                             placeholder="e.g. 2 yrs Gulf / Fresher"
                           />
                         </div>
@@ -1344,7 +1344,7 @@ export default function MessagingCenter({
                             type="text"
                             value={leadFormData.qualification}
                             onChange={(e) => setLeadFormData({ ...leadFormData, qualification: e.target.value })}
-                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                             placeholder="e.g. 10th / Graduate / ITI"
                           />
                         </div>
@@ -1359,7 +1359,7 @@ export default function MessagingCenter({
                           <select
                             value={leadFormData.importance}
                             onChange={(e) => setLeadFormData({ ...leadFormData, importance: e.target.value })}
-                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                           >
                             <option value="1">⭐ 1 Star (Low)</option>
                             <option value="2">⭐⭐ 2 Stars (Normal)</option>
@@ -1376,7 +1376,7 @@ export default function MessagingCenter({
                           <select
                             value={leadFormData.source}
                             onChange={(e) => setLeadFormData({ ...leadFormData, source: e.target.value })}
-                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                           >
                             <option value="Ads">Ads 📣</option>
                             <option value="Organic">Organic 🌱</option>
@@ -1411,7 +1411,7 @@ export default function MessagingCenter({
                               value={newProjectInput}
                               onChange={(e) => setNewProjectInput(e.target.value)}
                               placeholder="New Project..."
-                              className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100"
+                              className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100"
                             />
                             <button
                               type="button"
@@ -1432,7 +1432,7 @@ export default function MessagingCenter({
                           <select
                             value={leadFormData.project}
                             onChange={(e) => setLeadFormData({ ...leadFormData, project: e.target.value })}
-                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                           >
                             <option value="">Select Project (Leave Blank)</option>
                             {projects.map(p => (
@@ -1450,7 +1450,7 @@ export default function MessagingCenter({
                         <select
                           value={leadFormData.stage}
                           onChange={(e) => setLeadFormData({ ...leadFormData, stage: e.target.value as LeadStage })}
-                          className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                         >
                           <option value="new">New Inbound</option>
                           <option value="negotiating">In Discussion</option>
@@ -1470,11 +1470,11 @@ export default function MessagingCenter({
                         <select
                           value={leadFormData.assignedTo}
                           onChange={(e) => setLeadFormData({ ...leadFormData, assignedTo: e.target.value })}
-                          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border-2 border-indigo-300 dark:border-indigo-700 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-black focus:outline-hidden focus:border-indigo-500 shadow-xs cursor-pointer"
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border-2 border-indigo-300 dark:border-indigo-700 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-black focus:outline-hidden focus:border-indigo-500 shadow-xs cursor-pointer"
                         >
-                          <option value="unassigned" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans font-medium text-xs">⚠️ Unassigned (Keep in Requesting)</option>
+                          <option value="unassigned" className="bg-white dark:bg-slate-900 text-slate-100 dark:text-slate-100 font-sans font-medium text-xs">⚠️ Unassigned (Keep in Requesting)</option>
                           {coordinators.map(c => (
-                            <option key={c.id} value={c.displayName || c.username} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans font-medium text-xs">
+                            <option key={c.id} value={c.displayName || c.username} className="bg-white dark:bg-slate-900 text-slate-100 dark:text-slate-100 font-sans font-medium text-xs">
                               👤 {c.displayName || c.username} ({c.role === 'admin' ? 'Admin' : 'Coordinator'})
                             </option>
                           ))}
@@ -1485,9 +1485,9 @@ export default function MessagingCenter({
                       </div>
 
                       {/* AiSensy TAGS SECTION (Reference Image 3 & 4 Parity) */}
-                      <div className="p-3.5 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2.5">
+                      <div className="p-3.5 bg-slate-800 dark:bg-slate-950 border border-slate-750 dark:border-slate-800 rounded-xl space-y-2.5">
                         <div className="flex items-center justify-between">
-                          <label className="text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase flex items-center gap-1.5">
+                          <label className="text-[11px] font-black text-slate-100 dark:text-slate-200 uppercase flex items-center gap-1.5">
                             <Tag className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                             <span>Tags (AiSensy Hub)</span>
                           </label>
@@ -1498,17 +1498,17 @@ export default function MessagingCenter({
 
                         {/* Active Tag Chips (Pills like in Image 3: [JAPAN ×], [Sales ×], [QATAR ×]) */}
                         {leadFormData.tags.length > 0 ? (
-                          <div className="flex flex-wrap gap-1.5 p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg min-h-[36px] items-center">
+                          <div className="flex flex-wrap gap-1.5 p-2 bg-white dark:bg-slate-900 border border-slate-750 dark:border-slate-800 rounded-lg min-h-[36px] items-center">
                             {leadFormData.tags.map((t) => (
                               <span
                                 key={t}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-950 shadow-2xs group"
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-850 text-slate-100 dark:bg-slate-200 dark:text-slate-950 border border-slate-750 dark:border-transparent shadow-2xs group"
                               >
                                 <span>{t}</span>
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveTag(t)}
-                                  className="text-slate-300 dark:text-slate-600 hover:text-white dark:hover:text-black font-black text-xs leading-none cursor-pointer"
+                                  className="text-slate-400 dark:text-slate-600 hover:text-slate-100 dark:hover:text-black font-black text-xs leading-none cursor-pointer"
                                   title={`Remove tag ${t}`}
                                 >
                                   ×
@@ -1534,7 +1534,7 @@ export default function MessagingCenter({
                                 }
                               }}
                               placeholder="Type custom tag or choose..."
-                              className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-medium focus:outline-hidden focus:border-emerald-500"
+                              className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-750 dark:border-slate-700 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-medium focus:outline-hidden focus:border-emerald-500"
                             />
                             <button
                               type="button"
@@ -1556,13 +1556,13 @@ export default function MessagingCenter({
                                 }
                               }}
                               defaultValue=""
-                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-700 dark:text-slate-300 font-medium focus:outline-hidden focus:border-emerald-500 cursor-pointer"
+                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-750 dark:border-slate-700 rounded-lg text-xs text-slate-100 dark:text-slate-300 font-medium focus:outline-hidden focus:border-emerald-500 cursor-pointer"
                             >
-                              <option value="" disabled>Select & add tag...</option>
+                              <option value="" disabled className="text-slate-400">Select & add tag...</option>
                               {tagsList
                                 .filter(t => !leadFormData.tags.includes(t))
                                 .map(t => (
-                                  <option key={t} value={t}>{t}</option>
+                                  <option key={t} value={t} className="bg-white dark:bg-slate-900 text-slate-100 dark:text-slate-100">{t}</option>
                                 ))}
                             </select>
                           </div>
@@ -1577,7 +1577,7 @@ export default function MessagingCenter({
                                   key={tag}
                                   type="button"
                                   onClick={() => handleAddTag(tag)}
-                                  className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-300 font-bold transition-all cursor-pointer"
+                                  className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 border border-slate-750 dark:border-slate-700 text-slate-100 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-300 font-bold transition-all cursor-pointer"
                                 >
                                   + {tag}
                                 </button>
@@ -1595,7 +1595,7 @@ export default function MessagingCenter({
                           rows={2}
                           value={leadFormData.adminRemarks}
                           onChange={(e) => setLeadFormData({ ...leadFormData, adminRemarks: e.target.value })}
-                          className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 font-medium focus:outline-hidden focus:border-emerald-500 resize-none shadow-xs"
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-medium focus:outline-hidden focus:border-emerald-500 resize-none shadow-xs"
                           placeholder="Candidate WhatsApp query details & qualifications..."
                         />
                       </div>
@@ -1631,7 +1631,7 @@ export default function MessagingCenter({
                 <MessageSquare className="h-8 w-8" />
               </div>
               <div className="space-y-1 max-w-sm">
-                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                <h3 className="text-base font-black text-slate-100 dark:text-white">
                   No Conversation Selected
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
@@ -1649,7 +1649,7 @@ export default function MessagingCenter({
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-indigo-500" />
-                <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase">
+                <h3 className="text-sm font-black text-slate-100 dark:text-white uppercase">
                   Simulate New Inbound Lead
                 </h3>
               </div>
@@ -1694,7 +1694,7 @@ export default function MessagingCenter({
                   onClick={() => handleSimulateInboundMessage(sim)}
                   className="p-3 bg-slate-50 dark:bg-slate-800/80 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border border-slate-200 dark:border-slate-700 hover:border-emerald-400 rounded-xl cursor-pointer transition-all space-y-1"
                 >
-                  <div className="flex items-center justify-between text-xs font-black text-slate-900 dark:text-white">
+                  <div className="flex items-center justify-between text-xs font-black text-slate-100 dark:text-white">
                     <span>{sim.name} ({sim.phone})</span>
                     <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded font-mono">
                       {sim.country} • {sim.trade}
@@ -1726,7 +1726,7 @@ export default function MessagingCenter({
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <MessageSquare className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                <h3 className="text-sm font-black text-slate-100 dark:text-white uppercase tracking-tight">
                   Start New WhatsApp Chat
                 </h3>
               </div>
@@ -1765,7 +1765,7 @@ export default function MessagingCenter({
                     placeholder="e.g. +919876543210"
                     value={startChatPhone}
                     onChange={(e) => setStartChatPhone(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
+                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-100 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
                   />
                 </div>
 
@@ -1779,7 +1779,7 @@ export default function MessagingCenter({
                     placeholder="e.g. Rajesh Kumar"
                     value={startChatName}
                     onChange={(e) => setStartChatName(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
+                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-100 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
                   />
                 </div>
 
@@ -1791,7 +1791,7 @@ export default function MessagingCenter({
                   <select
                     value={startChatCountry}
                     onChange={(e) => setStartChatCountry(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
+                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-100 dark:text-slate-100 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
                   >
                     {countries.map((c, idx) => (
                       <option key={idx} value={c}>{c}</option>
@@ -1807,7 +1807,7 @@ export default function MessagingCenter({
                   <select
                     value={startChatPosition}
                     onChange={(e) => setStartChatPosition(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
+                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-100 dark:text-slate-100 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
                   >
                     {positions.map((p, idx) => (
                       <option key={idx} value={p}>{p}</option>
@@ -1826,7 +1826,7 @@ export default function MessagingCenter({
                   placeholder="Type an introductory message to dispatch automatically..."
                   value={startChatInitialMessage}
                   onChange={(e) => setStartChatInitialMessage(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
+                  className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-100 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:border-emerald-500 transition-all font-sans"
                 />
               </div>
 

@@ -126,20 +126,20 @@
 }
 
 html.light, .light {
-  /* Warm Slate Ergonomic Light Mode */
-  --slate-950: #f1f5f9; /* Warm clean light canvas */
-  --slate-900: #ffffff; /* Crisp white card surface */
-  --slate-850: #f8fafc; /* Elevated light panel */
-  --slate-800: #f1f5f9; /* Light button / input fill */
-  --slate-750: #e2e8f0; /* Soft card border */
-  --slate-700: #cbd5e1; /* Clear divider border */
-  --slate-600: #64748b; /* Medium-muted text */
-  --slate-500: #475569; /* Balanced secondary text */
-  --slate-400: #334155; /* Readable dark-gray text */
-  --slate-300: #1e293b; /* Rich slate text */
-  --slate-200: #0f172a; /* Deep slate headings */
-  --slate-100: #0f172a; /* Primary black/slate text */
-  --slate-50: #f8fafc; /* Clean hover background */
+  /* Elegant Natural CRM Light Mode (Clean, Professional, Cool Slate) */
+  --slate-950: #f1f5f9; /* Crisp, neutral clean slate background canvas */
+  --slate-900: #ffffff; /* Pristine pure white card surface */
+  --slate-850: #f1f5f9; /* Soft cool secondary alabaster panel */
+  --slate-800: #f1f5f9; /* Clean cool gray button / input fill */
+  --slate-750: #e2e8f0; /* Clean, subtle border stroke (slate-200) */
+  --slate-700: #cbd5e1; /* Crisp light divider stroke (slate-300) */
+  --slate-600: #64748b; /* Readable muted slate-500 secondary text */
+  --slate-500: #475569; /* Clear slate-600 body copy supporting text */
+  --slate-400: #334155; /* Crisp dark slate-700 general body text */
+  --slate-300: #1e293b; /* Rich slate-800 headings and subheadings */
+  --slate-200: #0f172a; /* Deep bold slate-900 headers */
+  --slate-100: #0f172a; /* Primary crisp slate-900 text readability */
+  --slate-50: #fafbfd;  /* Clean hover background with very light blue tint */
 
   --accent-purple: #7c3aed;
   --accent-emerald: #059669;
@@ -179,7 +179,7 @@ html.light, .light {
   --update-bar-text: #0f172a;
 
   color-scheme: light;
-  background-color: #f1f5f9;
+  background-color: #f8fafc;
   color: #0f172a;
 }
 
@@ -193,8 +193,8 @@ body {
 }
 
 html.light body, .light body {
-  background-color: #f1f5f9;
-  color: #0f172a;
+  background-color: var(--slate-950);
+  color: var(--slate-100);
 }
 
 html.dark body, .dark body {

@@ -598,7 +598,7 @@ export default function LeadWhatsAppChat({
 
       const dateHeaderElement = showDateHeader ? (
         <div key={`date-header-${msg.id || index}`} className="flex justify-center my-4 w-full select-none">
-          <span className="bg-slate-200/90 dark:bg-slate-850/90 text-slate-600 dark:text-slate-300 px-3.5 py-1 rounded-full text-[10px] font-black tracking-wide uppercase border border-slate-300/40 dark:border-slate-700/40 shadow-xs">
+          <span className="bg-slate-800/90 dark:bg-slate-850/90 text-slate-400 dark:text-slate-300 px-3.5 py-1 rounded-full text-[10px] font-black tracking-wide uppercase border border-slate-750 dark:border-slate-700/40 shadow-xs">
             {dateString}
           </span>
         </div>
@@ -610,7 +610,7 @@ export default function LeadWhatsAppChat({
 
           {isSystem ? (
             <div className="flex justify-center my-1.5 w-full">
-              <div className="bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-3 py-1 rounded-lg text-[10.5px] font-bold font-mono text-center max-w-[70%] border border-slate-300 dark:border-slate-700">
+              <div className="bg-slate-800 dark:bg-slate-800 text-slate-400 dark:text-slate-300 px-3 py-1 rounded-lg text-[10.5px] font-bold font-mono text-center max-w-[70%] border border-slate-750 dark:border-slate-700">
                 ℹ️ {msg.text}
               </div>
             </div>
@@ -637,10 +637,10 @@ export default function LeadWhatsAppChat({
 
                 {/* Message Bubble - Compact, readable & neat width */}
                 <div
-                  className={`max-w-[85%] sm:max-w-[420px] w-fit rounded-xl py-1 px-2.5 text-[11.5px] leading-snug shadow-3xs relative transition-all border ${
+                  className={`max-w-[85%] sm:max-w-[420px] w-fit rounded-xl py-1 px-2.5 text-[13px] leading-snug shadow-3xs relative transition-all border ${
                     isUser
-                      ? 'bg-emerald-100/90 dark:bg-emerald-950/80 border-emerald-300/60 dark:border-emerald-850/60 text-slate-950 dark:text-emerald-50 rounded-tr-xs'
-                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 rounded-tl-xs'
+                      ? 'bg-emerald-100/90 dark:bg-emerald-950/80 border-emerald-300/60 dark:border-emerald-850/60 text-slate-100 dark:text-emerald-50 rounded-tr-xs'
+                      : 'bg-white dark:bg-slate-900 border-slate-750 dark:border-slate-800 text-slate-100 dark:text-slate-100 rounded-tl-xs'
                   }`}
                 >
                   {/* Template tag if sent from template */}
@@ -683,7 +683,7 @@ export default function LeadWhatsAppChat({
                         <FileText className="h-5 w-5" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[11px] font-extrabold text-slate-900 dark:text-white truncate">
+                        <p className="text-[11px] font-extrabold text-slate-100 dark:text-white truncate">
                           {msg.fileName || 'Attachment Document'}
                         </p>
                         <p className="text-[9.5px] text-slate-500 dark:text-slate-400 font-mono">
@@ -705,7 +705,7 @@ export default function LeadWhatsAppChat({
 
                   {/* Body Text */}
                   {msg.text && msg.text !== 'Sent an image' && msg.text !== 'Sent a PDF document' && msg.text !== 'Sent a document' && (
-                    <p className="whitespace-pre-wrap leading-snug font-sans font-medium select-text break-words">
+                    <p className="whitespace-pre-wrap leading-normal font-sans font-semibold text-[13px] sm:text-[13.5px] select-text break-words tracking-wide">
                       {msg.text}
                     </p>
                   )}
@@ -787,7 +787,7 @@ export default function LeadWhatsAppChat({
               <div className="h-12 w-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-2xs">
                 <MessageSquare className="h-6 w-6" />
               </div>
-              <h5 className="text-sm font-black text-slate-900 dark:text-white">Start WhatsApp Conversation</h5>
+              <h5 className="text-sm font-black text-slate-100 dark:text-white">Start WhatsApp Conversation</h5>
               <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
                 No WhatsApp messages sent yet to <strong>{lead.name || 'Candidate'}</strong> ({lead.phone}). Choose a recruitment template below or write a custom message.
               </p>
@@ -821,7 +821,7 @@ export default function LeadWhatsAppChat({
             <div className="p-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                <h5 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                <h5 className="text-xs font-black text-slate-100 dark:text-white uppercase tracking-wider">
                   WhatsApp Recruitment Templates
                 </h5>
               </div>
@@ -854,7 +854,7 @@ export default function LeadWhatsAppChat({
                     className={`text-[10px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer border ${
                       selectedCategory === cat.id
                         ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100'
+                        : 'bg-slate-800 dark:bg-slate-900 text-slate-100 dark:text-slate-300 border-slate-750 dark:border-slate-800 hover:bg-slate-750'
                     }`}
                   >
                     {cat.label}
@@ -869,11 +869,11 @@ export default function LeadWhatsAppChat({
                   return (
                     <div
                       key={tpl.id}
-                      className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-emerald-400 dark:hover:border-emerald-600 transition-all text-xs flex flex-col justify-between space-y-2 group shadow-3xs"
+                      className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-750 dark:border-slate-800 hover:border-emerald-400 dark:hover:border-emerald-600 transition-all text-xs flex flex-col justify-between space-y-2 group shadow-3xs"
                     >
                       <div>
                         <div className="flex items-center justify-between gap-1 mb-1">
-                          <span className="font-extrabold text-slate-900 dark:text-white text-xs">{tpl.title}</span>
+                          <span className="font-extrabold text-slate-100 dark:text-white text-xs">{tpl.title}</span>
                           <span className="text-[9px] font-bold uppercase text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
                             {tpl.category}
                           </span>
@@ -883,11 +883,11 @@ export default function LeadWhatsAppChat({
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-1.5 pt-1 border-t border-slate-200 dark:border-slate-800/60">
+                      <div className="flex items-center gap-1.5 pt-1 border-t border-slate-750 dark:border-slate-800/60">
                         <button
                           type="button"
                           onClick={() => handleSelectTemplate(tpl, false)}
-                          className="flex-1 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-lg text-[10.5px] border border-slate-200 dark:border-slate-700 transition-all cursor-pointer text-center"
+                          className="flex-1 py-1.5 bg-slate-800 dark:bg-slate-800 hover:bg-slate-750 dark:hover:bg-slate-700 text-slate-100 dark:text-slate-200 font-bold rounded-lg text-[10.5px] border border-slate-750 dark:border-slate-700 transition-all cursor-pointer text-center"
                         >
                           Insert to Input
                         </button>
@@ -919,7 +919,7 @@ export default function LeadWhatsAppChat({
             <div className="p-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Zap className="h-4 w-4 text-amber-600 dark:text-amber-400 fill-current animate-pulse" />
-                <h5 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                <h5 className="text-xs font-black text-slate-100 dark:text-white uppercase tracking-wider">
                   ⚡ Quick Reply Messages
                 </h5>
               </div>
@@ -955,7 +955,7 @@ export default function LeadWhatsAppChat({
                       placeholder="e.g. welcome"
                       value={newQuickReply.id}
                       onChange={e => setNewQuickReply(p => ({ ...p, id: e.target.value.toLowerCase().replace(/\s+/g, '_') }))}
-                      className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-900 dark:text-slate-100"
+                      className="w-full text-xs p-2 rounded-lg border border-slate-750 bg-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100"
                     />
                   </div>
                   <div>
@@ -968,7 +968,7 @@ export default function LeadWhatsAppChat({
                       placeholder="e.g. Greeting Welcome"
                       value={newQuickReply.title}
                       onChange={e => setNewQuickReply(p => ({ ...p, title: e.target.value }))}
-                      className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-900 dark:text-slate-100"
+                      className="w-full text-xs p-2 rounded-lg border border-slate-750 bg-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100"
                     />
                   </div>
                 </div>
@@ -982,7 +982,7 @@ export default function LeadWhatsAppChat({
                     placeholder="Brief description about when to use this quick reply"
                     value={newQuickReply.description}
                     onChange={e => setNewQuickReply(p => ({ ...p, description: e.target.value }))}
-                    className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-900 dark:text-slate-100"
+                    className="w-full text-xs p-2 rounded-lg border border-slate-750 bg-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100"
                   />
                 </div>
 
@@ -996,7 +996,7 @@ export default function LeadWhatsAppChat({
                     placeholder="Enter quick reply text here... Use variables to auto-fill candidate or coordinator data."
                     value={newQuickReply.text}
                     onChange={e => setNewQuickReply(p => ({ ...p, text: e.target.value }))}
-                    className="w-full text-xs p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-amber-500 font-sans text-slate-900 dark:text-slate-100"
+                    className="w-full text-xs p-2.5 rounded-lg border border-slate-750 bg-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500 font-sans text-slate-100"
                   />
                 </div>
 
@@ -1004,7 +1004,7 @@ export default function LeadWhatsAppChat({
                   <button
                     type="button"
                     onClick={() => setShowCreateQuickReply(false)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 dark:bg-slate-800 text-slate-100 dark:text-slate-200 text-xs font-bold cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -1023,11 +1023,11 @@ export default function LeadWhatsAppChat({
                   return (
                     <div
                       key={tpl.id}
-                      className="p-3 bg-amber-50/10 dark:bg-amber-950/10 rounded-xl border border-amber-200/40 dark:border-amber-900/30 hover:border-amber-400 dark:hover:border-amber-600 transition-all text-xs flex flex-col justify-between space-y-2 group shadow-3xs"
+                      className="p-3 bg-amber-50/10 dark:bg-amber-950/10 rounded-xl border border-amber-400/40 dark:border-amber-900/30 hover:border-amber-400 dark:hover:border-amber-600 transition-all text-xs flex flex-col justify-between space-y-2 group shadow-3xs"
                     >
                       <div>
                         <div className="flex items-center justify-between gap-1 mb-1">
-                          <span className="font-extrabold text-slate-900 dark:text-white text-xs flex items-center gap-1">
+                          <span className="font-extrabold text-slate-100 dark:text-white text-xs flex items-center gap-1">
                             <Zap className="h-3 w-3 text-amber-500 fill-current" />
                             {tpl.title}
                           </span>
@@ -1040,14 +1040,14 @@ export default function LeadWhatsAppChat({
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-1.5 pt-1 border-t border-slate-200 dark:border-slate-800/60">
+                      <div className="flex items-center gap-1.5 pt-1 border-t border-slate-750 dark:border-slate-800/60">
                         <button
                           type="button"
                           onClick={() => {
                             setInputText(preview);
                             setShowQuickReplies(false);
                           }}
-                          className="flex-1 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-lg text-[10.5px] border border-slate-200 dark:border-slate-700 transition-all cursor-pointer text-center"
+                          className="flex-1 py-1.5 bg-slate-800 dark:bg-slate-800 hover:bg-slate-750 dark:hover:bg-slate-700 text-slate-100 dark:text-slate-200 font-bold rounded-lg text-[10.5px] border border-slate-750 dark:border-slate-700 transition-all cursor-pointer text-center"
                         >
                           Insert to Input
                         </button>
@@ -1203,7 +1203,7 @@ export default function LeadWhatsAppChat({
               }
             }}
             placeholder={`Type a WhatsApp message to ${lead.name || 'Candidate'} (${lead.phone})...`}
-            className="flex-1 text-xs sm:text-[13px] p-2.5 px-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-medium resize-none leading-relaxed transition-all"
+            className="flex-1 text-xs sm:text-[13px] p-2.5 px-3 rounded-xl bg-slate-800 border border-slate-750 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-slate-100 placeholder-slate-600 font-medium resize-none leading-relaxed transition-all"
           />
 
           {/* Emoji Trigger Button */}
@@ -1213,7 +1213,7 @@ export default function LeadWhatsAppChat({
             className={`p-3 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 border h-[42px] w-[42px] ${
               showEmojiPicker
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
-                : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                : 'bg-slate-800 hover:bg-slate-850 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-100 dark:text-slate-300 border-slate-750 dark:border-slate-700'
             }`}
             title="Emoji Keyboard"
           >
@@ -1225,7 +1225,7 @@ export default function LeadWhatsAppChat({
             type="button"
             onClick={handleFileUploadClick}
             disabled={uploading || sending}
-            className="p-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 border border-slate-200 dark:border-slate-700 h-[42px] w-[42px]"
+            className="p-3 bg-slate-800 hover:bg-slate-850 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-100 dark:text-slate-300 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 border border-slate-750 dark:border-slate-700 h-[42px] w-[42px]"
             title="Attach Image, PDF, or Document"
           >
             {uploading ? (

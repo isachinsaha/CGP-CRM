@@ -138,6 +138,7 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        selectedLeadRef.current = null;
         setSelectedLead(null);
         setIsCreateModalOpen(false);
         setIsCoordManagerOpen(false);
@@ -461,7 +462,10 @@ export default function App() {
     try {
       const res = await fetch(`/api/leads/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        if (selectedLead && selectedLead.id === id) setSelectedLead(null);
+        if (selectedLead && selectedLead.id === id) {
+          selectedLeadRef.current = null;
+          setSelectedLead(null);
+        }
         pullCrmData(true);
       }
     } catch (err) {
@@ -536,7 +540,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-full flex flex-col bg-slate-100 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 antialiased overflow-hidden selection:bg-indigo-600 selection:text-white" id="cgp-root-viewport">
+    <div className="h-screen w-full flex flex-col bg-slate-950 font-sans text-slate-100 dark:text-slate-100 antialiased overflow-hidden selection:bg-indigo-600 selection:text-white" id="cgp-root-viewport">
       
       {/* Dynamic Slide-in Success Welcome Toast */}
       {toastMessage && (
@@ -612,7 +616,7 @@ export default function App() {
                 </div>
                 <div className="text-left min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <h1 className="font-black text-slate-900 dark:text-slate-100 text-sm tracking-wider uppercase font-display leading-tight truncate">
+                    <h1 className="font-black text-slate-100 dark:text-slate-100 text-sm tracking-wider uppercase font-display leading-tight truncate">
                       CAREER GROWTH PLACEMENT
                     </h1>
                     <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="System Operational" />
@@ -742,7 +746,7 @@ export default function App() {
                       {currentUser?.displayName?.charAt(0).toUpperCase() || 'M'}
                     </div>
                     <div className="text-left hidden xl:block">
-                      <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate leading-tight max-w-[120px]">
+                      <p className="text-xs font-bold text-slate-100 dark:text-slate-100 truncate leading-tight max-w-[120px]">
                         {currentUser?.displayName}
                       </p>
                       <p className="text-[9px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider font-mono">
@@ -766,8 +770,8 @@ export default function App() {
             </header>
 
             {/* ROW 2: SEPARATE DEDICATED NAVIGATION MENU BAR WITH BREATHING SPACE AND INCREASED HEIGHT */}
-            <div className="px-3 sm:px-5 pt-2 pb-2.5 bg-slate-100/60 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800">
-              <nav className="bg-slate-950 text-white rounded-2xl px-3.5 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3 overflow-x-auto no-scrollbar shadow-md border border-slate-800/80">
+            <div className="px-3 sm:px-5 pt-2 pb-2.5 bg-slate-950/60 border-b border-slate-200 dark:border-slate-800">
+              <nav className="bg-slate-950 text-slate-100 rounded-2xl px-3.5 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3 overflow-x-auto no-scrollbar shadow-md border border-slate-800/80">
                 
                 {/* Left Navigation Buttons */}
                 <div className="flex items-center gap-3 sm:gap-4.5 shrink-0">
@@ -781,21 +785,21 @@ export default function App() {
                         className={`group px-3.5 sm:px-4.5 py-2.5 rounded-xl text-[13px] md:text-[14px] font-extrabold md:font-black flex items-center gap-2.5 transition-all cursor-pointer shrink-0 ${
                           isSelected
                             ? 'bg-indigo-600 text-white shadow-sm font-black'
-                            : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
                         }`}
                       >
-                        <Icon className={`h-4 w-4 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
+                        <Icon className={`h-4 w-4 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`} />
                         <span className="whitespace-nowrap">{tab.label}</span>
                         {tab.requestingBadge !== undefined && tab.requestingBadge > 0 && (
                           <span className={`text-[9.5px] font-mono font-black px-1.5 py-0.2 rounded-full ${
-                            isSelected ? 'bg-amber-400 text-slate-950' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
+                            isSelected ? 'bg-amber-400 text-slate-950' : 'bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse'
                           }`} title={`${tab.requestingBadge} requesting chats`}>
                             {tab.requestingBadge}
                           </span>
                         )}
                         {tab.badge !== undefined && tab.badge > 0 && (
                           <span className={`text-[9.5px] font-mono font-black px-1.5 py-0.2 rounded-full ${
-                            isSelected ? 'bg-white text-indigo-700' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                            isSelected ? 'bg-white text-indigo-700' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                           }`}>
                             {tab.badge}
                           </span>
@@ -952,7 +956,7 @@ export default function App() {
 
       {/* 2. MANUALLY ENROLL CANDIDATE MODAL DIALOG (Admin Power option) */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4 text-left">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 text-left">
           <div className="bg-slate-850 rounded-3xl shadow-2xl border border-slate-750 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-slate-100">
             
             {/* Header */}
@@ -1418,7 +1422,10 @@ export default function App() {
       {selectedLead && (
         <LeadModal
           lead={selectedLead}
-          onClose={() => setSelectedLead(null)}
+          onClose={() => {
+            selectedLeadRef.current = null;
+            setSelectedLead(null);
+          }}
           onLeadUpdated={() => pullCrmData(true)}
           userRole={userRole}
           currentAgentId={currentAgentId}

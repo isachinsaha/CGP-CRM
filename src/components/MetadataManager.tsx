@@ -39,7 +39,7 @@ export default function MetadataManager({
 
   if (userRole !== 'admin') {
     return (
-      <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
         <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-sm text-center">
           <Lock className="h-10 w-10 text-red-500 mx-auto mb-3" />
           <h3 className="text-base font-bold text-slate-100">Access Denied</h3>
@@ -125,7 +125,7 @@ export default function MetadataManager({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 select-none">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4 select-none">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col h-[580px] text-left">
         
         {/* Header */}

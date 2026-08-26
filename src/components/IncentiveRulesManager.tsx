@@ -61,7 +61,7 @@ export default function IncentiveRulesManager({
 
   if (userRole !== 'admin') {
     return (
-      <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
         <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-sm text-center">
           <Lock className="h-10 w-10 text-red-500 mx-auto mb-3" />
           <h3 className="text-base font-bold text-slate-100">Access Denied</h3>
@@ -167,7 +167,7 @@ export default function IncentiveRulesManager({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 text-left">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 text-left">
       <div className="bg-slate-850 rounded-3xl shadow-2xl border border-slate-750 w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-slate-100">
         
         {/* Header */}

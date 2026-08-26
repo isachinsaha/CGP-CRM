@@ -546,25 +546,25 @@ export default function LeadModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.2 }}
-      className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 text-left" 
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 text-left" 
       id="cgp-leads-modal"
     >
       <motion.div 
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 380, damping: 26 }}
-        className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-[1560px] h-[95vh] flex flex-col overflow-hidden text-slate-900 dark:text-slate-100 text-sm"
+        className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-[1560px] h-[95vh] flex flex-col overflow-hidden text-slate-100 dark:text-slate-100 text-sm"
       >
         
         {/* Header ribbon */}
-        <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row gap-3 justify-between lg:items-center shrink-0 shadow-2xs">
+        <div className="bg-white dark:bg-slate-900 text-slate-100 dark:text-slate-100 px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row gap-3 justify-between lg:items-center shrink-0 shadow-2xs">
           <div className="flex items-center gap-3">
             <div className="p-2 border border-slate-200 dark:border-slate-700 rounded-full text-slate-700 dark:text-slate-300 shrink-0">
               <Info className="h-5 w-5" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-black text-slate-900 dark:text-white text-xl tracking-tight uppercase">{formatCandidateName(lead.name)}</h3>
+                <h3 className="font-black text-slate-100 dark:text-white text-xl tracking-tight uppercase">{formatCandidateName(lead.name)}</h3>
                 <span className={`text-xs font-black px-3 py-0.5 rounded-full uppercase border ${getFitStyle(lead.fitScore)}`}>
                   {lead.fitScore} Fit
                 </span>
@@ -586,17 +586,17 @@ export default function LeadModal({
               </div>
               <div className="flex items-center flex-wrap gap-x-2.5 gap-y-1 text-xs sm:text-[13px] text-slate-600 dark:text-slate-300 font-mono mt-1">
                 <span className="flex items-center gap-1">
-                  Serial No: <strong className="text-slate-900 dark:text-white font-bold">{lead.serialNo || 'Pending'}</strong> 
+                  Serial No: <strong className="text-slate-100 dark:text-white font-bold">{lead.serialNo || 'Pending'}</strong> 
                 </span>
                 <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
                 <span className="flex items-center gap-1">
-                  Phone: <strong className="text-slate-900 dark:text-white font-bold">{lead.phone}</strong> 
+                  Phone: <strong className="text-slate-100 dark:text-white font-bold">{lead.phone}</strong> 
                 </span>
                 {lead.alternateNo && (
                   <>
                     <span className="text-slate-300 dark:text-slate-700 select-none">•</span>
                     <span className="flex items-center gap-1">
-                      Alt: <strong className="text-slate-900 dark:text-white font-bold">{lead.alternateNo}</strong>
+                      Alt: <strong className="text-slate-100 dark:text-white font-bold">{lead.alternateNo}</strong>
                     </span>
                   </>
                 )}
@@ -668,9 +668,9 @@ export default function LeadModal({
                 value={formFields.stage === 'negotiating' ? 'in_discussion' : formFields.stage === 'proposal' ? 'office_visited' : formFields.stage === 'rotations' ? 'cold_leads' : formFields.stage}
                 name="stage"
                 onChange={handleFieldChange}
-                className="text-xs sm:text-[13px] font-extrabold bg-transparent text-slate-900 dark:text-slate-100 px-1 py-0.5 focus:outline-none cursor-pointer max-w-[160px] font-sans"
+                className="text-xs sm:text-[13px] font-extrabold bg-transparent text-slate-100 dark:text-slate-100 px-1 py-0.5 focus:outline-none cursor-pointer max-w-[160px] font-sans"
               >
-                <option value="new" className="font-extrabold bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">1. NEW INBOUND</option>
+                <option value="new" className="font-extrabold bg-white dark:bg-slate-900 text-slate-100 dark:text-slate-100">1. NEW INBOUND</option>
                 <option value="in_discussion" className="font-extrabold bg-white dark:bg-slate-900 text-amber-600">2. IN DISCUSSION</option>
                 <option value="strong_opportunity" className="font-extrabold bg-white dark:bg-slate-900 text-sky-600">3. STRONG OPPORTUNITY</option>
                 <option value="office_visited" className="font-extrabold bg-white dark:bg-slate-900 text-purple-600">4. OFFICE VISITED / INTERVIEW</option>
@@ -751,7 +751,7 @@ export default function LeadModal({
 
             <button
               onClick={onClose}
-              className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg transition-all cursor-pointer"
+              className="p-1.5 hover:bg-slate-800 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg transition-all cursor-pointer"
             >
               <X className="h-6 w-6" />
             </button>
@@ -843,8 +843,8 @@ export default function LeadModal({
                       {/* Extracted Target Details */}
                       <div className="grid grid-cols-2 gap-3 bg-white dark:bg-slate-900/80 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-3xs">
                         <div>
-                          <span className="text-slate-700 dark:text-slate-400 font-bold block text-[11px]">Extracted Target Country:</span>
-                          <span className="text-slate-900 dark:text-slate-100 font-extrabold flex items-center gap-1.5 mt-0.5 text-xs">
+                          <span className="text-slate-500 dark:text-slate-400 font-bold block text-[11px]">Extracted Target Country:</span>
+                          <span className="text-slate-100 dark:text-slate-100 font-extrabold flex items-center gap-1.5 mt-0.5 text-xs">
                             {lead.country && getCountryFlagUrl(lead.country) ? (
                               <img 
                                 src={getCountryFlagUrl(lead.country)} 
@@ -859,8 +859,8 @@ export default function LeadModal({
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-700 dark:text-slate-400 font-bold block text-[11px]">Placement Target Position:</span>
-                          <span className="text-slate-900 dark:text-slate-100 font-extrabold block mt-0.5 text-xs">
+                          <span className="text-slate-500 dark:text-slate-400 font-bold block text-[11px]">Placement Target Position:</span>
+                          <span className="text-slate-100 dark:text-slate-100 font-extrabold block mt-0.5 text-xs">
                             💼 {lead.position || 'General Openings'}
                           </span>
                         </div>
@@ -873,37 +873,37 @@ export default function LeadModal({
                         </span>
                         <div className="bg-white dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden shadow-xs">
                           <div className="flex items-center justify-between px-3.5 py-2.5 gap-3">
-                            <span className="text-slate-800 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
+                            <span className="text-slate-500 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
                               <span>⏱️</span> Experience
                             </span>
-                            <span className="text-slate-900 dark:text-slate-100 font-extrabold text-xs text-right break-words">
+                            <span className="text-slate-100 dark:text-slate-100 font-extrabold text-xs text-right break-words">
                               {getEffectiveExperience(lead)}
                             </span>
                           </div>
 
                           <div className="flex items-center justify-between px-3.5 py-2.5 gap-3">
-                            <span className="text-slate-800 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
+                            <span className="text-slate-500 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
                               <span>🎓</span> Qualification
                             </span>
-                            <span className="text-slate-900 dark:text-slate-100 font-extrabold text-xs text-right break-words">
+                            <span className="text-slate-100 dark:text-slate-100 font-extrabold text-xs text-right break-words">
                               {lead.qualification || 'Not Specified'}
                             </span>
                           </div>
 
                           <div className="flex items-center justify-between px-3.5 py-2.5 gap-3">
-                            <span className="text-slate-800 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
+                            <span className="text-slate-500 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
                               <span>🎂</span> Age
                             </span>
-                            <span className="text-slate-900 dark:text-slate-100 font-extrabold text-xs text-right break-words">
+                            <span className="text-slate-100 dark:text-slate-100 font-extrabold text-xs text-right break-words">
                               {lead.age ? `${lead.age} Yrs` : 'Not Specified'}
                             </span>
                           </div>
 
                           <div className="flex items-center justify-between px-3.5 py-2.5 gap-3">
-                            <span className="text-slate-800 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
+                            <span className="text-slate-500 dark:text-slate-400 font-extrabold text-[11px] shrink-0 flex items-center gap-2">
                               <span>📍</span> Origin / State
                             </span>
-                            <span className="text-slate-900 dark:text-slate-100 font-extrabold text-xs text-right break-words">
+                            <span className="text-slate-100 dark:text-slate-100 font-extrabold text-xs text-right break-words">
                               {lead.origin || 'Not Specified'}
                             </span>
                           </div>
@@ -914,32 +914,32 @@ export default function LeadModal({
 
                   {/* Live Telecaller Remarks (Primary) */}
                   <div className="bg-white dark:bg-slate-900/60 p-4.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-xs">
-                    <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-2 flex items-center justify-between">
+                    <h4 className="text-xs font-black text-slate-100 dark:text-slate-300 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-2 flex items-center justify-between">
                       <span>Live Telecaller Remarks</span>
                     </h4>
 
                     <div className="space-y-3 text-xs">
                       <div className="grid grid-cols-1 gap-3">
                         <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 text-left focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/10 transition-all">
-                          <span className="text-[10px] font-black text-slate-900 dark:text-slate-200 block uppercase tracking-wider">Remarks 1 (First Contact Outcome)</span>
+                          <span className="text-[10px] font-black text-slate-500 dark:text-slate-200 block uppercase tracking-wider">Remarks 1 (First Contact Outcome)</span>
                           <textarea
                             rows={2}
                             name="remarks1"
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks1 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-600 dark:placeholder-slate-400 font-mono italic mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-extrabold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-100 dark:text-slate-100 placeholder-slate-600 dark:placeholder-slate-400 font-mono italic mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-extrabold text-xs"
                           />
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 text-left focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/10 transition-all">
-                          <span className="text-[10px] font-black text-slate-900 dark:text-slate-200 block uppercase tracking-wider">Remarks 2 (Follow-up Call Comments)</span>
+                          <span className="text-[10px] font-black text-slate-500 dark:text-slate-200 block uppercase tracking-wider">Remarks 2 (Follow-up Call Comments)</span>
                           <textarea
                             rows={2}
                             name="remarks2"
                             placeholder="— No remarks logged yet."
                             value={formFields.remarks2 || ''}
                             onChange={handleFieldChange}
-                            className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-slate-100 placeholder-slate-600 dark:placeholder-slate-400 font-mono italic mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-extrabold text-xs"
+                            className="w-full bg-transparent border-none p-0 text-slate-100 dark:text-slate-100 placeholder-slate-600 dark:placeholder-slate-400 font-mono italic mt-1 leading-relaxed focus:outline-none focus:ring-0 resize-none font-extrabold text-xs"
                           />
                         </div>
                         <div className="p-3.5 bg-amber-100/90 dark:bg-amber-950/40 rounded-xl border-2 border-amber-400 dark:border-amber-700 text-left focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/20 transition-all shadow-2xs">
@@ -979,8 +979,8 @@ export default function LeadModal({
 
                   {/* Interactive Candidate Document Checklist - Verification Desk Clickable and Light-Mode Adaptive */}
                   <div className="bg-white dark:bg-slate-900/40 p-4.5 rounded-xl border border-slate-200 dark:border-slate-750 text-left shadow-xs">
-                    <h4 className="text-xs font-black text-slate-900 dark:text-slate-200 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-2 mb-3 flex items-center justify-between">
-                      <span className="text-slate-900 dark:text-slate-200 font-extrabold flex items-center gap-1.5">Candidate Document Checklist</span>
+                    <h4 className="text-xs font-black text-slate-100 dark:text-slate-200 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-2 mb-3 flex items-center justify-between">
+                      <span className="text-slate-100 dark:text-slate-200 font-extrabold flex items-center gap-1.5">Candidate Document Checklist</span>
                       <span className="text-[10px] font-black text-white bg-indigo-600 dark:bg-indigo-700 px-3 py-1 rounded-lg uppercase font-mono tracking-wider shadow-2xs">
                         Verification Desk
                       </span>
@@ -1010,7 +1010,7 @@ export default function LeadModal({
                         <span className={`text-xs transition-all ${
                           formFields.docPassportCopy 
                             ? 'text-emerald-800 dark:text-emerald-300 font-extrabold' 
-                            : 'text-slate-800 dark:text-slate-300 font-bold'
+                            : 'text-slate-100 dark:text-slate-300 font-bold'
                         }`}>
                           Passport Copy
                         </span>
@@ -1039,7 +1039,7 @@ export default function LeadModal({
                         <span className={`text-xs transition-all ${
                           formFields.docResume 
                             ? 'text-emerald-800 dark:text-emerald-300 font-extrabold' 
-                            : 'text-slate-800 dark:text-slate-300 font-bold'
+                            : 'text-slate-100 dark:text-slate-300 font-bold'
                         }`}>
                           Resume / CV
                         </span>
@@ -1068,7 +1068,7 @@ export default function LeadModal({
                         <span className={`text-xs transition-all ${
                           formFields.docOfficeVisited 
                             ? 'text-emerald-800 dark:text-emerald-300 font-extrabold' 
-                            : 'text-slate-800 dark:text-slate-300 font-bold'
+                            : 'text-slate-100 dark:text-slate-300 font-bold'
                         }`}>
                           Office Visited
                         </span>
@@ -1097,7 +1097,7 @@ export default function LeadModal({
                         <span className={`text-xs transition-all ${
                           formFields.docOthers 
                             ? 'text-emerald-800 dark:text-emerald-300 font-extrabold' 
-                            : 'text-slate-800 dark:text-slate-300 font-bold'
+                            : 'text-slate-100 dark:text-slate-300 font-bold'
                         }`}>
                           Other Documents
                         </span>
@@ -1108,8 +1108,8 @@ export default function LeadModal({
                   {/* Manual Observations (Editable Notes) */}
                   <div className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200 dark:border-slate-800 text-left shadow-2xs">
                     <div className="flex justify-between items-center mb-2">
-                      <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 block uppercase tracking-wider">Manual General Notes</h4>
-                      <span className="text-[10px] text-slate-700 dark:text-slate-400 font-bold">Quick-save notes directly</span>
+                      <h4 className="text-xs font-black text-slate-100 dark:text-slate-300 block uppercase tracking-wider">Manual General Notes</h4>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-450 font-bold">Quick-save notes directly</span>
                     </div>
                     <textarea
                       placeholder="Type custom notes, documentation status, candidate preferences here..."
@@ -1118,7 +1118,7 @@ export default function LeadModal({
                         const val = e.target.value;
                         setFormFields(prev => ({ ...prev, notes: val }));
                       }}
-                      className="w-full text-xs p-3 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all font-bold font-sans min-h-[100px] text-slate-900 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-500"
+                      className="w-full text-xs p-3 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all font-bold font-sans min-h-[100px] text-slate-100 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-500"
                     />
                     <div className="flex justify-end mt-2">
                       <button
@@ -1174,38 +1174,38 @@ export default function LeadModal({
                   )}
 
                   {/* 1. SPREADSHEET INDICES */}
-                  <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1">1. Spreadsheet Ingestion Identifiers</h4>
+                  <h4 className="text-xs font-black text-slate-100 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1">1. Spreadsheet Ingestion Identifiers</h4>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Serial No</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Serial No</label>
                       <input
                         type="text"
                         name="serialNo"
                         disabled={isSubAgent}
                         value={formFields.serialNo}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-850 disabled:text-slate-500 font-semibold"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Entry Date</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Entry Date</label>
                       <input
                         type="text"
                         name="entryDate"
                         disabled={isSubAgent}
                         value={formFields.entryDate}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-850 disabled:text-slate-500 font-semibold"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Star Importance</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Star Importance</label>
                       <select
                         name="importance"
                         disabled={isSubAgent}
                         value={formFields.importance}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 cursor-pointer font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 disabled:text-slate-500 cursor-pointer font-semibold"
                       >
                         <option value="1">⭐ Star Low (1)</option>
                         <option value="2">⭐⭐ Star Fair (2)</option>
@@ -1217,44 +1217,44 @@ export default function LeadModal({
                   </div>
 
                   {/* 2. DEMOGRAPHICS */}
-                  <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1 pt-2">2. Candidate Information</h4>
+                  <h4 className="text-xs font-black text-slate-100 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1 pt-2">2. Candidate Information</h4>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Candidate Name</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Candidate Name</label>
                       <input
                         type="text"
                         name="name"
                         value={formFields.name}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 disabled:text-slate-500 font-semibold uppercase"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Candidate Mobile No</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Candidate Mobile No</label>
                       <input
                         type="text"
                         name="phone"
                         disabled={isSubAgent}
                         value={formFields.phone}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 disabled:text-slate-500 font-mono font-semibold"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Alternative No (Optional)</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Alternative No (Optional)</label>
                       <input
                         type="text"
                         name="alternateNo"
                         value={formFields.alternateNo}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 disabled:text-slate-500 font-mono font-semibold"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Gender</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Gender</label>
                       <SearchableSelect
                         value={formFields.gender}
                         onChange={(val) => setFormFields(prev => ({ ...prev, gender: val }))}
@@ -1265,38 +1265,38 @@ export default function LeadModal({
                           { value: 'F', label: '👩 F' },
                           { value: 'Not defined', label: '❓ NOT DEFINED' }
                         ]}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 font-semibold uppercase cursor-pointer"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 font-semibold uppercase cursor-pointer"
                         dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Age</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Age</label>
                       <input
                         type="number"
                         name="age"
                         value={formFields.age}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-mono font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 disabled:text-slate-500 font-mono font-semibold"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-400 mb-1">Origin / State</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Origin / State</label>
                       <input
                         type="text"
                         name="origin"
                         placeholder="e.g. DARJEELING"
                         value={formFields.origin}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 disabled:text-slate-500 font-semibold uppercase"
                       />
                     </div>
                   </div>
 
                   {/* 3. JOB SECTOR */}
-                  <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1 pt-2">3. Job Applied Profile</h4>
+                  <h4 className="text-xs font-black text-slate-100 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-750 pb-1 pt-2">3. Job Applied Profile</h4>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Target Country</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Target Country</label>
                       <SearchableSelect
                         value={formFields.country}
                         onChange={(val) => setFormFields(prev => ({ ...prev, country: val }))}
@@ -1307,12 +1307,12 @@ export default function LeadModal({
                             label: `✈️ ${c.toUpperCase()}`
                           }))
                         ]}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-slate-900 dark:text-slate-100 font-semibold uppercase cursor-pointer"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 text-slate-100 font-semibold uppercase cursor-pointer"
                         dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Coordinator</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Coordinator</label>
                       <SearchableSelect
                         value={formFields.assignedTo}
                         onChange={(val) => {
@@ -1337,12 +1337,12 @@ export default function LeadModal({
                             }))
                           ))
                         ]}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 text-emerald-800 dark:text-emerald-400 font-semibold cursor-pointer"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 text-emerald-800 dark:text-emerald-400 font-semibold cursor-pointer"
                         dropdownClassName="w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Assign Date</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Assign Date</label>
                       <input
                         type="text"
                         name="assignDate"
@@ -1350,14 +1350,14 @@ export default function LeadModal({
                         placeholder="yyyy-mm-dd"
                         value={formFields.assignDate}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-mono disabled:bg-slate-850 disabled:text-slate-500 font-semibold"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Target Position / Line</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Target Position / Line</label>
                       <SearchableSelect
                         value={formFields.position}
                         onChange={(val) => setFormFields(prev => ({ ...prev, position: val }))}
@@ -1368,38 +1368,38 @@ export default function LeadModal({
                             label: `💼 ${p.toUpperCase()}`
                           }))
                         ]}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-500 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 disabled:text-slate-500 font-semibold uppercase cursor-pointer"
                         dropdownClassName="w-60 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Experience Criteria</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Experience Criteria</label>
                       <input
                         type="text"
                         name="experience"
                         placeholder="e.g. FRESHER"
                         value={formFields.experience}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 disabled:text-slate-500 font-semibold"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Qualification</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Qualification</label>
                       <input
                         type="text"
                         name="qualification"
                         placeholder="e.g. 10th Pass, 12th, Graduate, ITI"
                         value={formFields.qualification || ''}
                         onChange={handleFieldChange}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 disabled:text-slate-500 font-semibold"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1">Lead Source</label>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Lead Source</label>
                       <SearchableSelect
                         value={formFields.source}
                         onChange={(val) => setFormFields(prev => ({ ...prev, source: val }))}
@@ -1412,14 +1412,14 @@ export default function LeadModal({
                           { value: 'Referral', label: '🤝 REFERRAL' },
                           { value: 'Other', label: '❓ OTHER' }
                         ]}
-                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
+                        className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-850 disabled:text-slate-500 font-semibold uppercase cursor-pointer"
                         dropdownClassName="w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                       />
                     </div>
 
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300">Hiring Project</label>
+                        <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300">Hiring Project</label>
                         <button
                           type="button"
                           onClick={() => setIsAddingProject(!isAddingProject)}
@@ -1435,7 +1435,7 @@ export default function LeadModal({
                             value={newProjectName}
                             onChange={(e) => setNewProjectName(e.target.value)}
                             placeholder="Project..."
-                            className="flex-1 text-xs sm:text-[13px] px-2 py-1 rounded border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-semibold"
+                            className="flex-1 text-xs sm:text-[13px] px-2 py-1 rounded border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white dark:bg-slate-900 text-slate-100 dark:text-slate-100 font-semibold"
                           />
                           <button
                             type="button"
@@ -1466,7 +1466,7 @@ export default function LeadModal({
                               label: `📁 ${proj.toUpperCase()}`
                             }))
                           ]}
-                          className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
+                          className="w-full text-xs sm:text-[13px] px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-100 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold uppercase cursor-pointer"
                           dropdownClassName="w-56 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                         />
                       )}
@@ -1474,11 +1474,11 @@ export default function LeadModal({
                   </div>
 
                   {/* 4. ADMIN PLACEMENT & NOTES */}
-                  <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-widest border-b border-slate-200 dark:border-slate-750 pb-1 pt-2">4. Admin Placement & Notes</h4>
+                  <h4 className="text-xs font-black text-slate-100 dark:text-slate-300 uppercase tracking-widest border-b border-slate-200 dark:border-slate-750 pb-1 pt-2">4. Admin Placement & Notes</h4>
                   <div className="space-y-3">
 
                     <div>
-                      <label className="block text-xs font-semibold text-rose-800 dark:text-rose-400 mb-1">Admin Placement instructions (Admins Only)</label>
+                      <label className="block text-xs font-semibold text-rose-700 dark:text-rose-400 mb-1">Admin Placement instructions (Admins Only)</label>
                       <textarea
                         name="adminRemarks"
                         placeholder="Admin instructions only..."
@@ -1486,13 +1486,13 @@ export default function LeadModal({
                         value={formFields.adminRemarks}
                         onChange={handleFieldChange}
                         rows={2}
-                        className="w-full text-xs sm:text-[13px] p-3 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-900 dark:text-rose-400 focus:ring-1 focus:ring-rose-500 focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
+                        className="w-full text-xs sm:text-[13px] p-3 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-700 dark:text-rose-400 focus:ring-1 focus:ring-rose-500 focus:outline-none disabled:bg-slate-100 dark:disabled:bg-slate-950 disabled:text-slate-600 dark:disabled:text-slate-400 font-semibold"
                       />
                     </div>
 
                     {/* Interactive tags creator section */}
                     <div className="pt-2 border-t border-slate-200 dark:border-slate-750">
-                      <label className="block text-xs font-semibold text-slate-800 dark:text-slate-300 mb-1 flex items-center gap-1.5 uppercase tracking-wider">
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1 flex items-center gap-1.5 uppercase tracking-wider">
                         <span>🏷️ Candidate Category Tags</span>
                         <span className="text-[10px] font-medium text-slate-600 dark:text-slate-400 capitalize">(Enter or click Add to save)</span>
                       </label>
@@ -1521,7 +1521,7 @@ export default function LeadModal({
                           value={tagInputVal}
                           onChange={(e) => setTagInputVal(e.target.value)}
                           placeholder="Add tag (e.g. Chef, Nurse, Waiter)..."
-                          className="flex-1 text-xs sm:text-[13px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-semibold transition-all"
+                          className="flex-1 text-xs sm:text-[13px] px-3 py-2 rounded-xl bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-semibold transition-all"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
@@ -1567,7 +1567,7 @@ export default function LeadModal({
                                   setTags([...tags, sTag]);
                                   setTagInputVal('');
                                 }}
-                                className="bg-white dark:bg-slate-900 hover:bg-indigo-600 text-slate-700 dark:text-slate-300 hover:text-white text-[10px] font-extrabold px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-indigo-600 transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
+                                className="bg-white dark:bg-slate-900 hover:bg-indigo-600 text-slate-100 dark:text-slate-200 hover:text-white text-[10px] font-extrabold px-2 py-1 rounded-lg border border-slate-750 dark:border-slate-700 hover:border-indigo-600 transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
                               >
                                 <Plus className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-400 hover:text-white" />
                                 <span>{sTag}</span>
@@ -1594,32 +1594,32 @@ export default function LeadModal({
               {activeLeftTab === 'tasks' && (
                 <div className="space-y-4 animate-in fade-in duration-200">
                   <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
-                    <h4 className="text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider mb-3 flex items-center gap-2">
+                    <h4 className="text-xs font-black text-slate-100 dark:text-slate-100 uppercase tracking-wider mb-3 flex items-center gap-2">
                       <ListTodo className="h-4 w-4 text-violet-600 dark:text-violet-400" /> Schedule Telecaller Action Item
                     </h4>
 
                     <form onSubmit={handleAddTask} className="space-y-3">
                       <div>
-                        <label className="block text-xs font-extrabold text-slate-900 dark:text-slate-300 uppercase tracking-wider">Action Description</label>
+                        <label className="block text-xs font-extrabold text-slate-100 dark:text-slate-300 uppercase tracking-wider">Action Description</label>
                         <input
                           type="text"
                           required
                           placeholder="e.g. Callback to request passport scan..."
                           value={newTaskTitle}
                           onChange={(e) => setNewTaskTitle(e.target.value)}
-                          className="w-full text-xs sm:text-[13px] px-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-violet-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all mt-1 font-bold"
+                          className="w-full text-xs sm:text-[13px] px-3 py-2 rounded-lg bg-slate-800 border border-slate-750 focus:outline-none focus:ring-1 focus:ring-violet-500 text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all mt-1 font-bold"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs font-extrabold text-slate-900 dark:text-slate-300 uppercase tracking-wider mb-1">Follow-up Due Date</label>
+                          <label className="block text-xs font-extrabold text-slate-100 dark:text-slate-300 uppercase tracking-wider mb-1">Follow-up Due Date</label>
                           <div className="relative">
                             <input
                               type="date"
                               required
                               value={newTaskDueDate}
                               onChange={(e) => setNewTaskDueDate(e.target.value)}
-                              className="w-full text-xs sm:text-[13px] pl-8 pr-3 py-2 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-violet-500 text-slate-900 dark:text-slate-100 font-bold cursor-pointer dark:[color-scheme:dark] [color-scheme:light]"
+                              className="w-full text-xs sm:text-[13px] pl-8 pr-3 py-2 rounded-lg bg-slate-800 border border-slate-750 focus:outline-none focus:ring-1 focus:ring-violet-500 text-slate-100 font-bold cursor-pointer dark:[color-scheme:dark] [color-scheme:light]"
                             />
                             <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-violet-600 dark:text-violet-400 pointer-events-none" />
                           </div>
@@ -1638,7 +1638,7 @@ export default function LeadModal({
                   </div>
 
                   <div className="space-y-2">
-                    <h4 className="text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-wider">Scheduled Tasks list</h4>
+                    <h4 className="text-xs font-black text-slate-100 dark:text-slate-300 uppercase tracking-wider">Scheduled Tasks list</h4>
                     
                     {lead.tasks && lead.tasks.length > 0 ? (
                       <div className="space-y-2">
@@ -1704,7 +1704,7 @@ export default function LeadModal({
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <History className="h-4.5 w-4.5 text-indigo-600 dark:text-indigo-400" />
-                        <h4 className="text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider">
+                        <h4 className="text-xs font-black text-slate-100 dark:text-slate-100 uppercase tracking-wider">
                           Activity Timeline & Audit Trail
                         </h4>
                       </div>
@@ -1733,7 +1733,7 @@ export default function LeadModal({
                         className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'all'
                             ? 'bg-indigo-700 text-white border-indigo-700 shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            : 'bg-slate-800 text-slate-100 border-slate-750 hover:bg-slate-750'
                         }`}
                       >
                         All ({timelineCounts.total})
@@ -1744,7 +1744,7 @@ export default function LeadModal({
                         className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'status'
                             ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            : 'bg-slate-800 text-slate-100 border-slate-750 hover:bg-slate-750'
                         }`}
                       >
                         📈 Stage ({timelineCounts.status})
@@ -1755,7 +1755,7 @@ export default function LeadModal({
                         className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'remark'
                             ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            : 'bg-slate-800 text-slate-100 border-slate-750 hover:bg-slate-750'
                         }`}
                       >
                         📞 Remarks ({timelineCounts.remark})
@@ -1766,7 +1766,7 @@ export default function LeadModal({
                         className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'assignment'
                             ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            : 'bg-slate-800 text-slate-100 border-slate-750 hover:bg-slate-750'
                         }`}
                       >
                         👤 Coord ({timelineCounts.assignment})
@@ -1777,7 +1777,7 @@ export default function LeadModal({
                         className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'task'
                             ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            : 'bg-slate-800 text-slate-100 border-slate-750 hover:bg-slate-750'
                         }`}
                       >
                         📝 Tasks ({timelineCounts.task})
@@ -1788,7 +1788,7 @@ export default function LeadModal({
                         className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
                           timelineFilter === 'message'
                             ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            : 'bg-slate-800 text-slate-100 border-slate-750 hover:bg-slate-750'
                         }`}
                       >
                         💬 Chat ({timelineCounts.message})
@@ -1803,7 +1803,7 @@ export default function LeadModal({
                         placeholder="Search timeline events..."
                         value={timelineSearch}
                         onChange={(e) => setTimelineSearch(e.target.value)}
-                        className="w-full text-xs pl-8.5 pr-7 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-semibold"
+                        className="w-full text-xs pl-8.5 pr-7 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-100 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-semibold"
                       />
                       {timelineSearch && (
                         <button
@@ -1933,7 +1933,7 @@ export default function LeadModal({
                                 </div>
                               </div>
 
-                              <p className="text-slate-800 dark:text-slate-200 leading-relaxed font-semibold font-sans whitespace-pre-wrap text-xs pt-0.5">
+                              <p className="text-slate-100 dark:text-slate-200 leading-relaxed font-semibold font-sans whitespace-pre-wrap text-xs pt-0.5">
                                 {event.text}
                               </p>
                             </div>

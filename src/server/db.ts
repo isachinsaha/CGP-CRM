@@ -4,7 +4,8 @@ import * as XLSX from 'xlsx';
 import { DEFAULT_WHATSAPP_TEMPLATES } from './whatsapp.ts';
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, 
+  getFirestore,
+  initializeFirestore, 
   collection, 
   getDocs, 
   getDoc,
@@ -266,7 +267,9 @@ async function verifyDatabaseAccess(): Promise<boolean> {
     )) {
       console.warn(`[Firestore Client] Custom database "${currentDbId}" unavailable. Falling back to "(default)".`);
       try {
-        db = getFirestore(firebaseApp, '(default)');
+        db = initializeFirestore(firebaseApp, {
+          experimentalForceLongPolling: true
+        }, '(default)');
         currentDbId = '(default)';
         const testRef = doc(db, 'metadata', 'test_connection');
         await runWithTimeout(getDoc(testRef), 10000);
@@ -382,7 +385,9 @@ function initFirestore() {
       };
       const app = initializeApp(firebaseConfig);
       firebaseApp = app;
-      db = getFirestore(app, config.firestoreDatabaseId || '(default)');
+      db = initializeFirestore(app, {
+        experimentalForceLongPolling: true
+      }, config.firestoreDatabaseId || '(default)');
       currentDbId = config.firestoreDatabaseId || '(default)';
       console.log(`[Firestore Client] Initialized Firestore client for project "${config.projectId}" (Database ID: "${currentDbId}")`);
     } else {

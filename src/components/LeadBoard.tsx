@@ -165,40 +165,40 @@ export default function LeadBoard({
 
     let level: 'green' | 'yellow' | 'orange' | 'red' = 'green';
     let rangeLabel = '0-25%';
-    let selectedClass = 'bg-emerald-950/25 dark:bg-emerald-950/80 border-2 border-emerald-500 text-slate-100 shadow-md ring-2 ring-emerald-500/20';
-    let unselectedClass = 'bg-emerald-950/20 border-emerald-800/60 hover:border-emerald-500 text-emerald-200 shadow-3xs';
-    let badgeColor = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black';
-    let iconColor = 'text-emerald-400';
-    let headerColor = 'text-emerald-300 bg-emerald-950/60 font-bold border border-emerald-800/50';
-    let textColor = 'text-emerald-400';
+    let selectedClass = 'bg-emerald-50 dark:bg-emerald-950/80 border-2 border-emerald-500 text-emerald-950 dark:text-slate-100 shadow-md ring-2 ring-emerald-500/20';
+    let unselectedClass = 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60 hover:border-emerald-500 text-emerald-900 dark:text-emerald-200 shadow-3xs';
+    let badgeColor = 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-400 border-emerald-300 dark:border-emerald-500/40 font-black';
+    let iconColor = 'text-emerald-600 dark:text-emerald-400';
+    let headerColor = 'text-emerald-900 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 font-bold border border-emerald-300 dark:border-emerald-800/50';
+    let textColor = 'text-emerald-700 dark:text-emerald-400';
 
     if (percentage >= 75) {
       level = 'red';
       rangeLabel = '>75%';
-      selectedClass = 'bg-rose-950/25 dark:bg-rose-950/80 border-2 border-rose-500 text-slate-100 shadow-md ring-2 ring-rose-500/20';
-      unselectedClass = 'bg-rose-950/20 border-rose-800/60 hover:border-rose-500 text-rose-200 shadow-3xs';
-      badgeColor = 'bg-rose-500/20 text-rose-400 border-rose-500/40 font-black';
-      iconColor = 'text-rose-400';
-      headerColor = 'text-rose-300 bg-rose-950/60 font-bold border border-rose-800/50';
-      textColor = 'text-rose-400';
+      selectedClass = 'bg-rose-50 dark:bg-rose-950/80 border-2 border-rose-500 text-rose-950 dark:text-slate-100 shadow-md ring-2 ring-rose-500/20';
+      unselectedClass = 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/60 hover:border-rose-500 text-rose-900 dark:text-rose-200 shadow-3xs';
+      badgeColor = 'bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-400 border-rose-300 dark:border-rose-500/40 font-black';
+      iconColor = 'text-rose-600 dark:text-rose-400';
+      headerColor = 'text-rose-900 dark:text-rose-300 bg-rose-100 dark:bg-rose-950/60 font-bold border border-rose-300 dark:border-rose-800/50';
+      textColor = 'text-rose-700 dark:text-rose-400';
     } else if (percentage >= 50) {
       level = 'orange';
       rangeLabel = '50-75%';
-      selectedClass = 'bg-orange-950/40 dark:bg-orange-950/85 border-2 border-orange-600 text-slate-100 shadow-md ring-2 ring-orange-600/30';
-      unselectedClass = 'bg-orange-950/30 border-orange-700/80 hover:border-orange-500 text-orange-200 shadow-3xs';
-      badgeColor = 'bg-orange-600/30 text-orange-300 border-orange-500/60 font-black';
-      iconColor = 'text-orange-500';
-      headerColor = 'text-orange-200 bg-orange-950/80 font-bold border border-orange-700/70';
-      textColor = 'text-orange-400';
+      selectedClass = 'bg-orange-50 dark:bg-orange-950/85 border-2 border-orange-600 text-orange-950 dark:text-slate-100 shadow-md ring-2 ring-orange-600/30';
+      unselectedClass = 'bg-orange-50/50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-700/80 hover:border-orange-500 text-orange-900 dark:text-orange-200 shadow-3xs';
+      badgeColor = 'bg-orange-100 dark:bg-orange-600/30 text-orange-800 dark:text-orange-350 border-orange-300 dark:border-orange-500/60 font-black';
+      iconColor = 'text-orange-600 dark:text-orange-500';
+      headerColor = 'text-orange-900 dark:text-orange-200 bg-orange-100 dark:bg-orange-950/80 font-bold border border-orange-300 dark:border-orange-700/70';
+      textColor = 'text-orange-700 dark:text-orange-400';
     } else if (percentage >= 25) {
       level = 'yellow';
       rangeLabel = '25-50%';
-      selectedClass = 'bg-yellow-950/35 dark:bg-yellow-950/85 border-2 border-yellow-400 text-yellow-100 shadow-md ring-2 ring-yellow-400/40';
-      unselectedClass = 'bg-yellow-950/25 border-yellow-400/90 hover:border-yellow-300 text-yellow-200 shadow-3xs';
-      badgeColor = 'bg-yellow-400/25 text-yellow-300 border-yellow-400/60 font-black';
-      iconColor = 'text-yellow-300';
-      headerColor = 'text-yellow-200 bg-yellow-950/80 font-bold border border-yellow-400/60';
-      textColor = 'text-yellow-300';
+      selectedClass = 'bg-yellow-50 dark:bg-yellow-950/85 border-2 border-yellow-400 text-yellow-950 dark:text-yellow-100 shadow-md ring-2 ring-yellow-400/40';
+      unselectedClass = 'bg-yellow-50/50 dark:bg-yellow-950/25 border-yellow-200 dark:border-yellow-400/90 hover:border-yellow-300 text-yellow-900 dark:text-yellow-200 shadow-3xs';
+      badgeColor = 'bg-yellow-100 dark:bg-yellow-400/25 text-yellow-800 dark:text-yellow-350 border-yellow-300 dark:border-yellow-400/60 font-black';
+      iconColor = 'text-yellow-600 dark:text-yellow-300';
+      headerColor = 'text-yellow-900 dark:text-yellow-200 bg-yellow-100 dark:bg-yellow-950/80 font-bold border border-yellow-300 dark:border-yellow-400/60';
+      textColor = 'text-yellow-700 dark:text-yellow-350';
     }
 
     return {
@@ -559,7 +559,7 @@ export default function LeadBoard({
             e.dataTransfer.effectAllowed = 'move';
           }
         }}
-        className="bg-slate-850 rounded-2xl border border-slate-750 p-4 shadow-xs cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full hover:shadow-lg hover:shadow-accent-emerald/5"
+        className="bg-slate-850 rounded-2xl border border-emerald-900/60 dark:border-emerald-800/50 p-4 shadow-xs cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full hover:shadow-lg hover:shadow-accent-emerald/5"
         onClick={() => onSelectLead(lead)}
       >
         {/* Target country badge & Stars */}
@@ -735,7 +735,7 @@ export default function LeadBoard({
     <div className="space-y-6" id="cgp-leads-pipeline">
 
       {/* Pipeline Border Card Container */}
-      <div className="bg-slate-950/40 rounded-3xl border border-slate-700 p-6 shadow-xl text-left">
+      <div className="bg-slate-950/40 rounded-3xl border border-emerald-900/60 dark:border-emerald-800/60 p-6 shadow-xl text-left">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-5 border-b border-slate-700 pb-4 gap-4">
           {/* Left Side: Controls in One Straight Line in exact requested order */}
           <div className="flex flex-wrap items-center gap-3">

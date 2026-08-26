@@ -155,7 +155,7 @@ export default function CoordinatorsManager({ userRole, onCoordinatorsChanged, o
   );
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs font-sans animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs font-sans animate-in fade-in duration-200">
       <div className="bg-slate-900 rounded-3xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden border border-slate-800 animate-in zoom-in-95 duration-200">
         
         {/* Header */}
@@ -446,7 +446,7 @@ export default function CoordinatorsManager({ userRole, onCoordinatorsChanged, o
 
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xs font-sans animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs font-sans animate-in fade-in duration-200">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full text-left space-y-4 shadow-2xl animate-in zoom-in-95">
             <div className="flex items-center gap-3 text-rose-500">
               <div className="p-2.5 bg-rose-950/30 rounded-xl border border-rose-900/30">

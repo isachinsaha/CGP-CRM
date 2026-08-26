@@ -132,7 +132,7 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
               return (
                 <span key={`orig-${update.id || idx}`} className="flex items-center gap-4 select-text group/update">
                   <span className="text-emerald-600 dark:text-emerald-400/70 font-mono text-[10px]">({new Date(update.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})})</span>
-                  <span className="font-semibold text-slate-800 dark:text-emerald-200">{update.text}</span>
+                  <span className="font-semibold text-slate-100 dark:text-emerald-200">{update.text}</span>
                   <button
                     type="button"
                     onClick={() => handleCopy(update.text, `orig-${update.id || idx}`)}
@@ -163,7 +163,7 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
               return (
                 <span key={`dup-${update.id || idx}`} className="flex items-center gap-4 select-text group/update-dup">
                   <span className="text-emerald-600 dark:text-emerald-400/70 font-mono text-[10px]">({new Date(update.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})})</span>
-                  <span className="font-semibold text-slate-800 dark:text-emerald-200">{update.text}</span>
+                  <span className="font-semibold text-slate-100 dark:text-emerald-200">{update.text}</span>
                   <button
                     type="button"
                     onClick={() => handleCopy(update.text, `dup-${update.id || idx}`)}

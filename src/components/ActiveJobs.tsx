@@ -1522,7 +1522,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
             {/* Background overlay */}
             <div 
-              className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" 
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity" 
               onClick={() => setDeletingJobId(null)}
             />
 
@@ -1569,7 +1569,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
             {/* Background overlay */}
             <div 
-              className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" 
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity" 
               onClick={() => setIsFormOpen(false)}
             />
 
@@ -1881,7 +1881,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
         <div className="fixed inset-0 z-[60] overflow-y-auto" aria-labelledby="update-modal-title" role="dialog" aria-modal="true">
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
             <div 
-              className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" 
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity" 
               onClick={() => setDeletingUpdateId(null)}
             />
             <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
@@ -1923,7 +1923,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
         <div className="fixed inset-0 z-[60] overflow-y-auto" aria-labelledby="update-form-title" role="dialog" aria-modal="true">
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
             <div 
-              className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" 
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity" 
               onClick={() => setIsUpdateFormOpen(false)}
             />
             <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
