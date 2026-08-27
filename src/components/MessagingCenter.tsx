@@ -773,7 +773,7 @@ export default function MessagingCenter({
               <span>History (&gt;24h)</span>
               {historyLeadsCount > 0 && (
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
-                  filterType === 'history' ? 'bg-white text-slate-100' : 'bg-slate-900 dark:bg-slate-700 text-slate-300 dark:text-slate-300'
+                  filterType === 'history' ? 'bg-white text-slate-800' : 'bg-slate-900 dark:bg-slate-700 text-slate-300 dark:text-slate-300'
                 }`}>
                   {historyLeadsCount}
                 </span>

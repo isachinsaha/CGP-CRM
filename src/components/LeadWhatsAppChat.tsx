@@ -78,6 +78,20 @@ export default function LeadWhatsAppChat({
     setMessages(lead.messages || []);
   }, [lead.messages]);
 
+  // Auto-resize the message textarea based on content length
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      const scrollHeight = textarea.scrollHeight;
+      if (!inputText) {
+        textarea.style.height = '42px';
+      } else {
+        textarea.style.height = `${scrollHeight}px`;
+      }
+    }
+  }, [inputText]);
+
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -587,7 +601,7 @@ export default function LeadWhatsAppChat({
       const isSystem = msg.sender === 'system';
 
       const formattedTime = msg.timestamp
-        ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase()
         : '';
 
       const dateString = msg.timestamp ? getMessageDateString(msg.timestamp) : '';
@@ -597,8 +611,8 @@ export default function LeadWhatsAppChat({
       }
 
       const dateHeaderElement = showDateHeader ? (
-        <div key={`date-header-${msg.id || index}`} className="flex justify-center my-4 w-full select-none">
-          <span className="bg-slate-800/90 dark:bg-slate-850/90 text-slate-400 dark:text-slate-300 px-3.5 py-1 rounded-full text-[10px] font-black tracking-wide uppercase border border-slate-750 dark:border-slate-700/40 shadow-xs">
+        <div key={`date-header-${msg.id || index}`} className="flex justify-center my-3 w-full select-none z-10">
+          <span className="bg-[#ffffff]/90 dark:bg-[#182229]/95 text-[#54656f] dark:text-[#8696a0] px-3 py-1 rounded-md text-[11px] font-semibold uppercase tracking-wide shadow-[0_1px_0.5px_rgba(0,0,0,0.08)]">
             {dateString}
           </span>
         </div>
@@ -609,43 +623,39 @@ export default function LeadWhatsAppChat({
           {dateHeaderElement}
 
           {isSystem ? (
-            <div className="flex justify-center my-1.5 w-full">
-              <div className="bg-slate-800 dark:bg-slate-800 text-slate-400 dark:text-slate-300 px-3 py-1 rounded-lg text-[10.5px] font-bold font-mono text-center max-w-[70%] border border-slate-750 dark:border-slate-700">
-                ℹ️ {msg.text}
+            <div className="flex justify-center my-1.5 w-full z-10">
+              <div className="bg-[#ffeecd] dark:bg-[#182229] text-[#54656f] dark:text-[#8696a0] px-3.5 py-1.5 rounded-lg text-[11.5px] font-normal text-center max-w-[85%] sm:max-w-[70%] shadow-[0_1px_0.5px_rgba(0,0,0,0.08)] leading-relaxed border-none">
+                {msg.text}
               </div>
             </div>
           ) : (
             <motion.div
-              initial={{ opacity: 0, y: 6, scale: 0.99 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.15 }}
-              className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group max-w-full w-full`}
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.12 }}
+              className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group max-w-full w-full mb-1 z-10`}
             >
-                {/* Sender Tag Header */}
-                <div className={`flex items-center gap-1.5 text-[9px] font-bold mb-0.5 px-1 max-w-[85%] sm:max-w-[420px] ${isUser ? 'text-emerald-700 dark:text-emerald-400 justify-end' : 'text-slate-500 dark:text-slate-400 justify-start'}`}>
-                  {isUser ? (
-                    <>
-                      <span>{msg.senderName || 'Coordinator'}</span>
-                      <span className="text-[8.5px] opacity-75 font-mono">({config.provider.split(' ')[0]})</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>{msg.senderName || lead.name || 'Candidate'}</span>
-                    </>
-                  )}
-                </div>
-
-                {/* Message Bubble - Compact, readable & neat width */}
+              {/* Message Bubble Wrapper to hold the Tail & Main body */}
+              <div className="relative flex items-start max-w-[85%] sm:max-w-[460px]">
+                
+                {/* Bubble - Real WhatsApp styling */}
                 <div
-                  className={`max-w-[85%] sm:max-w-[420px] w-fit rounded-xl py-1 px-2.5 text-[13px] leading-snug shadow-3xs relative transition-all border ${
+                  className={`w-fit rounded-lg pl-3 pr-2.5 pt-1.5 pb-1 text-[14.2px] leading-[19px] shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] relative transition-all ${
                     isUser
-                      ? 'bg-emerald-100/90 dark:bg-emerald-950/80 border-emerald-300/60 dark:border-emerald-850/60 text-slate-100 dark:text-emerald-50 rounded-tr-xs'
-                      : 'bg-white dark:bg-slate-900 border-slate-750 dark:border-slate-800 text-slate-100 dark:text-slate-100 rounded-tl-xs'
+                      ? 'bg-[#d9fdd3] dark:bg-[#005c4b] text-[#111b21] dark:text-[#e9edef] rounded-tr-none ml-2'
+                      : 'bg-white dark:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] rounded-tl-none mr-2'
                   }`}
                 >
+                  {/* Tailwind-based Triangle Tail */}
+                  {isUser ? (
+                    <div className="absolute top-0 -right-1.5 w-1.5 h-2.5 bg-[#d9fdd3] dark:bg-[#005c4b]" style={{ clipPath: 'polygon(0 0, 100% 0, 0 100%)' }} />
+                  ) : (
+                    <div className="absolute top-0 -left-1.5 w-1.5 h-2.5 bg-white dark:bg-[#202c33]" style={{ clipPath: 'polygon(100% 0, 0 0, 100% 100%)' }} />
+                  )}
+
                   {/* Template tag if sent from template */}
                   {msg.templateName && (
-                    <div className="mb-1 pb-0.5 border-b border-emerald-200/80 dark:border-emerald-800/80 text-[9px] font-black uppercase text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+                    <div className="mb-1.5 pb-0.5 border-b border-[#000000]/05 dark:border-white/10 text-[10px] font-bold uppercase text-[#00a884] dark:text-emerald-400 flex items-center gap-1 select-none">
                       <span>📑 Template:</span>
                       <span className="truncate">{msg.templateName}</span>
                     </div>
@@ -653,12 +663,12 @@ export default function LeadWhatsAppChat({
 
                   {/* Quoted Message Reply Box */}
                   {msg.replyToId && (
-                    <div className="mb-1.5 p-1.5 px-2 rounded-lg bg-black/5 dark:bg-white/5 border-l-3 border-emerald-500 dark:border-emerald-400 text-[10.5px] leading-tight select-none text-slate-800 dark:text-slate-200">
-                      <div className="font-extrabold text-[9px] text-emerald-600 dark:text-emerald-400 mb-0.5 truncate flex items-center gap-1">
-                        <CornerUpLeft className="h-2.5 w-2.5" />
+                    <div className="mb-1.5 p-2 rounded-md bg-[#000000]/04 dark:bg-[#000000]/25 border-l-[4px] border-[#00a884] dark:border-emerald-500 text-[12px] leading-tight select-none text-[#111b21]/80 dark:text-[#e9edef]/85">
+                      <div className="font-bold text-[11px] text-[#00a884] dark:text-emerald-400 mb-0.5 truncate flex items-center gap-1">
+                        <CornerUpLeft className="h-3 w-3" />
                         <span>{msg.replyToSender || 'Contact'}</span>
                       </div>
-                      <div className="line-clamp-2 italic text-slate-600 dark:text-slate-300">
+                      <div className="line-clamp-2 italic text-[#111b21]/70 dark:text-[#e9edef]/75">
                         {msg.replyToText}
                       </div>
                     </div>
@@ -666,27 +676,27 @@ export default function LeadWhatsAppChat({
 
                   {/* Media Content Previews */}
                   {msg.type === 'image' && msg.mediaUrl && (
-                    <div className="mb-2 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950">
+                    <div className="mb-1.5 rounded-md overflow-hidden border border-[#000000]/05 bg-[#f0f2f5] dark:bg-[#111b21] max-w-full">
                       <img
                         src={msg.mediaUrl}
                         alt={msg.fileName || 'WhatsApp Attachment'}
                         referrerPolicy="no-referrer"
-                        className="max-h-60 w-full object-cover hover:scale-[1.02] transition-transform duration-200 cursor-zoom-in"
+                        className="max-h-64 w-full object-cover hover:scale-[1.01] transition-transform duration-200 cursor-zoom-in"
                         onClick={() => window.open(msg.mediaUrl, '_blank')}
                       />
                     </div>
                   )}
 
                   {(msg.type === 'pdf' || msg.type === 'document') && msg.mediaUrl && (
-                    <div className="mb-2 p-2 px-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 flex items-center gap-2.5">
+                    <div className="mb-1.5 p-2 rounded-lg border border-[#000000]/05 bg-[#f0f2f5]/60 dark:bg-[#111b21]/40 flex items-center gap-2.5 max-w-full">
                       <div className="p-2 rounded-lg bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 shrink-0">
                         <FileText className="h-5 w-5" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[11px] font-extrabold text-slate-100 dark:text-white truncate">
+                        <p className="text-[12px] font-bold text-[#111b21] dark:text-[#e9edef] truncate">
                           {msg.fileName || 'Attachment Document'}
                         </p>
-                        <p className="text-[9.5px] text-slate-500 dark:text-slate-400 font-mono">
+                        <p className="text-[10px] text-[#667781] dark:text-[#8696a0] font-mono">
                           {msg.fileSize || 'Unknown Size'} • {msg.type?.toUpperCase()}
                         </p>
                       </div>
@@ -695,38 +705,38 @@ export default function LeadWhatsAppChat({
                         download={msg.fileName || 'document'}
                         target="_blank"
                         rel="noreferrer"
-                        className="p-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer shrink-0"
+                        className="p-1.5 rounded-full bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 text-[#54656f] dark:text-[#8696a0] transition-colors cursor-pointer shrink-0"
                         title="Download File"
                       >
-                        <ChevronDown className="h-3.5 w-3.5 rotate-180" />
+                        <ChevronDown className="h-4 w-4 rotate-180" />
                       </a>
                     </div>
                   )}
 
                   {/* Body Text */}
                   {msg.text && msg.text !== 'Sent an image' && msg.text !== 'Sent a PDF document' && msg.text !== 'Sent a document' && (
-                    <p className="whitespace-pre-wrap leading-normal font-sans font-semibold text-[13px] sm:text-[13.5px] select-text break-words tracking-wide">
+                    <span className="whitespace-pre-wrap leading-normal font-sans font-normal text-[14px] select-text break-words tracking-normal">
                       {msg.text}
-                    </p>
+                    </span>
                   )}
 
-                  {/* Bubble Footer Info */}
-                  <div className="flex items-center justify-end gap-1 mt-0.5 text-[9px] font-mono text-slate-500 dark:text-slate-400">
-                    <span>{formattedTime}</span>
+                  {/* Bubble Footer Info - Floated gracefully in the bottom-right corner */}
+                  <span className="inline-flex items-center justify-end gap-1 text-[10px] text-[#667781] dark:text-[#8696a0] select-none float-right ml-4 mt-1 leading-none">
+                    <span className="font-sans">{formattedTime}</span>
 
                     {isUser && (
                       <span 
                         className={`inline-flex items-center ${
                           msg.status === 'read' 
-                            ? 'text-sky-500 dark:text-sky-400 font-extrabold' 
-                            : 'text-slate-400 dark:text-slate-500'
+                            ? 'text-[#53bdeb]' 
+                            : 'text-[#8696a0]'
                         }`} 
                         title={
                           msg.status === 'read' 
                             ? "Read by candidate (Blue tick)" 
                             : msg.status === 'delivered' 
-                              ? "Delivered to candidate (Double tick)" 
-                              : "Sent to candidate (Single tick)"
+                              ? "Delivered to candidate" 
+                              : "Sent to candidate"
                         }
                       >
                         {msg.status === 'sent' ? (
@@ -737,174 +747,211 @@ export default function LeadWhatsAppChat({
                       </span>
                     )}
 
-                     {/* Reply Button */}
-                    <button
-                      type="button"
-                      onClick={() => setReplyingToMessage(msg)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-slate-900 dark:hover:text-white cursor-pointer ml-1"
-                      title="Reply to this message"
-                    >
-                      <CornerUpLeft className="h-3 w-3" />
-                    </button>
+                    {/* Inline Hover Action Triggers */}
+                    <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 inline-flex items-center gap-1 ml-1.5 pl-1.5 border-l border-[#000000]/10 dark:border-white/10">
+                      <button
+                        type="button"
+                        onClick={() => setReplyingToMessage(msg)}
+                        className="p-0.5 text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer transition-colors"
+                        title="Reply"
+                      >
+                        <CornerUpLeft className="h-3 w-3" />
+                      </button>
 
-                    <button
-                      type="button"
-                      onClick={() => handleCopyMessage(msg.text, msg.id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-slate-900 dark:hover:text-white cursor-pointer ml-1"
-                      title="Copy text"
-                    >
-                      {copiedId === msg.id ? (
-                        <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                      ) : (
-                        <Copy className="h-3 w-3" />
-                      )}
-                    </button>
-                  </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyMessage(msg.text, msg.id)}
+                        className="p-0.5 text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer transition-colors"
+                        title="Copy"
+                      >
+                        {copiedId === msg.id ? (
+                          <Check className="h-3 w-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                      </button>
+                    </span>
+                  </span>
+
+                  {/* Float Clearing */}
+                  <div className="clear-both" />
+
                 </div>
-              </motion.div>
-            )}
-          </React.Fragment>
-        );
-      });
-    };
-
-    return (
-      <div className="flex flex-col h-full bg-slate-50/70 dark:bg-slate-950/60 overflow-hidden text-left relative" id="whatsapp-inbuilt-module">
-        
-        {/* Sticky API Branding Header */}
-        <div className="bg-emerald-500/10 dark:bg-emerald-500/5 border-b border-emerald-500/20 px-3 py-1 flex items-center justify-between shrink-0 select-none z-10">
-          <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider font-mono">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Powered by AI Sensy Cloud API</span>
-          </div>
-          <span className="text-[9px] text-emerald-600/60 dark:text-emerald-400/50 font-semibold font-mono">LIVE CLOUD CHANNEL</span>
-        </div>
-
-        {/* 2. Messages Stream List - Maximized Room */}
-        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-1.5 text-xs">
-          {displayMessages.length === 0 ? (
-            <div className="text-center py-12 space-y-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xs">
-              <div className="h-12 w-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-2xs">
-                <MessageSquare className="h-6 w-6" />
               </div>
-              <h5 className="text-sm font-black text-slate-100 dark:text-white">Start WhatsApp Conversation</h5>
-              <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
-                No WhatsApp messages sent yet to <strong>{lead.name || 'Candidate'}</strong> ({lead.phone}). Choose a recruitment template below or write a custom message.
-              </p>
-              <div className="pt-2 flex justify-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowTemplates(true)}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 shadow-xs cursor-pointer uppercase tracking-wider"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Browse WhatsApp Templates
-                </button>
-              </div>
-            </div>
-          ) : (
-            renderMessageStream()
+              
+              {/* Coordinator Sublabel if sent by Admin or specific Coordinator */}
+              {isUser && msg.senderName && (
+                <span className="text-[9.5px] text-[#667781] dark:text-[#8696a0] mr-2.5 mt-0.5 select-none font-medium">
+                  Sent by: {msg.senderName.replace('Coordinator ', '')}
+                </span>
+              )}
+            </motion.div>
           )}
-          <div ref={chatBottomRef} />
-        </div>
+        </React.Fragment>
+      );
+    });
+  };
 
-      {/* 3. Templates Drawer / Quick Selector (Expandable) */}
+  return (
+    <div className="flex flex-col h-full bg-[#efeae2] dark:bg-[#0b141a] overflow-hidden text-left relative" id="whatsapp-inbuilt-module">
+      
+      {/* Repeating WhatsApp Doodle Pattern Overlay in Background */}
+      <div 
+        className="absolute inset-0 opacity-[0.38] dark:opacity-[0.16] pointer-events-none z-0" 
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%238696a0' stroke-width='0.6'%3E%3Cpath d='M10,20 C12,17 17,17 17,20 C17,23 12,23 10,20 Z M30,50 C33,50 35,52 35,55 C35,58 33,60 30,60 C27,60 25,58 25,55 C25,52 27,50 30,50 Z M65,30 L75,30 L75,40 L65,40 Z M45,75 C50,75 50,85 45,85 C40,85 40,75 45,75 Z' /%3E%3Ccircle cx='50' cy='35' r='1.5' /%3E%3Ccircle cx='20' cy='70' r='2' /%3E%3Cpath d='M70,65 C73,62 77,66 74,69' /%3E%3C/g%3E%3C/svg%3E")`,
+          backgroundRepeat: 'repeat',
+        }}
+      />
+
+      {/* WhatsApp Native Style Top Header Bar */}
+      <div className="bg-[#f0f2f5] dark:bg-[#202c33] border-b border-[#e9edef] dark:border-slate-800/60 px-4 py-2.5 flex items-center justify-between shrink-0 select-none z-10 shadow-xs">
+        <div className="flex items-center gap-3">
+          {/* Circular Initials Profile Picture */}
+          <div className="h-9 w-9 rounded-full bg-[#00a884] text-white flex items-center justify-center font-bold text-sm tracking-wide uppercase select-none shadow-3xs shrink-0">
+            {lead.name?.charAt(0) || 'C'}
+          </div>
+          <div className="min-w-0">
+            <h4 className="text-[14.5px] font-bold text-[#111b21] dark:text-[#e9edef] leading-tight truncate">
+              {lead.name || 'Candidate Chat'}
+            </h4>
+            <p className="text-[11.5px] text-[#667781] dark:text-[#8696a0] font-mono leading-none mt-0.5">
+              {lead.phone} • {lead.country || 'N/A'}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {lead.assignedTo && lead.assignedTo.toLowerCase() !== 'unassigned' && (
+            <span className="hidden sm:inline-flex items-center bg-[#e1f5fe] dark:bg-[#182229] text-[#0288d1] dark:text-sky-400 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
+              👤 Assigned: {lead.assignedTo}
+            </span>
+          )}
+          <div className="flex items-center gap-1.5 text-[10.5px] text-[#00a884] dark:text-emerald-400 font-bold uppercase tracking-wider font-mono bg-[#d9fdd3] dark:bg-[#005c4b]/20 px-2.5 py-1 rounded-full shadow-3xs">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#00a884] animate-pulse" />
+            <span>AI Sensy Active</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Messages Stream Container */}
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-2 relative z-10">
+        {displayMessages.length === 0 ? (
+          <div className="text-center py-16 space-y-3 bg-white dark:bg-[#111b21]/80 rounded-2xl border border-[#e9edef] dark:border-slate-800 p-6 shadow-xs max-w-md mx-auto my-6 z-10 relative">
+            <div className="h-12 w-12 rounded-full bg-[#d9fdd3] dark:bg-[#005c4b]/30 text-[#00a884] dark:text-emerald-400 flex items-center justify-center mx-auto shadow-3xs">
+              <MessageSquare className="h-6 w-6" />
+            </div>
+            <h5 className="text-[15px] font-bold text-[#111b21] dark:text-[#e9edef]">Start WhatsApp Conversation</h5>
+            <p className="text-[12.5px] text-[#667781] dark:text-[#8696a0] max-w-sm mx-auto leading-relaxed">
+              No WhatsApp messages sent yet to <strong>{lead.name || 'Candidate'}</strong> ({lead.phone}). Choose a recruitment template below or write a custom message.
+            </p>
+            <div className="pt-2 flex justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowTemplates(true)}
+                className="px-4 py-2 bg-[#00a884] hover:bg-[#008f72] text-white font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-xs cursor-pointer uppercase tracking-wider"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Browse Templates
+              </button>
+            </div>
+          </div>
+        ) : (
+          renderMessageStream()
+        )}
+        <div ref={chatBottomRef} />
+      </div>
+
+      {/* 3. Templates Drawer (Expandable) */}
       <AnimatePresence>
         {showTemplates && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-            className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 overflow-hidden shadow-md shrink-0"
+            transition={{ duration: 0.18 }}
+            className="bg-white dark:bg-[#111b21] border-t border-[#e9edef] dark:border-slate-800 shadow-lg shrink-0 z-20 relative"
           >
-            <div className="p-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <div className="p-3.5 border-b border-[#e9edef] dark:border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                <h5 className="text-xs font-black text-slate-100 dark:text-white uppercase tracking-wider">
+                <Sparkles className="h-4 w-4 text-[#00a884] dark:text-emerald-400 animate-pulse" />
+                <h5 className="text-xs font-bold text-[#111b21] dark:text-[#e9edef] uppercase tracking-wider">
                   WhatsApp Recruitment Templates
                 </h5>
               </div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowTemplates(false)}
-                  className="text-xs font-extrabold text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
-                >
-                  ✕ Close
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowTemplates(false)}
+                className="text-xs font-bold text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer bg-black/5 dark:bg-white/5 px-2.5 py-1 rounded-md"
+              >
+                ✕ Close
+              </button>
             </div>
 
-            <>
-              {/* Template Category Pills */}
-              <div className="flex items-center gap-1.5 p-2 px-3 bg-slate-50 dark:bg-slate-950/60 overflow-x-auto">
-                {[
-                  { id: 'all', label: 'All Templates' },
-                  { id: 'documentation', label: '📄 Documents & Passport' },
-                  { id: 'interview', label: '📅 Interviews' },
-                  { id: 'onboarding', label: '🏢 Office Visits' },
-                  { id: 'offer', label: '🎉 Visa & Offer' },
-                  { id: 'status', label: '📞 Callbacks' }
-                ].map(cat => (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    onClick={() => setSelectedCategory(cat.id)}
-                    className={`text-[10px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer border ${
-                      selectedCategory === cat.id
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                        : 'bg-slate-800 dark:bg-slate-900 text-slate-100 dark:text-slate-300 border-slate-750 dark:border-slate-800 hover:bg-slate-750'
-                    }`}
+            <div className="flex items-center gap-1.5 p-2 px-3 bg-[#f0f2f5] dark:bg-[#202c33] overflow-x-auto select-none">
+              {[
+                { id: 'all', label: 'All Templates' },
+                { id: 'documentation', label: '📄 Documents & Passport' },
+                { id: 'interview', label: '📅 Interviews' },
+                { id: 'onboarding', label: '🏢 Office Visits' },
+                { id: 'offer', label: '🎉 Visa & Offer' },
+                { id: 'status', label: '📞 Callbacks' }
+              ].map(cat => (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className={`text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer border ${
+                    selectedCategory === cat.id
+                      ? 'bg-[#00a884] text-white border-transparent shadow-3xs'
+                      : 'bg-white dark:bg-[#2a3942] text-[#54656f] dark:text-[#8696a0] border-[#e9edef] dark:border-slate-800 hover:bg-[#f0f2f5]'
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="max-h-52 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {filteredTemplates.map(tpl => {
+                const preview = replaceTemplatePlaceholders(tpl.text, lead, lead.assignedTo || currentAgentId);
+                return (
+                  <div
+                    key={tpl.id}
+                    className="p-3 bg-[#f0f2f5]/50 dark:bg-[#202c33]/40 rounded-xl border border-[#e9edef] dark:border-slate-800/80 hover:border-[#00a884] dark:hover:border-emerald-600 transition-all text-xs flex flex-col justify-between space-y-2 group"
                   >
-                    {cat.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Template Cards List */}
-              <div className="max-h-56 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                {filteredTemplates.map(tpl => {
-                  const preview = replaceTemplatePlaceholders(tpl.text, lead, lead.assignedTo || currentAgentId);
-                  return (
-                    <div
-                      key={tpl.id}
-                      className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-750 dark:border-slate-800 hover:border-emerald-400 dark:hover:border-emerald-600 transition-all text-xs flex flex-col justify-between space-y-2 group shadow-3xs"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between gap-1 mb-1">
-                          <span className="font-extrabold text-slate-100 dark:text-white text-xs">{tpl.title}</span>
-                          <span className="text-[9px] font-bold uppercase text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
-                            {tpl.category}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-600 dark:text-slate-400 line-clamp-3 italic font-sans leading-relaxed">
-                          {preview}
-                        </p>
+                    <div>
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <span className="font-bold text-[#111b21] dark:text-[#e9edef] text-xs">{tpl.title}</span>
+                        <span className="text-[9px] font-bold uppercase text-[#00a884] dark:text-emerald-400 bg-[#d9fdd3] dark:bg-[#005c4b]/20 px-1.5 py-0.5 rounded">
+                          {tpl.category}
+                        </span>
                       </div>
-
-                      <div className="flex items-center gap-1.5 pt-1 border-t border-slate-750 dark:border-slate-800/60">
-                        <button
-                          type="button"
-                          onClick={() => handleSelectTemplate(tpl, false)}
-                          className="flex-1 py-1.5 bg-slate-800 dark:bg-slate-800 hover:bg-slate-750 dark:hover:bg-slate-700 text-slate-100 dark:text-slate-200 font-bold rounded-lg text-[10.5px] border border-slate-750 dark:border-slate-700 transition-all cursor-pointer text-center"
-                        >
-                          Insert to Input
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleSelectTemplate(tpl, true)}
-                          className="py-1.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-lg text-[10.5px] transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
-                        >
-                          <Send className="h-3 w-3" />
-                          Send Now
-                        </button>
-                      </div>
+                      <p className="text-[11px] text-[#667781] dark:text-[#8696a0] line-clamp-3 italic font-sans leading-relaxed">
+                        {preview}
+                      </p>
                     </div>
-                  );
-                })}
-              </div>
-            </>
+
+                    <div className="flex items-center gap-1.5 pt-1.5 border-t border-[#000000]/05 dark:border-white/5">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectTemplate(tpl, false)}
+                        className="flex-1 py-1 bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] font-bold rounded-lg text-[11px] border border-[#e9edef] dark:border-slate-800 transition-all cursor-pointer text-center"
+                      >
+                        Insert
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectTemplate(tpl, true)}
+                        className="py-1 px-3 bg-[#00a884] hover:bg-[#008f72] text-white font-bold rounded-lg text-[11px] transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
+                      >
+                        <Send className="h-3 w-3" />
+                        Send
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </motion.div>
         )}
 
@@ -913,13 +960,13 @@ export default function LeadWhatsAppChat({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-            className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 overflow-hidden shadow-md shrink-0"
+            transition={{ duration: 0.18 }}
+            className="bg-white dark:bg-[#111b21] border-t border-[#e9edef] dark:border-slate-800 shadow-lg shrink-0 z-20 relative"
           >
-            <div className="p-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <div className="p-3.5 border-b border-[#e9edef] dark:border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Zap className="h-4 w-4 text-amber-600 dark:text-amber-400 fill-current animate-pulse" />
-                <h5 className="text-xs font-black text-slate-100 dark:text-white uppercase tracking-wider">
+                <Zap className="h-4 w-4 text-amber-500 fill-current animate-pulse" />
+                <h5 className="text-xs font-bold text-[#111b21] dark:text-[#e9edef] uppercase tracking-wider">
                   ⚡ Quick Reply Messages
                 </h5>
               </div>
@@ -927,7 +974,7 @@ export default function LeadWhatsAppChat({
                 <button
                   type="button"
                   onClick={() => setShowCreateQuickReply(!showCreateQuickReply)}
-                  className="text-xs font-black text-amber-700 dark:text-amber-400 hover:text-amber-600 flex items-center gap-1 cursor-pointer bg-amber-50 dark:bg-amber-950/60 px-2.5 py-1 rounded-lg"
+                  className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:text-amber-500 flex items-center gap-1 cursor-pointer bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-200/50 dark:border-amber-900/40"
                 >
                   <Plus className="h-3 w-3" />
                   {showCreateQuickReply ? 'View Quick Replies' : 'Add Quick Reply'}
@@ -935,7 +982,7 @@ export default function LeadWhatsAppChat({
                 <button
                   type="button"
                   onClick={() => setShowQuickReplies(false)}
-                  className="text-xs font-extrabold text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                  className="text-xs font-bold text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer bg-black/5 dark:bg-white/5 px-2.5 py-1 rounded-md"
                 >
                   ✕ Close
                 </button>
@@ -943,11 +990,11 @@ export default function LeadWhatsAppChat({
             </div>
 
             {showCreateQuickReply ? (
-              <form onSubmit={handleCreateQuickReply} className="p-4 bg-slate-50 dark:bg-slate-950/40 border-b border-slate-200 dark:border-slate-800 space-y-3">
+              <form onSubmit={handleCreateQuickReply} className="p-4 bg-[#f0f2f5]/50 dark:bg-[#202c33]/40 border-b border-[#e9edef] dark:border-slate-800 space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1">
-                      Quick Reply ID (Short code, e.g. `welcome`) *
+                    <label className="block text-[10px] font-black uppercase text-[#667781] dark:text-[#8696a0] mb-1">
+                      Quick Reply ID (e.g. `welcome`) *
                     </label>
                     <input
                       type="text"
@@ -955,11 +1002,11 @@ export default function LeadWhatsAppChat({
                       placeholder="e.g. welcome"
                       value={newQuickReply.id}
                       onChange={e => setNewQuickReply(p => ({ ...p, id: e.target.value.toLowerCase().replace(/\s+/g, '_') }))}
-                      className="w-full text-xs p-2 rounded-lg border border-slate-750 bg-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100"
+                      className="w-full text-xs p-2.5 rounded-lg border border-[#e9edef] dark:border-slate-800 bg-white dark:bg-[#2a3942] focus:outline-none text-[#111b21] dark:text-[#e9edef]"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1">
+                    <label className="block text-[10px] font-black uppercase text-[#667781] dark:text-[#8696a0] mb-1">
                       Display Title *
                     </label>
                     <input
@@ -968,35 +1015,35 @@ export default function LeadWhatsAppChat({
                       placeholder="e.g. Greeting Welcome"
                       value={newQuickReply.title}
                       onChange={e => setNewQuickReply(p => ({ ...p, title: e.target.value }))}
-                      className="w-full text-xs p-2 rounded-lg border border-slate-750 bg-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100"
+                      className="w-full text-xs p-2.5 rounded-lg border border-[#e9edef] dark:border-slate-800 bg-white dark:bg-[#2a3942] focus:outline-none text-[#111b21] dark:text-[#e9edef]"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1">
+                  <label className="block text-[10px] font-black uppercase text-[#667781] dark:text-[#8696a0] mb-1">
                     Short Description / Note
                   </label>
                   <input
                     type="text"
-                    placeholder="Brief description about when to use this quick reply"
+                    placeholder="e.g. For initial introductions"
                     value={newQuickReply.description}
                     onChange={e => setNewQuickReply(p => ({ ...p, description: e.target.value }))}
-                    className="w-full text-xs p-2 rounded-lg border border-slate-750 bg-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-100"
+                    className="w-full text-xs p-2.5 rounded-lg border border-[#e9edef] dark:border-slate-800 bg-white dark:bg-[#2a3942] focus:outline-none text-[#111b21] dark:text-[#e9edef]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1">
+                  <label className="block text-[10px] font-black uppercase text-[#667781] dark:text-[#8696a0] mb-1">
                     Message Body Content (Variables: {"{{name}}, {{country}}, {{position}}, {{coordinator}}"}) *
                   </label>
                   <textarea
-                    rows={4}
+                    rows={3}
                     required
-                    placeholder="Enter quick reply text here... Use variables to auto-fill candidate or coordinator data."
+                    placeholder="Enter message body..."
                     value={newQuickReply.text}
                     onChange={e => setNewQuickReply(p => ({ ...p, text: e.target.value }))}
-                    className="w-full text-xs p-2.5 rounded-lg border border-slate-750 bg-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500 font-sans text-slate-100"
+                    className="w-full text-xs p-2.5 rounded-lg border border-[#e9edef] dark:border-slate-800 bg-white dark:bg-[#2a3942] focus:outline-none font-sans text-[#111b21] dark:text-[#e9edef]"
                   />
                 </div>
 
@@ -1004,30 +1051,30 @@ export default function LeadWhatsAppChat({
                   <button
                     type="button"
                     onClick={() => setShowCreateQuickReply(false)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 dark:bg-slate-800 text-slate-100 dark:text-slate-200 text-xs font-bold cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 dark:bg-[#2a3942] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] text-xs font-bold border border-[#e9edef] dark:border-slate-800 cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-4.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-extrabold shadow-2xs cursor-pointer uppercase tracking-wider"
+                    className="px-4.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-3xs cursor-pointer uppercase tracking-wider"
                   >
-                    Save Quick Reply
+                    Save
                   </button>
                 </div>
               </form>
             ) : (
-              <div className="max-h-56 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              <div className="max-h-52 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
                 {templates.filter(t => t.type === 'quick_reply').map(tpl => {
                   const preview = replaceTemplatePlaceholders(tpl.text, lead, lead.assignedTo || currentAgentId);
                   return (
                     <div
                       key={tpl.id}
-                      className="p-3 bg-amber-50/10 dark:bg-amber-950/10 rounded-xl border border-amber-400/40 dark:border-amber-900/30 hover:border-amber-400 dark:hover:border-amber-600 transition-all text-xs flex flex-col justify-between space-y-2 group shadow-3xs"
+                      className="p-3 bg-amber-50/10 dark:bg-amber-950/10 rounded-xl border border-amber-400/30 dark:border-amber-900/20 hover:border-amber-400 dark:hover:border-amber-600 transition-all text-xs flex flex-col justify-between space-y-2 group shadow-3xs"
                     >
                       <div>
                         <div className="flex items-center justify-between gap-1 mb-1">
-                          <span className="font-extrabold text-slate-100 dark:text-white text-xs flex items-center gap-1">
+                          <span className="font-bold text-[#111b21] dark:text-[#e9edef] text-xs flex items-center gap-1">
                             <Zap className="h-3 w-3 text-amber-500 fill-current" />
                             {tpl.title}
                           </span>
@@ -1035,21 +1082,21 @@ export default function LeadWhatsAppChat({
                             Quick
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-600 dark:text-slate-400 italic font-sans leading-relaxed">
+                        <p className="text-[11px] text-[#667781] dark:text-[#8696a0] italic font-sans leading-relaxed">
                           {preview}
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-1.5 pt-1 border-t border-slate-750 dark:border-slate-800/60">
+                      <div className="flex items-center gap-1.5 pt-1 border-t border-[#000000]/05 dark:border-white/5">
                         <button
                           type="button"
                           onClick={() => {
                             setInputText(preview);
                             setShowQuickReplies(false);
                           }}
-                          className="flex-1 py-1.5 bg-slate-800 dark:bg-slate-800 hover:bg-slate-750 dark:hover:bg-slate-700 text-slate-100 dark:text-slate-200 font-bold rounded-lg text-[10.5px] border border-slate-750 dark:border-slate-700 transition-all cursor-pointer text-center"
+                          className="flex-1 py-1 bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] font-bold rounded-lg text-[11px] border border-[#e9edef] dark:border-slate-800 transition-all cursor-pointer text-center"
                         >
-                          Insert to Input
+                          Insert
                         </button>
                         <button
                           type="button"
@@ -1061,17 +1108,17 @@ export default function LeadWhatsAppChat({
                             handleSelectTemplate(fakeTemplate, true);
                             setShowQuickReplies(false);
                           }}
-                          className="py-1.5 px-3 bg-amber-600 hover:bg-amber-500 text-white font-extrabold rounded-lg text-[10.5px] transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
+                          className="py-1 px-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-[11px] transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
                         >
                           <Send className="h-3 w-3" />
-                          Send Now
+                          Send
                         </button>
                       </div>
                     </div>
                   );
                 })}
                 {templates.filter(t => t.type === 'quick_reply').length === 0 && (
-                  <div className="col-span-full py-8 text-center text-xs text-slate-400 italic">
+                  <div className="col-span-full py-8 text-center text-xs text-[#667781] dark:text-[#8696a0] italic">
                     No quick replies configured in the Admin Control.
                   </div>
                 )}
@@ -1081,32 +1128,32 @@ export default function LeadWhatsAppChat({
         )}
       </AnimatePresence>
 
-      {/* 4. WhatsApp Message Composer Bar */}
-      <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shrink-0 space-y-2 shadow-sm relative">
+      {/* 4. WhatsApp Message Composer Bar - High Fidelity Web Layout */}
+      <div className="p-3 bg-[#f0f2f5] dark:bg-[#202c33] border-t border-[#e9edef] dark:border-slate-800/80 shrink-0 space-y-2.5 shadow-md relative z-20">
         
         {/* Reply Message Preview Panel */}
         {replyingToMessage && (
-          <div className="bg-slate-50 dark:bg-slate-950 border-l-4 border-emerald-500 p-2.5 rounded-lg flex items-center justify-between text-xs transition-all relative shadow-2xs">
+          <div className="bg-white dark:bg-[#2a3942] border-l-[4px] border-[#00a884] p-2.5 rounded-lg flex items-center justify-between text-xs transition-all relative shadow-3xs">
             <div className="flex-1 min-w-0 pr-4">
-              <span className="font-extrabold text-emerald-600 dark:text-emerald-400 block mb-0.5 text-[10.5px]">
+              <span className="font-bold text-[#00a884] dark:text-emerald-400 block mb-0.5 text-[11px]">
                 Replying to {replyingToMessage.senderName || (replyingToMessage.sender === 'lead' ? lead.name : 'Coordinator')}
               </span>
-              <span className="text-slate-600 dark:text-slate-300 truncate block italic text-[11px]">
+              <span className="text-[#667781] dark:text-[#8696a0] truncate block italic text-[11.5px]">
                 {replyingToMessage.text}
               </span>
             </div>
             <button
               type="button"
               onClick={() => setReplyingToMessage(null)}
-              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
-              title="Cancel Reply"
+              className="p-1 text-[#667781] hover:text-[#111b21] dark:hover:text-white transition-colors cursor-pointer rounded-full hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] shrink-0"
+              title="Cancel"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
         )}
 
-        {/* Helper tools row */}
+        {/* Helper quick tools row */}
         <div className="flex items-center justify-between text-xs px-1">
           <div className="flex items-center gap-2">
             <button
@@ -1115,15 +1162,14 @@ export default function LeadWhatsAppChat({
                 setShowTemplates(!showTemplates);
                 setShowQuickReplies(false);
               }}
-              className={`text-[11px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border ${
+              className={`text-[10.5px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border ${
                 showTemplates
-                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                  : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
+                  ? 'bg-[#00a884] text-white border-transparent shadow-3xs'
+                  : 'bg-white dark:bg-[#2a3942] text-[#54656f] dark:text-[#8696a0] border-[#e9edef] dark:border-slate-800 hover:bg-[#f0f2f5]'
               }`}
             >
               <Sparkles className="h-3 w-3" />
               <span>Templates ({templates.filter(t => t.type !== 'quick_reply').length})</span>
-              {showTemplates ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
             </button>
 
             <button
@@ -1132,37 +1178,36 @@ export default function LeadWhatsAppChat({
                 setShowQuickReplies(!showQuickReplies);
                 setShowTemplates(false);
               }}
-              className={`text-[11px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border ${
+              className={`text-[10.5px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border ${
                 showQuickReplies
-                  ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
-                  : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800 hover:bg-amber-100'
+                  ? 'bg-amber-600 text-white border-transparent shadow-3xs'
+                  : 'bg-white dark:bg-[#2a3942] text-amber-800 dark:text-amber-400 border-[#e9edef] dark:border-slate-800 hover:bg-amber-50'
               }`}
             >
               <Zap className="h-3 w-3 fill-current" />
               <span>Quick Replies ({templates.filter(t => t.type === 'quick_reply').length})</span>
-              {showQuickReplies ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
             </button>
           </div>
 
-          <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono font-bold">
-            <span>Press Enter to send</span>
+          <div className="text-[9.5px] text-[#667781] dark:text-[#8696a0] font-mono font-bold uppercase select-none">
+            <span>Enter to Send</span>
           </div>
         </div>
 
         {/* Popover Emoji Picker */}
         {showEmojiPicker && (
-          <div className="absolute bottom-[58px] right-3 bg-white dark:bg-slate-950 border border-slate-250 dark:border-slate-800 rounded-2xl shadow-xl p-3 z-30 w-64 text-left">
-            <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-100 dark:border-slate-800">
-              <span className="text-[10px] font-black uppercase text-slate-400">Insert Emoji</span>
+          <div className="absolute bottom-[72px] left-3 bg-white dark:bg-[#111b21] border border-[#e9edef] dark:border-slate-800 rounded-xl shadow-xl p-3.5 z-30 w-64 text-left">
+            <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-[#e9edef] dark:border-slate-800">
+              <span className="text-[10px] font-bold uppercase text-[#667781] dark:text-[#8696a0]">Emojis</span>
               <button
                 type="button"
                 onClick={() => setShowEmojiPicker(false)}
-                className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 transition-colors"
+                className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#667781] hover:text-[#111b21] dark:hover:text-white transition-colors"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
-            <div className="grid grid-cols-6 gap-2 max-h-48 overflow-y-auto pr-1">
+            <div className="grid grid-cols-6 gap-2 max-h-44 overflow-y-auto pr-1">
               {emojis.map((emoji) => (
                 <button
                   key={emoji}
@@ -1171,7 +1216,7 @@ export default function LeadWhatsAppChat({
                     setInputText(prev => prev + emoji);
                     textareaRef.current?.focus();
                   }}
-                  className="text-lg p-1 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-lg active:scale-90 transition-transform cursor-pointer select-none text-center flex items-center justify-center h-8 w-8"
+                  className="text-lg p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md active:scale-90 transition-transform cursor-pointer select-none text-center flex items-center justify-center h-8 w-8"
                 >
                   {emoji}
                 </button>
@@ -1180,8 +1225,8 @@ export default function LeadWhatsAppChat({
           </div>
         )}
 
-        {/* Input box & action controls */}
-        <div className="flex items-end gap-2">
+        {/* Main Composer Row */}
+        <div className="flex items-center gap-2.5">
           {/* Hidden File Input */}
           <input
             type="file"
@@ -1191,9 +1236,42 @@ export default function LeadWhatsAppChat({
             accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
           />
 
+          {/* Left Accessory Icon Actions */}
+          <div className="flex items-center gap-1.5">
+            {/* Emoji Trigger Button */}
+            <button
+              type="button"
+              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+              className={`p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 ${
+                showEmojiPicker
+                  ? 'text-[#00a884]'
+                  : 'text-[#54656f] dark:text-[#8696a0]'
+              }`}
+              title="Emoji"
+            >
+              <Smile className="h-6 w-6" />
+            </button>
+
+            {/* Attachment Button */}
+            <button
+              type="button"
+              onClick={handleFileUploadClick}
+              disabled={uploading || sending}
+              className="p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#8696a0]"
+              title="Attach Document or Media"
+            >
+              {uploading ? (
+                <RefreshCw className="h-5.5 w-5.5 animate-spin text-[#00a884]" />
+              ) : (
+                <Paperclip className="h-5.5 w-5.5 rotate-45" />
+              )}
+            </button>
+          </div>
+
+          {/* Textarea Input Field */}
           <textarea
             ref={textareaRef}
-            rows={2}
+            rows={1}
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={(e) => {
@@ -1202,52 +1280,27 @@ export default function LeadWhatsAppChat({
                 handleSendMessage();
               }
             }}
-            placeholder={`Type a WhatsApp message to ${lead.name || 'Candidate'} (${lead.phone})...`}
-            className="flex-1 text-xs sm:text-[13px] p-2.5 px-3 rounded-xl bg-slate-800 border border-slate-750 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-slate-100 placeholder-slate-600 font-medium resize-none leading-relaxed transition-all"
+            placeholder="Type a message"
+            className="flex-1 text-[14.5px] py-2.5 px-4 rounded-lg bg-white dark:bg-[#2a3942] border-none focus:outline-none focus:ring-0 text-[#111b21] dark:text-[#e9edef] placeholder-[#667781] dark:placeholder-[#8696a0] font-normal leading-normal max-h-36 min-h-[42px] resize-none overflow-y-auto"
+            style={{ height: '42px' }}
           />
 
-          {/* Emoji Trigger Button */}
-          <button
-            type="button"
-            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-            className={`p-3 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 border h-[42px] w-[42px] ${
-              showEmojiPicker
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
-                : 'bg-slate-800 hover:bg-slate-850 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-100 dark:text-slate-300 border-slate-750 dark:border-slate-700'
-            }`}
-            title="Emoji Keyboard"
-          >
-            <Smile className="h-4 w-4" />
-          </button>
-
-          {/* Attachment Button */}
-          <button
-            type="button"
-            onClick={handleFileUploadClick}
-            disabled={uploading || sending}
-            className="p-3 bg-slate-800 hover:bg-slate-850 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-100 dark:text-slate-300 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 border border-slate-750 dark:border-slate-700 h-[42px] w-[42px]"
-            title="Attach Image, PDF, or Document"
-          >
-            {uploading ? (
-              <RefreshCw className="h-4 w-4 animate-spin text-slate-600 dark:text-slate-400" />
-            ) : (
-              <Paperclip className="h-4 w-4" />
-            )}
-          </button>
-
+          {/* Send Button - Rounded Circle style like true WhatsApp Web */}
           <button
             type="button"
             onClick={() => handleSendMessage()}
-            disabled={!inputText.trim() || sending}
-            className="py-3 px-4.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-40 disabled:hover:bg-emerald-600 text-white font-extrabold rounded-xl text-xs transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5 shrink-0 uppercase tracking-wider h-[42px]"
+            disabled={(!inputText.trim() && !sending) || sending}
+            className={`h-11 w-11 rounded-full flex items-center justify-center shadow-md transition-all shrink-0 cursor-pointer ${
+              inputText.trim() 
+                ? 'bg-[#00a884] hover:bg-[#008f72] text-white active:scale-95' 
+                : 'bg-black/5 dark:bg-white/5 text-[#54656f] dark:text-[#8696a0] opacity-40 cursor-not-allowed'
+            }`}
+            title="Send message"
           >
             {sending ? (
-              <RefreshCw className="h-4 w-4 animate-spin text-white" />
+              <RefreshCw className="h-5 w-5 animate-spin text-white" />
             ) : (
-              <>
-                <Send className="h-3.5 w-3.5 stroke-[2.5]" />
-                <span>Send</span>
-              </>
+              <Send className="h-5 w-5 text-white ml-0.5 fill-current" />
             )}
           </button>
         </div>

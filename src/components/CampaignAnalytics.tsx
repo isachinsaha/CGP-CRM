@@ -401,43 +401,139 @@ export default function CampaignAnalytics({
 
   // 1. DAILY REPORT ESTIMATIONS (Leads / Remarks updated today)
   const dailyStats = useMemo(() => {
-    const todayStr = new Date().toDateString(); // Or check created/updated matches
-    const todayLeads = activeLeads.filter(l => {
-      const createdDate = new Date(l.createdAt).toDateString();
-      return createdDate === todayStr;
+    const todayLocalDateStr = getLocalDateString(new Date());
+    const leadsList = activeLeads || [];
+    
+    const touchedLeadsSet = new Set<string>();
+    const uniqueAssignmentsMap = new Map<string, any>();
+    const remarksList: any[] = [];
+    let wonTodayCount = 0;
+
+    const normalizeBucketName = (name: string) => {
+      const lower = name.toLowerCase();
+      if (lower.includes('new')) return 'New Inbound';
+      if (lower.includes('discussion') || lower.includes('negotiating')) return 'In Discussion';
+      if (lower.includes('strong') || lower.includes('opportunity')) return 'Strong Opportunity';
+      if (lower.includes('office') || lower.includes('visited') || lower.includes('interview') || lower.includes('proposal')) return 'Office Visited/Interview Attended';
+      if (lower.includes('won') || lower.includes('closed won')) return 'Closed Won';
+      if (lower.includes('rotation') || lower.includes('cold') || lower.includes('rotations')) return 'In Rotations';
+      if (lower.includes('lost') || lower.includes('closed lost')) return 'Closed Lost';
+      return name;
+    };
+
+    leadsList.forEach(l => {
+      // 1. Check for initial/registration assignment done on todayLocalDateStr
+      const leadAssignDate = l.assignDate || (l.assignedTo && l.assignedTo.toLowerCase() !== 'unassigned' ? getLocalDateString(l.createdAt || l.entryDate) : '');
+      if (leadAssignDate === todayLocalDateStr && l.assignedTo && l.assignedTo.trim() !== '' && l.assignedTo.toLowerCase() !== 'unassigned') {
+        uniqueAssignmentsMap.set(l.id, {
+          id: l.id,
+          name: l.name,
+          lead: l,
+          text: `Newly assigned to coordinator "${l.assignedTo}" by Administrator upon registration.`,
+          actor: 'Administrator',
+          timestamp: new Date(`${todayLocalDateStr}T09:00:00`).toISOString()
+        });
+        touchedLeadsSet.add(l.id);
+      }
+
+      if (!l.timeline || !Array.isArray(l.timeline)) return;
+
+      l.timeline.forEach(e => {
+        const eventDate = new Date(e.timestamp);
+        if (isNaN(eventDate.getTime())) return;
+        
+        const eventYear = eventDate.getFullYear();
+        const eventMonth = String(eventDate.getMonth() + 1).padStart(2, '0');
+        const eventDay = String(eventDate.getDate()).padStart(2, '0');
+        const eventDateStr = `${eventYear}-${eventMonth}-${eventDay}`;
+        
+        if (eventDateStr !== todayLocalDateStr) return;
+
+        // Count assignment events
+        const isAssignmentEvent = e.type === 'assignment' || e.text.toLowerCase().includes('assigned coordinator') || e.text.toLowerCase().includes('coordinator changed');
+        if (isAssignmentEvent) {
+          uniqueAssignmentsMap.set(l.id, {
+            id: l.id,
+            name: l.name,
+            lead: l,
+            text: e.text,
+            actor: e.actor || 'Administrator',
+            timestamp: e.timestamp
+          });
+          touchedLeadsSet.add(l.id);
+        }
+
+        // Count remarks logged today
+        if (e.type === 'remark' || e.type === 'message' || e.text.toLowerCase().includes('remark') || e.text.toLowerCase().includes('call status') || e.text.toLowerCase().includes('whatsapp')) {
+          remarksList.push({
+            id: l.id,
+            lead: l,
+            name: l.name,
+            assignedTo: e.actor || l.assignedTo || 'System',
+            country: l.country || 'N/A',
+            remarks: e.text,
+            time: eventDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            timestamp: e.timestamp
+          });
+          touchedLeadsSet.add(l.id);
+        }
+
+        // Count moves to 'Closed Won' today
+        if (e.type === 'status' || e.text.toLowerCase().includes('pipeline stage changed') || e.text.toLowerCase().includes('pipeline stage auto-moved')) {
+          const match = e.text.match(/to\s+"([^"]+)"/i) || e.text.match(/to\s+([^"]+)$/i);
+          const rawTargetBucket = match ? match[1] : 'Unknown';
+          const normalizedBucket = normalizeBucketName(rawTargetBucket);
+          if (normalizedBucket === 'Closed Won') {
+            wonTodayCount++;
+          }
+          touchedLeadsSet.add(l.id);
+        }
+
+        touchedLeadsSet.add(l.id);
+      });
     });
 
-    const activeOutreachCount = activeLeads.filter(l => {
-      const updatedDate = new Date(l.updatedAt).toDateString();
-      const isOutreach = l.stage !== 'new' && (l.remarks1 || l.remarks2 || l.notes);
-      return updatedDate === todayStr && isOutreach;
-    }).length;
+    const assignedCount = uniqueAssignmentsMap.size;
+    const touchedCount = touchedLeadsSet.size;
 
-    const wonToday = activeLeads.filter(l => {
-      const updatedDate = new Date(l.updatedAt).toDateString();
-      return updatedDate === todayStr && l.stage === 'won';
-    }).length;
+    // Ensure we sort remarks by timestamp descending so the latest remarks show first
+    const remarksSorted = remarksList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-    // Fetch remarks logged today
-    const remarksToday = activeLeads.filter(l => {
-      const updatedDate = new Date(l.updatedAt).toDateString();
-       return updatedDate === todayStr && (l.remarks1 || l.remarks2 || l.remarks3);
-    }).map(l => ({
-      id: l.id,
-      lead: l,
-      name: l.name,
-      assignedTo: l.assignedTo,
-      country: l.country,
-      remarks: l.remarks3 || l.remarks2 || l.remarks1,
-      time: new Date(l.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }));
+    // If there are no remarks logged in the timeline today, we can fall back to the last-updated remarks from the lead fields
+    // to preserve backwards compatibility or manual remarks entered directly without timeline events
+    if (remarksSorted.length === 0) {
+      leadsList.forEach(l => {
+        const updatedDate = getLocalDateString(l.updatedAt);
+        if (updatedDate === todayLocalDateStr && (l.remarks1 || l.remarks2 || l.remarks3)) {
+          remarksSorted.push({
+            id: l.id,
+            lead: l,
+            name: l.name,
+            assignedTo: l.assignedTo || 'System',
+            country: l.country || 'N/A',
+            remarks: l.remarks3 || l.remarks2 || l.remarks1,
+            time: new Date(l.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            timestamp: l.updatedAt
+          });
+        }
+      });
+      remarksSorted.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    }
+
+    // Let's also check won status by updatedAt date string just to be completely safe and accurate
+    const wonByStatusCount = leadsList.filter(l => {
+      const updatedDate = getLocalDateString(l.updatedAt);
+      return updatedDate === todayLocalDateStr && l.stage === 'won';
+    }).length;
+    
+    const wonToday = Math.max(wonTodayCount, wonByStatusCount);
 
     return {
-      createdCount: todayLeads.length,
-      todayLeads,
-      activeOutreachCount,
+      createdCount: assignedCount,
+      todayLeads: leadsList.filter(l => getLocalDateString(l.createdAt) === todayLocalDateStr),
+      activeOutreachCount: touchedCount,
       wonToday,
-      remarksToday
+      remarksToday: remarksSorted
     };
   }, [activeLeads]);
 

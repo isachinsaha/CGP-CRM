@@ -166,39 +166,39 @@ export default function LeadBoard({
     let level: 'green' | 'yellow' | 'orange' | 'red' = 'green';
     let rangeLabel = '0-25%';
     let selectedClass = 'bg-emerald-50 dark:bg-emerald-950/80 border-2 border-emerald-500 text-emerald-950 dark:text-slate-100 shadow-md ring-2 ring-emerald-500/20';
-    let unselectedClass = 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60 hover:border-emerald-500 text-emerald-900 dark:text-emerald-200 shadow-3xs';
-    let badgeColor = 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-400 border-emerald-300 dark:border-emerald-500/40 font-black';
+    let unselectedClass = 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-600/35 dark:border-emerald-500/20 hover:border-emerald-500 text-emerald-900 dark:text-emerald-200 shadow-3xs';
+    let badgeColor = 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-500/40 font-black';
     let iconColor = 'text-emerald-600 dark:text-emerald-400';
     let headerColor = 'text-emerald-900 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 font-bold border border-emerald-300 dark:border-emerald-800/50';
-    let textColor = 'text-emerald-700 dark:text-emerald-400';
+    let textColor = 'text-emerald-700 dark:text-emerald-300';
 
     if (percentage >= 75) {
       level = 'red';
       rangeLabel = '>75%';
       selectedClass = 'bg-rose-50 dark:bg-rose-950/80 border-2 border-rose-500 text-rose-950 dark:text-slate-100 shadow-md ring-2 ring-rose-500/20';
-      unselectedClass = 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/60 hover:border-rose-500 text-rose-900 dark:text-rose-200 shadow-3xs';
-      badgeColor = 'bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-400 border-rose-300 dark:border-rose-500/40 font-black';
+      unselectedClass = 'bg-rose-50/50 dark:bg-rose-950/20 border-emerald-600/35 dark:border-emerald-500/20 hover:border-rose-500 text-rose-900 dark:text-rose-200 shadow-3xs';
+      badgeColor = 'bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-500/40 font-black';
       iconColor = 'text-rose-600 dark:text-rose-400';
       headerColor = 'text-rose-900 dark:text-rose-300 bg-rose-100 dark:bg-rose-950/60 font-bold border border-rose-300 dark:border-rose-800/50';
-      textColor = 'text-rose-700 dark:text-rose-400';
+      textColor = 'text-rose-700 dark:text-rose-300';
     } else if (percentage >= 50) {
       level = 'orange';
       rangeLabel = '50-75%';
       selectedClass = 'bg-orange-50 dark:bg-orange-950/85 border-2 border-orange-600 text-orange-950 dark:text-slate-100 shadow-md ring-2 ring-orange-600/30';
-      unselectedClass = 'bg-orange-50/50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-700/80 hover:border-orange-500 text-orange-900 dark:text-orange-200 shadow-3xs';
-      badgeColor = 'bg-orange-100 dark:bg-orange-600/30 text-orange-800 dark:text-orange-350 border-orange-300 dark:border-orange-500/60 font-black';
+      unselectedClass = 'bg-orange-50/50 dark:bg-orange-950/30 border-emerald-600/35 dark:border-emerald-500/20 hover:border-orange-500 text-orange-900 dark:text-orange-200 shadow-3xs';
+      badgeColor = 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-200 border-orange-300 dark:border-orange-500/60 font-black';
       iconColor = 'text-orange-600 dark:text-orange-500';
       headerColor = 'text-orange-900 dark:text-orange-200 bg-orange-100 dark:bg-orange-950/80 font-bold border border-orange-300 dark:border-orange-700/70';
-      textColor = 'text-orange-700 dark:text-orange-400';
+      textColor = 'text-orange-700 dark:text-orange-300';
     } else if (percentage >= 25) {
       level = 'yellow';
       rangeLabel = '25-50%';
       selectedClass = 'bg-yellow-50 dark:bg-yellow-950/85 border-2 border-yellow-400 text-yellow-950 dark:text-yellow-100 shadow-md ring-2 ring-yellow-400/40';
-      unselectedClass = 'bg-yellow-50/50 dark:bg-yellow-950/25 border-yellow-200 dark:border-yellow-400/90 hover:border-yellow-300 text-yellow-900 dark:text-yellow-200 shadow-3xs';
-      badgeColor = 'bg-yellow-100 dark:bg-yellow-400/25 text-yellow-800 dark:text-yellow-350 border-yellow-300 dark:border-yellow-400/60 font-black';
+      unselectedClass = 'bg-yellow-50/50 dark:bg-yellow-950/25 border-emerald-600/35 dark:border-emerald-500/20 hover:border-yellow-300 text-yellow-900 dark:text-yellow-200 shadow-3xs';
+      badgeColor = 'bg-yellow-100 dark:bg-yellow-400/25 text-yellow-800 dark:text-yellow-200 border-yellow-300 dark:border-yellow-400/60 font-black';
       iconColor = 'text-yellow-600 dark:text-yellow-300';
       headerColor = 'text-yellow-900 dark:text-yellow-200 bg-yellow-100 dark:bg-yellow-950/80 font-bold border border-yellow-300 dark:border-yellow-400/60';
-      textColor = 'text-yellow-700 dark:text-yellow-350';
+      textColor = 'text-yellow-700 dark:text-yellow-300';
     }
 
     return {
@@ -559,7 +559,7 @@ export default function LeadBoard({
             e.dataTransfer.effectAllowed = 'move';
           }
         }}
-        className="bg-slate-850 rounded-2xl border border-emerald-900/60 dark:border-emerald-800/50 p-4 shadow-xs cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full hover:shadow-lg hover:shadow-accent-emerald/5"
+        className="bg-slate-850 rounded-2xl border border-emerald-600/35 dark:border-emerald-500/20 p-4 shadow-xs cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full hover:shadow-lg hover:shadow-accent-emerald/5"
         onClick={() => onSelectLead(lead)}
       >
         {/* Target country badge & Stars */}
@@ -735,7 +735,7 @@ export default function LeadBoard({
     <div className="space-y-6" id="cgp-leads-pipeline">
 
       {/* Pipeline Border Card Container */}
-      <div className="bg-slate-950/40 rounded-3xl border border-emerald-900/60 dark:border-emerald-800/60 p-6 shadow-xl text-left">
+      <div className="bg-slate-950/40 rounded-3xl border border-emerald-600/35 dark:border-emerald-500/20 p-6 shadow-xl text-left">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-5 border-b border-slate-700 pb-4 gap-4">
           {/* Left Side: Controls in One Straight Line in exact requested order */}
           <div className="flex flex-wrap items-center gap-3">
@@ -899,7 +899,7 @@ export default function LeadBoard({
                 let selectedClass = '';
                 let badgeColor = '';
                 let iconColor = 'text-slate-400';
-                let unselectedClass = 'bg-slate-850 border-slate-750 hover:border-slate-600 text-slate-200 hover:bg-slate-800/50 shadow-3xs';
+                let unselectedClass = 'bg-slate-850 border-emerald-600/35 dark:border-emerald-500/20 hover:border-emerald-600 text-slate-200 hover:bg-slate-800/50 shadow-3xs';
                 
                 if (col.id === 'new') {
                   selectedClass = isSelected ? 'bg-sky-950/20 dark:bg-sky-950/80 border-2 border-sky-600 dark:border-sky-500 text-slate-100 shadow-md ring-2 ring-sky-500/20' : '';
@@ -1000,7 +1000,7 @@ export default function LeadBoard({
 
             {/* Active Stage Container (Active Jobs Hub style) */}
             {selectedStage && (
-              <div className="bg-slate-950/40 border border-slate-700 rounded-3xl p-6 shadow-3xs text-left space-y-6">
+              <div className="bg-slate-950/40 border border-emerald-600/35 dark:border-emerald-500/20 rounded-3xl p-6 shadow-3xs text-left space-y-6">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-slate-700 pb-4 gap-4">
                   {/* Left Title, Stats AND Filters grouped beautifully with an increased generous gap */}
                   <div className="flex flex-col md:flex-row md:items-center gap-14 md:gap-28 min-w-0 flex-1">
@@ -1126,7 +1126,7 @@ export default function LeadBoard({
                     className={`rounded-2xl border p-3.5 flex flex-col min-h-[580px] w-[280px] sm:w-[300px] md:w-[310px] shrink-0 h-full text-left shadow-md transition-all duration-200 ${
                       isDraggedOver 
                         ? 'border-accent-purple bg-accent-purple/10 scale-[1.01] shadow-xl ring-2 ring-accent-purple/20' 
-                        : 'border-slate-700 bg-slate-900/90'
+                        : 'border-emerald-600/35 dark:border-emerald-500/20 bg-slate-900/90'
                     }`}
                   >
                     {/* Column Header */}
