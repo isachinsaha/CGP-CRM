@@ -1892,9 +1892,8 @@ export default function MessagingCenter({
                       quick_reply: '⚡'
                     };
                     const emoji = emojiMap[t.category] || '💬';
-                    const categoryStr = t.category ? t.category.toUpperCase() : 'TEMPLATE';
                     const snippet = t.text ? t.text.replace(/\s+/g, ' ').substring(0, 50) : '';
-                    const label = `${emoji} [${categoryStr}] ${t.title} - "${snippet}..."`;
+                    const label = `${emoji} ${t.title} - "${snippet}..."`;
                     return (
                       <option key={t.id} value={t.id} className="text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 font-sans">
                         {label}

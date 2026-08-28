@@ -38,6 +38,7 @@ export interface WhatsAppTemplate {
   description: string;
   text: string;
   type?: 'template' | 'quick_reply';
+  language?: string;
 }
 
 export interface Lead {

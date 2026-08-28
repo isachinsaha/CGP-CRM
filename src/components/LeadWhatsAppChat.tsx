@@ -1248,9 +1248,8 @@ export default function LeadWhatsAppChat({
                       quick_reply: '⚡'
                     };
                     const emoji = emojiMap[t.category] || '💬';
-                    const categoryStr = t.category ? t.category.toUpperCase() : 'TEMPLATE';
                     const snippet = t.text ? t.text.replace(/\s+/g, ' ').substring(0, 50) : '';
-                    const label = `${emoji} [${categoryStr}] ${t.title} - "${snippet}..."`;
+                    const label = `${emoji} ${t.title} - "${snippet}..."`;
                     return (
                       <option key={t.id} value={t.id} className="text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 font-sans">
                         {label}
@@ -1346,7 +1345,7 @@ export default function LeadWhatsAppChat({
                   className={`text-[10.5px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border ${
                     showTemplates
                       ? 'bg-[#00a884] text-white border-transparent shadow-3xs'
-                      : 'bg-white dark:bg-[#2a3942] text-[#54656f] dark:text-[#8696a0] border-[#e9edef] dark:border-slate-800 hover:bg-[#f0f2f5]'
+                      : 'bg-white dark:bg-[#2a3942] text-[#00a884] dark:text-[#00c298] border-emerald-500/30 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20'
                   }`}
                 >
                   <Sparkles className="h-3 w-3" />

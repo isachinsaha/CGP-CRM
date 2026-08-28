@@ -272,7 +272,7 @@ export async function sendWhatsAppMessage(
           template: {
             name: matchedTemplate.id,
             language: {
-              code: 'en_US'
+              code: matchedTemplate.language || 'en'
             },
             components: [
               {
@@ -412,7 +412,8 @@ export async function fetchMetaWhatsAppTemplates(): Promise<WhatsAppTemplate[]> 
         category,
         description: `Meta Approved Template (${raw.category || 'Utility'})`,
         text: bodyText,
-        type: 'template'
+        type: 'template',
+        language: raw.language || 'en'
       });
     }
 
