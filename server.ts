@@ -48,7 +48,7 @@ import {
 } from './src/server/db.ts';
 import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings } from './src/types.ts';
 import { isDefaultExperience, getEffectiveExperience, getEffectiveIntake } from './src/utils.ts';
-import { DEFAULT_WHATSAPP_TEMPLATES, sendWhatsAppMessage, replaceTemplatePlaceholders, formatPhoneForWhatsApp } from './src/server/whatsapp.ts';
+import { DEFAULT_WHATSAPP_TEMPLATES, sendWhatsAppMessage, replaceTemplatePlaceholders, formatPhoneForWhatsApp, fetchMetaWhatsAppTemplates } from './src/server/whatsapp.ts';
 
 const app = express();
 const PORT = 3000;
@@ -1802,7 +1802,7 @@ app.post('/api/whatsapp/test-connection', async (req, res) => {
 // POST /api/whatsapp/start-chat - Start a new WhatsApp chat with any phone number
 app.post('/api/whatsapp/start-chat', async (req, res) => {
   try {
-    const { phone, name, initialMessage, position, country, assignedTo } = req.body;
+    const { phone, name, initialMessage, position, country, assignedTo, templateName } = req.body;
     if (!phone || !String(phone).trim()) {
       res.status(400).json({ error: 'Phone number is required to start a chat.' });
       return;
@@ -1900,10 +1900,19 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
     let deliveryResult = null;
     if (initialMessage && String(initialMessage).trim()) {
       const msgText = String(initialMessage).trim();
+      const templates = await getWhatsAppTemplates().catch(() => DEFAULT_WHATSAPP_TEMPLATES);
+      const matchedTemplate = templates.find(t => t.id === templateName || t.title === templateName);
+
       deliveryResult = await sendWhatsAppMessage(
         targetLead.phone,
         msgText,
-        targetLead.name
+        targetLead.name,
+        templateName || undefined,
+        undefined,
+        undefined,
+        undefined,
+        targetLead,
+        matchedTemplate
       );
 
       const senderName = userRole === 'admin' ? 'Administrator' : `Coordinator (${agentId})`;
@@ -1913,8 +1922,9 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
         senderName,
         text: msgText,
         timestamp: nowIso,
-        status: 'sent',
-        channel: 'whatsapp'
+        status: deliveryResult?.status || 'sent',
+        channel: 'whatsapp',
+        templateName: templateName || undefined
       };
 
       if (!Array.isArray(targetLead.messages)) {
@@ -2052,11 +2062,18 @@ app.delete('/api/whatsapp/templates/:id', async (req, res) => {
 app.post('/api/whatsapp/templates/sync', async (req, res) => {
   try {
     console.log('[System] Syncing templates from Meta Business...');
-    // TODO: Implement actual API call with credentials
-    res.json({ success: true, message: 'Sync triggered (stub)' });
+    const metaTemplates = await fetchMetaWhatsAppTemplates();
+    if (metaTemplates.length > 0) {
+      for (const t of metaTemplates) {
+        await saveWhatsAppTemplate(t);
+      }
+      res.json({ success: true, count: metaTemplates.length, message: `Successfully synced ${metaTemplates.length} templates from Meta.` });
+    } else {
+      res.status(400).json({ error: 'No templates found on Meta or Meta integration is not configured with active API keys.' });
+    }
   } catch (err: any) {
     console.error('Failed to sync templates:', err);
-    res.status(500).json({ error: 'Failed to sync templates' });
+    res.status(500).json({ error: `Failed to sync templates: ${err.message}` });
   }
 });
 
@@ -2121,12 +2138,15 @@ app.post('/api/leads/:id/messages', async (req, res) => {
 
     // Dispatch directly via Meta Cloud API or Sandbox Engine
     const isOutbound = sender !== 'lead';
-    let deliveryResult: { success: boolean; channel: string; status: 'sent' | 'delivered' | 'read'; messageId?: string; details?: any } = {
+    let deliveryResult: { success: boolean; channel: string; status: 'sent' | 'delivered' | 'read' | 'failed'; messageId?: string; details?: any } = {
       success: true,
       channel: 'simulation',
       status: 'delivered'
     };
     if (isOutbound && lead.phone) {
+      const templates = await getWhatsAppTemplates().catch(() => DEFAULT_WHATSAPP_TEMPLATES);
+      const matchedTemplate = templates.find(t => t.id === templateName || t.title === templateName);
+
       deliveryResult = await sendWhatsAppMessage(
         lead.phone,
         messageText,
@@ -2134,7 +2154,9 @@ app.post('/api/leads/:id/messages', async (req, res) => {
         templateName,
         absoluteMediaUrl,
         msgType,
-        fileName
+        fileName,
+        lead,
+        matchedTemplate
       );
     }
 
@@ -2596,14 +2618,14 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
           assignDate: '',
           name: `WhatsApp Lead ${cleanPhone.slice(-10)}`,
           phone: `+${cleanPhone}`,
-          gender: 'M',
-          age: 24,
-          origin: 'Inbound Message',
-          country: 'Kuwait',
-          position: 'General openings',
-          experience: 'Verification pending',
-          adminRemarks: 'INBOUND WHATSAPP CONVERSION',
-          notes: 'Auto-enrolled from direct WhatsApp conversation reply.',
+          gender: 'Not defined',
+          age: '',
+          origin: '',
+          country: '',
+          position: '',
+          experience: '',
+          adminRemarks: '',
+          notes: '',
           assignedTo: 'unassigned',
           importance: 3,
           remarks1: '',
@@ -3172,14 +3194,14 @@ Extract:
       name: aiAnalysis.name,
       phone,
       email: aiAnalysis.email || '',
-      gender: 'M',
-      age: 24,
-      origin: 'Online conversion',
-      country: finalCampaignName.split(' ')[0] || 'Kuwait',
-      position: aiAnalysis.requirements[0] || 'General Opening',
-      experience: 'Verification pending',
-      adminRemarks: 'META ADS WHATSAPP CONVERSION',
-      notes: 'Lead received automatically via Meta Ads Click-to-WhatsApp webhook simulator.',
+      gender: 'Not defined',
+      age: '',
+      origin: '',
+      country: finalCampaignName.split(' ')[0] || '',
+      position: aiAnalysis.requirements[0] || '',
+      experience: '',
+      adminRemarks: '',
+      notes: '',
       assignedTo: '',
       importance: 3,
       remarks1: '',

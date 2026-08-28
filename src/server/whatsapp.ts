@@ -98,25 +98,97 @@ Seats are limited! Reply "INTERESTED" or call {{coordinator}} now to register.`
   }
 ];
 
+export function resolveTemplateVariable(
+  varName: string,
+  templateId: string,
+  templateText: string,
+  lead: Partial<Lead> | undefined,
+  phone: string,
+  candidateName?: string,
+  coordinatorName?: string
+): string {
+  const v = varName.trim().toLowerCase();
+  
+  const nameVal = lead?.name || candidateName || 'Candidate';
+  const countryVal = lead?.country || 'Gulf / Overseas';
+  const positionVal = lead?.position || 'Openings';
+  const phoneVal = lead?.phone || phone || '';
+  const serialNoVal = lead?.serialNo || 'N/A';
+  let coordinatorVal = coordinatorName || lead?.assignedTo || 'Career Growth Placement Team';
+  if (coordinatorVal === 'admin') {
+    coordinatorVal = 'Administrator';
+  } else if (coordinatorVal && coordinatorVal.length > 0) {
+    coordinatorVal = coordinatorVal.charAt(0).toUpperCase() + coordinatorVal.slice(1);
+  }
+
+  // Support explicit named variables
+  if (v === 'name') return nameVal;
+  if (v === 'country') return countryVal;
+  if (v === 'position') return positionVal;
+  if (v === 'phone') return phoneVal;
+  if (v === 'serialno') return serialNoVal;
+  if (v === 'coordinator') return coordinatorVal;
+
+  // Support Meta's numeric variables {{1}}, {{2}}, {{3}}...
+  const lowerId = templateId.toLowerCase();
+  const lowerText = templateText.toLowerCase();
+
+  if (v === '1') {
+    // Special heuristic: if it's the assignment template, the first variable is coordinator
+    if (lowerId.includes('assign') || lowerText.includes('assist') || lowerText.includes('save')) {
+      return coordinatorVal;
+    }
+    return nameVal;
+  }
+  if (v === '2') {
+    if (lowerId.includes('assign') || lowerText.includes('assist')) {
+      return phoneVal; // fallback e.g. for secondary phone
+    }
+    return positionVal;
+  }
+  if (v === '3') {
+    return countryVal;
+  }
+  if (v === '4') {
+    return coordinatorVal;
+  }
+
+  return '';
+}
+
 export function replaceTemplatePlaceholders(
   templateText: string,
   lead: Partial<Lead>,
-  coordinatorName?: string
+  coordinatorName?: string,
+  templateId: string = ''
 ): string {
   let result = templateText;
-  const name = lead.name || 'Candidate';
-  const country = lead.country || 'Gulf / Overseas';
-  const position = lead.position || 'Openings';
-  const phone = lead.phone || '';
-  const serialNo = lead.serialNo || 'N/A';
-  const coordinator = coordinatorName || lead.assignedTo || 'Career Growth Placement Team';
+  
+  // Find all matches of {{xxx}}
+  const regex = /\{\{([^}]+)\}\}/g;
+  let match;
+  const matches: string[] = [];
+  while ((match = regex.exec(templateText)) !== null) {
+    matches.push(match[1]);
+  }
 
-  result = result.replace(/\{\{name\}\}/gi, name);
-  result = result.replace(/\{\{country\}\}/gi, country);
-  result = result.replace(/\{\{position\}\}/gi, position);
-  result = result.replace(/\{\{phone\}\}/gi, phone);
-  result = result.replace(/\{\{serialNo\}\}/gi, serialNo);
-  result = result.replace(/\{\{coordinator\}\}/gi, coordinator);
+  // Replace each unique variable name using our resolveTemplateVariable helper
+  const uniqueVariables = Array.from(new Set(matches));
+  for (const v of uniqueVariables) {
+    const val = resolveTemplateVariable(
+      v,
+      templateId,
+      templateText,
+      lead,
+      lead.phone || '',
+      lead.name || '',
+      coordinatorName
+    );
+    // Replace all occurrences of {{v}} with val
+    const escapedVar = v.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const replaceRegex = new RegExp(`\\{\\{\\s*${escapedVar}\\s*\\}\\}`, 'gi');
+    result = result.replace(replaceRegex, val);
+  }
 
   return result;
 }
@@ -140,7 +212,7 @@ export interface SendWhatsAppResult {
   success: boolean;
   messageId: string;
   channel: 'meta_cloud_api' | 'simulation';
-  status: 'sent' | 'delivered' | 'read';
+  status: 'sent' | 'delivered' | 'read' | 'failed';
   details?: any;
 }
 
@@ -151,7 +223,9 @@ export async function sendWhatsAppMessage(
   templateName?: string,
   mediaUrl?: string,
   mediaType?: 'text' | 'image' | 'pdf' | 'document',
-  fileName?: string
+  fileName?: string,
+  lead?: Partial<Lead>,
+  matchedTemplate?: WhatsAppTemplate
 ): Promise<SendWhatsAppResult> {
   const formattedPhone = formatPhoneForWhatsApp(phone);
   const messageId = `wa_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -168,7 +242,47 @@ export async function sendWhatsAppMessage(
       let type = 'text';
       let payload: any = {};
 
-      if (mediaUrl) {
+      if (matchedTemplate) {
+        type = 'template';
+        
+        // Extract variables in order of appearance in original template text
+        const variables: string[] = [];
+        const regex = /\{\{([^}]+)\}\}/g;
+        let match;
+        while ((match = regex.exec(matchedTemplate.text)) !== null) {
+          variables.push(match[1].trim().toLowerCase());
+        }
+
+        const parameters = variables.map(v => {
+          const val = resolveTemplateVariable(
+            v,
+            matchedTemplate.id,
+            matchedTemplate.text,
+            lead,
+            phone,
+            candidateName
+          );
+          return {
+            type: 'text',
+            text: val
+          };
+        });
+
+        payload = {
+          template: {
+            name: matchedTemplate.id,
+            language: {
+              code: 'en_US'
+            },
+            components: [
+              {
+                type: 'body',
+                parameters
+              }
+            ]
+          }
+        };
+      } else if (mediaUrl) {
         if (mediaType === 'image') {
           type = 'image';
           payload = { image: { link: mediaUrl, caption: text } };
@@ -215,7 +329,7 @@ export async function sendWhatsAppMessage(
           success: false,
           messageId,
           channel: 'meta_cloud_api',
-          status: 'delivered',
+          status: 'failed',
           details: data
         };
       }
@@ -237,4 +351,120 @@ export async function sendWhatsAppMessage(
       note: 'Message delivered via Direct Meta WhatsApp Cloud API Engine.'
     }
   };
+}
+
+export async function fetchMetaWhatsAppTemplates(): Promise<WhatsAppTemplate[]> {
+  const metaToken = (process.env.WHATSAPP_API_KEY || process.env.META_WA_ACCESS_TOKEN || '').trim();
+  const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_PHONE_NUMBER_ID || '').trim();
+  const envWabaId = (process.env.WHATSAPP_WABA_ID || process.env.META_WABA_ID || '').trim();
+
+  if (!metaToken || metaToken === 'MY_WHATSAPP_API_KEY' || (!phoneNumberId && !envWabaId)) {
+    console.warn('[Meta WhatsApp] Missing API keys or Phone Number ID. Cannot fetch Meta templates.');
+    return [];
+  }
+
+  // Helper to fetch from WABA ID and map templates
+  const fetchAndMapFromWaba = async (wabaId: string): Promise<WhatsAppTemplate[]> => {
+    console.log(`[Meta WhatsApp] Fetching message templates from WABA ID: ${wabaId}...`);
+    const templatesUrl = `https://graph.facebook.com/v20.0/${wabaId}/message_templates?access_token=${metaToken}&limit=200`;
+    const templatesRes = await fetch(templatesUrl);
+    if (!templatesRes.ok) {
+      const errText = await templatesRes.text();
+      throw new Error(`Failed to fetch message templates for WABA ${wabaId}: ${templatesRes.statusText} (${errText})`);
+    }
+
+    const templatesData = await templatesRes.json() as any;
+    if (!templatesData || !Array.isArray(templatesData.data)) {
+      console.warn('[Meta WhatsApp] Response from Meta templates API did not contain templates data array.');
+      return [];
+    }
+
+    // Map Meta templates to local schema
+    const mapped: WhatsAppTemplate[] = [];
+    for (const raw of templatesData.data) {
+      // Find body text
+      const bodyComponent = Array.isArray(raw.components)
+        ? raw.components.find((c: any) => c.type === 'BODY' || c.type === 'body')
+        : null;
+      
+      const bodyText = bodyComponent?.text || '';
+      if (!bodyText) continue;
+
+      // Map Meta's category (e.g. UTILITY, MARKETING, AUTHENTICATION) to one of our categories
+      let category: 'onboarding' | 'interview' | 'documentation' | 'status' | 'offer' | 'quick_reply' = 'status';
+      const metaCat = raw.category ? String(raw.category).toUpperCase() : '';
+      if (metaCat === 'UTILITY') {
+        category = 'documentation';
+      } else if (metaCat === 'MARKETING') {
+        category = 'status';
+      } else if (metaCat === 'AUTHENTICATION') {
+        category = 'quick_reply';
+      }
+
+      // Format title cleanly (e.g. hello_world -> Hello World)
+      const cleanTitle = String(raw.name)
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+
+      mapped.push({
+        id: raw.name, // Must be lowercase ID corresponding to Meta template name
+        title: cleanTitle,
+        category,
+        description: `Meta Approved Template (${raw.category || 'Utility'})`,
+        text: bodyText,
+        type: 'template'
+      });
+    }
+
+    return mapped;
+  };
+
+  // Strategy A: If WABA ID is configured directly in env, use it immediately
+  if (envWabaId) {
+    try {
+      return await fetchAndMapFromWaba(envWabaId);
+    } catch (err) {
+      console.error(`[Meta WhatsApp] Direct WABA sync failed using ID ${envWabaId}:`, err);
+      // Fall through to try lookup if phone number ID is available
+    }
+  }
+
+  // Strategy B: Try lookup via phone number details to find associated WABA ID
+  let lookupError: Error | null = null;
+  if (phoneNumberId) {
+    try {
+      console.log(`[Meta WhatsApp] Fetching WABA ID for phone number ID: ${phoneNumberId}...`);
+      const phoneDetailsUrl = `https://graph.facebook.com/v20.0/${phoneNumberId}?fields=whatsapp_business_account&access_token=${metaToken}`;
+      const phoneRes = await fetch(phoneDetailsUrl);
+      if (phoneRes.ok) {
+        const phoneData = await phoneRes.json() as any;
+        const wabaId = phoneData?.whatsapp_business_account?.id;
+        if (wabaId) {
+          console.log(`[Meta WhatsApp] Found WABA ID via phone lookup: ${wabaId}`);
+          return await fetchAndMapFromWaba(wabaId);
+        }
+      } else {
+        const errText = await phoneRes.text();
+        lookupError = new Error(`Failed to fetch phone number details: ${phoneRes.statusText} (${errText})`);
+      }
+    } catch (err: any) {
+      lookupError = err;
+    }
+  }
+
+  // Strategy C (Self-Healing Fallback):
+  // If the phone lookup failed (e.g. because of #100 nonexisting field, which means the user likely entered
+  // the WABA ID itself in the Phone Number ID field), treat phoneNumberId as the WABA ID directly and pull templates!
+  if (phoneNumberId) {
+    console.log(`[Meta WhatsApp] Lookup failed/skipped (${lookupError?.message || 'No WABA found'}). Trying fallback: treating Phone Number ID (${phoneNumberId}) as WABA ID directly...`);
+    try {
+      return await fetchAndMapFromWaba(phoneNumberId);
+    } catch (fallbackErr: any) {
+      console.error(`[Meta WhatsApp] Fallback also failed:`, fallbackErr);
+      // If both failed, throw the original lookup error or fallback error
+      throw lookupError || fallbackErr;
+    }
+  }
+
+  throw new Error('Could not resolve a valid WhatsApp Business Account ID to sync templates.');
 }

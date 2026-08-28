@@ -78,6 +78,54 @@ export default function MessagingCenter({
   const [startChatPosition, setStartChatPosition] = useState('General openings');
   const [startChatCountry, setStartChatCountry] = useState('Kuwait');
   const [startChatError, setStartChatError] = useState<string | null>(null);
+  const [startChatTemplates, setStartChatTemplates] = useState<any[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+
+  // Fetch templates when start chat modal opens
+  useEffect(() => {
+    if (showStartChatModal) {
+      fetch('/api/whatsapp/templates')
+        .then(res => res.json())
+        .then(data => {
+          if (data && Array.isArray(data.templates)) {
+            setStartChatTemplates(data.templates.filter((t: any) => t.type !== 'quick_reply'));
+          }
+        })
+        .catch(err => console.error('Error fetching templates in MessagingCenter:', err));
+    } else {
+      setSelectedTemplateId('');
+    }
+  }, [showStartChatModal]);
+
+  // Dynamically update the initial message when template, name, position, country, or phone changes
+  useEffect(() => {
+    if (selectedTemplateId) {
+      const selectedTpl = startChatTemplates.find(t => t.id === selectedTemplateId);
+      if (selectedTpl) {
+        let text = selectedTpl.text;
+        const nameVal = startChatName.trim() || 'Candidate';
+        const countryVal = startChatCountry || 'Gulf / Overseas';
+        const positionVal = startChatPosition || 'Openings';
+        const phoneVal = startChatPhone || '';
+        
+        let coordinatorDisp = currentAgentId || 'Career Growth Placement Team';
+        if (coordinatorDisp === 'admin') {
+          coordinatorDisp = 'Administrator';
+        } else if (coordinatorDisp && coordinatorDisp.length > 0) {
+          coordinatorDisp = coordinatorDisp.charAt(0).toUpperCase() + coordinatorDisp.slice(1);
+        }
+
+        text = text.replace(/\{\{name\}\}/gi, nameVal);
+        text = text.replace(/\{\{country\}\}/gi, countryVal);
+        text = text.replace(/\{\{position\}\}/gi, positionVal);
+        text = text.replace(/\{\{phone\}\}/gi, phoneVal);
+        text = text.replace(/\{\{coordinator\}\}/gi, coordinatorDisp);
+        text = text.replace(/\{\{serialNo\}\}/gi, 'N/A');
+
+        setStartChatInitialMessage(text);
+      }
+    }
+  }, [selectedTemplateId, startChatName, startChatCountry, startChatPosition, startChatPhone, startChatTemplates, currentAgentId]);
 
   // Quick inline add toggles for country, position, and project
   const [isAddingCountry, setIsAddingCountry] = useState(false);
@@ -96,16 +144,16 @@ export default function MessagingCenter({
     name: '',
     phone: '',
     alternateNo: '',
-    gender: 'M',
-    age: '24',
+    gender: 'Not defined',
+    age: '',
     origin: '',
-    country: 'Kuwait',
-    position: 'General Applicant',
-    experience: 'Fresher',
-    qualification: '10th Pass',
+    country: '',
+    position: '',
+    experience: '',
+    qualification: '',
     importance: '3',
     source: 'Ads',
-    project: 'Gulf General Recruitment',
+    project: '',
     stage: 'negotiating' as LeadStage,
     assignedTo: 'unassigned',
     tags: [] as string[],
@@ -337,16 +385,16 @@ export default function MessagingCenter({
         name: currentChatLead.name || '',
         phone: currentChatLead.phone || '',
         alternateNo: currentChatLead.alternateNo || '',
-        gender: currentChatLead.gender || 'M',
-        age: String(currentChatLead.age || '24'),
+        gender: currentChatLead.gender || 'Not defined',
+        age: currentChatLead.age !== undefined && currentChatLead.age !== null && currentChatLead.age !== 0 ? String(currentChatLead.age) : '',
         origin: currentChatLead.origin || '',
-        country: currentChatLead.country || 'Kuwait',
-        position: currentChatLead.position || 'General Applicant',
-        experience: currentChatLead.experience || 'Fresher',
-        qualification: currentChatLead.qualification || '10th Pass',
+        country: currentChatLead.country || '',
+        position: currentChatLead.position || '',
+        experience: currentChatLead.experience || '',
+        qualification: currentChatLead.qualification || '',
         importance: String(currentChatLead.importance || '3'),
         source: currentChatLead.source || 'Ads',
-        project: currentChatLead.project || 'Gulf General Recruitment',
+        project: currentChatLead.project || '',
         stage: currentChatLead.stage || 'negotiating',
         assignedTo: currentChatLead.assignedTo || 'unassigned',
         tags: currentChatLead.tags || [],
@@ -554,7 +602,8 @@ export default function MessagingCenter({
           initialMessage: startChatInitialMessage.trim() || undefined,
           position: startChatPosition,
           country: startChatCountry,
-          assignedTo: currentAgentId
+          assignedTo: currentAgentId,
+          templateName: selectedTemplateId || undefined
         })
       });
 
@@ -566,6 +615,7 @@ export default function MessagingCenter({
         setStartChatPhone('');
         setStartChatName('');
         setStartChatInitialMessage('Hello! Welcome to Career Growth Placement. We received your request. Let\'s connect here on WhatsApp.');
+        setSelectedTemplateId('');
         
         // Refresh all local data so the new lead is pulled in
         if (onRefreshData) {
@@ -1815,6 +1865,62 @@ export default function MessagingCenter({
                   </select>
                 </div>
               </div>
+
+              {/* Approved WhatsApp Template Selector */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">
+                  Approved WhatsApp Template (Recommended for New Leads)
+                </label>
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => {
+                    setSelectedTemplateId(e.target.value);
+                    if (!e.target.value) {
+                      setStartChatInitialMessage('Hello! Welcome to Career Growth Placement. We received your request. Let\'s connect here on WhatsApp.');
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-100 dark:text-slate-100 focus:outline-hidden focus:border-emerald-500 transition-all font-sans font-bold"
+                >
+                  <option value="">-- No Template (Send Custom Free Text) --</option>
+                  {startChatTemplates.map((t) => {
+                    const emojiMap: Record<string, string> = {
+                      onboarding: '👋',
+                      interview: '📅',
+                      documentation: '📄',
+                      status: '📢',
+                      offer: '🎉',
+                      quick_reply: '⚡'
+                    };
+                    const emoji = emojiMap[t.category] || '💬';
+                    const categoryStr = t.category ? t.category.toUpperCase() : 'TEMPLATE';
+                    const snippet = t.text ? t.text.replace(/\s+/g, ' ').substring(0, 50) : '';
+                    const label = `${emoji} [${categoryStr}] ${t.title} - "${snippet}..."`;
+                    return (
+                      <option key={t.id} value={t.id} className="text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 font-sans">
+                        {label}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* Live Preview Panel - WhatsApp Styled */}
+              {selectedTemplateId && (
+                <div className="space-y-1 animate-fadeIn border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider flex items-center gap-1">
+                      <Sparkles className="h-3 w-3 text-emerald-500" />
+                      Template Live Preview
+                    </span>
+                    <span className="text-[8px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/20 px-1 py-0.2 rounded font-mono">
+                      Meta Verified Output
+                    </span>
+                  </div>
+                  <div className="p-2.5 bg-[#e1f3fc]/50 dark:bg-[#0b141a]/60 border border-[#b3e0f2]/40 dark:border-slate-800/40 rounded-lg text-xs text-[#111b21] dark:text-[#e9edef] whitespace-pre-wrap font-sans leading-relaxed shadow-3xs">
+                    {startChatInitialMessage}
+                  </div>
+                </div>
+              )}
 
               {/* Initial Outreach Message */}
               <div className="space-y-1">

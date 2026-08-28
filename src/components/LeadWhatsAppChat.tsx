@@ -57,6 +57,50 @@ export default function LeadWhatsAppChat({
 
   const [replyingToMessage, setReplyingToMessage] = useState<Message | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [selectedTemplateIdHistory, setSelectedTemplateIdHistory] = useState('');
+  const [historyPreviewText, setHistoryPreviewText] = useState('');
+  const [syncingMeta, setSyncingMeta] = useState(false);
+
+  const handleSyncMetaTemplates = async () => {
+    try {
+      setSyncingMeta(true);
+      const res = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        // Fetch fresh templates list
+        const tplRes = await fetch('/api/whatsapp/templates').catch(() => null);
+        if (tplRes && tplRes.ok && tplRes.headers.get('content-type')?.includes('application/json')) {
+          const tplData = await tplRes.json();
+          if (Array.isArray(tplData.templates)) {
+            setTemplates(tplData.templates);
+          }
+        }
+        alert(data.message || 'WhatsApp templates synced successfully from Meta!');
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(errData.error || 'Failed to sync templates. Please verify your Meta Business Manager integration settings or try again.');
+      }
+    } catch (err: any) {
+      console.error('[Sync Meta Templates Error]', err);
+      alert('Failed to connect to server to sync templates. Please check your network and try again.');
+    } finally {
+      setSyncingMeta(false);
+    }
+  };
+
+  // Determine if the chat's latest message is older than 24 hours (24h Window Expired)
+  const isChatOlderThan24Hours = () => {
+    const msgs = (messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
+    if (msgs.length === 0) return false; // If empty/new chat, do not restrict.
+    const latestMsg = msgs[msgs.length - 1];
+    if (!latestMsg?.timestamp) return false;
+    const latestTime = new Date(latestMsg.timestamp).getTime();
+    if (isNaN(latestTime)) return false;
+    const now = new Date().getTime();
+    const diffMs = now - latestTime;
+    return diffMs > 24 * 60 * 60 * 1000;
+  };
+  const sessionExpired = isChatOlderThan24Hours();
 
   const emojis = [
     '👍', '❤️', '😂', '😮', '😢', '🙏', '👋', '✨', '✅', '🔥', '🎉', '💯',
@@ -524,7 +568,7 @@ export default function LeadWhatsAppChat({
 
   // Handle template selection
   const handleSelectTemplate = (template: WhatsAppTemplate, directSend = false) => {
-    const formatted = replaceTemplatePlaceholders(template.text, lead, lead.assignedTo || currentAgentId);
+    const formatted = replaceTemplatePlaceholders(template.text, lead, lead.assignedTo || currentAgentId, template.id);
     if (directSend) {
       handleSendMessage(formatted, template.title);
     } else {
@@ -635,8 +679,8 @@ export default function LeadWhatsAppChat({
               transition={{ duration: 0.12 }}
               className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group max-w-full w-full mb-1 z-10`}
             >
-              {/* Message Bubble Wrapper to hold the Tail & Main body */}
-              <div className="relative flex items-start max-w-[85%] sm:max-w-[460px]">
+              {/* Message Bubble Wrapper to hold the Tail, Main body, and Floating Hover Actions */}
+              <div className="relative flex items-center max-w-[85%] sm:max-w-[460px]">
                 
                 {/* Bubble - Real WhatsApp styling */}
                 <div
@@ -694,7 +738,7 @@ export default function LeadWhatsAppChat({
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-[12px] font-bold text-[#111b21] dark:text-[#e9edef] truncate">
-                          {msg.fileName || 'Attachment Document'}
+                           {msg.fileName || 'Attachment Document'}
                         </p>
                         <p className="text-[10px] text-[#667781] dark:text-[#8696a0] font-mono">
                           {msg.fileSize || 'Unknown Size'} • {msg.type?.toUpperCase()}
@@ -746,37 +790,39 @@ export default function LeadWhatsAppChat({
                         )}
                       </span>
                     )}
-
-                    {/* Inline Hover Action Triggers */}
-                    <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 inline-flex items-center gap-1 ml-1.5 pl-1.5 border-l border-[#000000]/10 dark:border-white/10">
-                      <button
-                        type="button"
-                        onClick={() => setReplyingToMessage(msg)}
-                        className="p-0.5 text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer transition-colors"
-                        title="Reply"
-                      >
-                        <CornerUpLeft className="h-3 w-3" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleCopyMessage(msg.text, msg.id)}
-                        className="p-0.5 text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer transition-colors"
-                        title="Copy"
-                      >
-                        {copiedId === msg.id ? (
-                          <Check className="h-3 w-3 text-emerald-500" />
-                        ) : (
-                          <Copy className="h-3 w-3" />
-                        )}
-                      </button>
-                    </span>
                   </span>
 
                   {/* Float Clearing */}
                   <div className="clear-both" />
 
                 </div>
+
+                {/* Floating Hover Actions Outside the Bubble - Completely decoupled to prevent bubble stretching */}
+                <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-0.5 p-1 bg-white/90 dark:bg-[#202c33]/90 backdrop-blur-xs rounded-lg shadow-md border border-slate-200/50 dark:border-slate-800/80 transition-all duration-150 opacity-0 group-hover:opacity-100 z-20 ${
+                  isUser ? 'right-full mr-2' : 'left-full ml-2'
+                }`}>
+                  <button
+                    type="button"
+                    onClick={() => setReplyingToMessage(msg)}
+                    className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer transition-colors"
+                    title="Reply"
+                  >
+                    <CornerUpLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyMessage(msg.text, msg.id)}
+                    className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer transition-colors"
+                    title="Copy"
+                  >
+                    {copiedId === msg.id ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
+
               </div>
               
               {/* Coordinator Sublabel if sent by Admin or specific Coordinator */}
@@ -878,13 +924,24 @@ export default function LeadWhatsAppChat({
                   WhatsApp Recruitment Templates
                 </h5>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowTemplates(false)}
-                className="text-xs font-bold text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer bg-black/5 dark:bg-white/5 px-2.5 py-1 rounded-md"
-              >
-                ✕ Close
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSyncMetaTemplates}
+                  disabled={syncingMeta}
+                  className="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 dark:text-emerald-450 dark:hover:text-emerald-400 cursor-pointer bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 px-2.5 py-1 rounded-md flex items-center gap-1.5"
+                >
+                  <RefreshCw className={`h-3 w-3 ${syncingMeta ? 'animate-spin' : ''}`} />
+                  <span>{syncingMeta ? 'Syncing...' : 'Sync Meta'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTemplates(false)}
+                  className="text-xs font-bold text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer bg-black/5 dark:bg-white/5 px-2.5 py-1 rounded-md"
+                >
+                  ✕ Close
+                </button>
+              </div>
             </div>
 
             <div className="flex items-center gap-1.5 p-2 px-3 bg-[#f0f2f5] dark:bg-[#202c33] overflow-x-auto select-none">
@@ -913,7 +970,7 @@ export default function LeadWhatsAppChat({
 
             <div className="max-h-52 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
               {filteredTemplates.map(tpl => {
-                const preview = replaceTemplatePlaceholders(tpl.text, lead, lead.assignedTo || currentAgentId);
+                const preview = replaceTemplatePlaceholders(tpl.text, lead, lead.assignedTo || currentAgentId, tpl.id);
                 return (
                   <div
                     key={tpl.id}
@@ -1066,7 +1123,7 @@ export default function LeadWhatsAppChat({
             ) : (
               <div className="max-h-52 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
                 {templates.filter(t => t.type === 'quick_reply').map(tpl => {
-                  const preview = replaceTemplatePlaceholders(tpl.text, lead, lead.assignedTo || currentAgentId);
+                  const preview = replaceTemplatePlaceholders(tpl.text, lead, lead.assignedTo || currentAgentId, tpl.id);
                   return (
                     <div
                       key={tpl.id}
@@ -1129,181 +1186,307 @@ export default function LeadWhatsAppChat({
       </AnimatePresence>
 
       {/* 4. WhatsApp Message Composer Bar - High Fidelity Web Layout */}
-      <div className="p-3 bg-[#f0f2f5] dark:bg-[#202c33] border-t border-[#e9edef] dark:border-slate-800/80 shrink-0 space-y-2.5 shadow-md relative z-20">
+      <div className="p-3.5 bg-[#f0f2f5] dark:bg-[#202c33] border-t border-[#e9edef] dark:border-slate-800/80 shrink-0 space-y-3 shadow-md relative z-20">
         
-        {/* Reply Message Preview Panel */}
-        {replyingToMessage && (
-          <div className="bg-white dark:bg-[#2a3942] border-l-[4px] border-[#00a884] p-2.5 rounded-lg flex items-center justify-between text-xs transition-all relative shadow-3xs">
-            <div className="flex-1 min-w-0 pr-4">
-              <span className="font-bold text-[#00a884] dark:text-emerald-400 block mb-0.5 text-[11px]">
-                Replying to {replyingToMessage.senderName || (replyingToMessage.sender === 'lead' ? lead.name : 'Coordinator')}
-              </span>
-              <span className="text-[#667781] dark:text-[#8696a0] truncate block italic text-[11.5px]">
-                {replyingToMessage.text}
-              </span>
+        {sessionExpired ? (
+          <div className="space-y-3.5">
+            {/* Session Expired Notice */}
+            <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200/50 dark:border-amber-900/60 rounded-lg p-2 text-[11px] text-amber-900 dark:text-amber-200 flex items-center gap-2 shadow-3xs">
+              <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="font-bold uppercase tracking-wider text-[9px] text-amber-700 dark:text-amber-300">24-Hour Session Expired:</span>
+                <span className="opacity-95 text-amber-900 dark:text-amber-100">Meta rules prohibit free-text messages after 24 hours of inactivity. Please send an approved WhatsApp template to restart the window.</span>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setReplyingToMessage(null)}
-              className="p-1 text-[#667781] hover:text-[#111b21] dark:hover:text-white transition-colors cursor-pointer rounded-full hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] shrink-0"
-              title="Cancel"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
 
-        {/* Helper quick tools row */}
-        <div className="flex items-center justify-between text-xs px-1">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setShowTemplates(!showTemplates);
-                setShowQuickReplies(false);
-              }}
-              className={`text-[10.5px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border ${
-                showTemplates
-                  ? 'bg-[#00a884] text-white border-transparent shadow-3xs'
-                  : 'bg-white dark:bg-[#2a3942] text-[#54656f] dark:text-[#8696a0] border-[#e9edef] dark:border-slate-800 hover:bg-[#f0f2f5]'
-              }`}
-            >
-              <Sparkles className="h-3 w-3" />
-              <span>Templates ({templates.filter(t => t.type !== 'quick_reply').length})</span>
-            </button>
+            {/* Template Selector Dropdown & Live Preview */}
+            <div className="bg-white dark:bg-[#111b21] p-2.5 rounded-xl border border-[#e9edef] dark:border-slate-800/80 space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-[#00a884]" />
+                  SELECT PRE-APPROVED META TEMPLATE
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleSyncMetaTemplates}
+                    disabled={syncingMeta}
+                    className="text-[9px] font-black uppercase text-emerald-600 dark:text-emerald-450 hover:underline flex items-center gap-1 cursor-pointer bg-emerald-50 dark:bg-emerald-950/30 px-1.5 py-0.5 rounded-md border border-emerald-150 dark:border-emerald-900/50"
+                  >
+                    <RefreshCw className={`h-2.5 w-2.5 ${syncingMeta ? 'animate-spin' : ''}`} />
+                    <span>{syncingMeta ? 'Syncing...' : 'Sync Meta'}</span>
+                  </button>
+                  <span className="text-[8px] bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-350 font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">
+                    META VERIFIED ONLY
+                  </span>
+                </div>
+              </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                setShowQuickReplies(!showQuickReplies);
-                setShowTemplates(false);
-              }}
-              className={`text-[10.5px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border ${
-                showQuickReplies
-                  ? 'bg-amber-600 text-white border-transparent shadow-3xs'
-                  : 'bg-white dark:bg-[#2a3942] text-amber-800 dark:text-amber-400 border-[#e9edef] dark:border-slate-800 hover:bg-amber-50'
-              }`}
-            >
-              <Zap className="h-3 w-3 fill-current" />
-              <span>Quick Replies ({templates.filter(t => t.type === 'quick_reply').length})</span>
-            </button>
-          </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedTemplateIdHistory}
+                  onChange={(e) => {
+                    setSelectedTemplateIdHistory(e.target.value);
+                    const selected = templates.find(t => t.id === e.target.value);
+                    if (selected) {
+                      const formatted = replaceTemplatePlaceholders(selected.text, lead, lead.assignedTo || currentAgentId, selected.id);
+                      setHistoryPreviewText(formatted);
+                    } else {
+                      setHistoryPreviewText('');
+                    }
+                  }}
+                  className="flex-1 px-3 py-2 bg-slate-100 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 rounded-lg text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-emerald-500 transition-all font-sans font-bold"
+                >
+                  <option value="">-- Choose an Approved Meta Template to Re-Activate --</option>
+                  {templates.filter(t => t.type !== 'quick_reply').map((t) => {
+                    const emojiMap: Record<string, string> = {
+                      onboarding: '👋',
+                      interview: '📅',
+                      documentation: '📄',
+                      status: '📢',
+                      offer: '🎉',
+                      quick_reply: '⚡'
+                    };
+                    const emoji = emojiMap[t.category] || '💬';
+                    const categoryStr = t.category ? t.category.toUpperCase() : 'TEMPLATE';
+                    const snippet = t.text ? t.text.replace(/\s+/g, ' ').substring(0, 50) : '';
+                    const label = `${emoji} [${categoryStr}] ${t.title} - "${snippet}..."`;
+                    return (
+                      <option key={t.id} value={t.id} className="text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 font-sans">
+                        {label}
+                      </option>
+                    );
+                  })}
+                </select>
 
-          <div className="text-[9.5px] text-[#667781] dark:text-[#8696a0] font-mono font-bold uppercase select-none">
-            <span>Enter to Send</span>
-          </div>
-        </div>
-
-        {/* Popover Emoji Picker */}
-        {showEmojiPicker && (
-          <div className="absolute bottom-[72px] left-3 bg-white dark:bg-[#111b21] border border-[#e9edef] dark:border-slate-800 rounded-xl shadow-xl p-3.5 z-30 w-64 text-left">
-            <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-[#e9edef] dark:border-slate-800">
-              <span className="text-[10px] font-bold uppercase text-[#667781] dark:text-[#8696a0]">Emojis</span>
-              <button
-                type="button"
-                onClick={() => setShowEmojiPicker(false)}
-                className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#667781] hover:text-[#111b21] dark:hover:text-white transition-colors"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div className="grid grid-cols-6 gap-2 max-h-44 overflow-y-auto pr-1">
-              {emojis.map((emoji) => (
                 <button
-                  key={emoji}
+                  type="button"
+                  disabled={!selectedTemplateIdHistory || sending}
+                  onClick={async () => {
+                    const selected = templates.find(t => t.id === selectedTemplateIdHistory);
+                    if (selected) {
+                      setSending(true);
+                      try {
+                        await handleSendMessage(historyPreviewText, selected.id);
+                        setSelectedTemplateIdHistory('');
+                        setHistoryPreviewText('');
+                      } catch (e) {
+                        console.error('Failed to send template outreach:', e);
+                      } finally {
+                        setSending(false);
+                      }
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider transition-all select-none h-[34px] shrink-0 ${
+                    selectedTemplateIdHistory && !sending
+                      ? 'bg-[#00a884] hover:bg-[#008f72] text-white shadow-xs active:scale-98'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 cursor-not-allowed'
+                  }`}
+                >
+                  {sending ? (
+                    <RefreshCw className="h-4 w-4 animate-spin text-slate-400" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5" />
+                  )}
+                  <span>{sending ? 'Sending...' : 'Send Template'}</span>
+                </button>
+              </div>
+
+              {/* Live Preview Panel - Rendered compactly */}
+              {selectedTemplateIdHistory && (
+                <div className="space-y-1 animate-fadeIn border-t border-slate-100 dark:border-slate-800/80 pt-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">
+                      Live Preview
+                    </label>
+                    <span className="text-[8px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/20 px-1 py-0.2 rounded">
+                      Outbound Text
+                    </span>
+                  </div>
+                  <div className="p-2.5 bg-[#e1f3fc]/40 dark:bg-[#0b141a]/60 border border-[#b3e0f2]/50 dark:border-slate-800/60 rounded-md text-[11px] text-[#111b21] dark:text-[#e9edef] whitespace-pre-wrap font-sans leading-normal">
+                    {historyPreviewText}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Reply Message Preview Panel */}
+            {replyingToMessage && (
+              <div className="bg-white dark:bg-[#2a3942] border-l-[4px] border-[#00a884] p-2.5 rounded-lg flex items-center justify-between text-xs transition-all relative shadow-3xs">
+                <div className="flex-1 min-w-0 pr-4">
+                  <span className="font-bold text-[#00a884] dark:text-emerald-400 block mb-0.5 text-[11px]">
+                    Replying to {replyingToMessage.senderName || (replyingToMessage.sender === 'lead' ? lead.name : 'Coordinator')}
+                  </span>
+                  <span className="text-[#667781] dark:text-[#8696a0] truncate block italic text-[11.5px]">
+                    {replyingToMessage.text}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReplyingToMessage(null)}
+                  className="p-1 text-[#667781] hover:text-[#111b21] dark:hover:text-white transition-colors cursor-pointer rounded-full hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] shrink-0"
+                  title="Cancel"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Helper quick tools row */}
+            <div className="flex items-center justify-between text-xs px-1">
+              <div className="flex items-center gap-2">
+                <button
                   type="button"
                   onClick={() => {
-                    setInputText(prev => prev + emoji);
-                    textareaRef.current?.focus();
+                    setShowTemplates(!showTemplates);
+                    setShowQuickReplies(false);
                   }}
-                  className="text-lg p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md active:scale-90 transition-transform cursor-pointer select-none text-center flex items-center justify-center h-8 w-8"
+                  className={`text-[10.5px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border ${
+                    showTemplates
+                      ? 'bg-[#00a884] text-white border-transparent shadow-3xs'
+                      : 'bg-white dark:bg-[#2a3942] text-[#54656f] dark:text-[#8696a0] border-[#e9edef] dark:border-slate-800 hover:bg-[#f0f2f5]'
+                  }`}
                 >
-                  {emoji}
+                  <Sparkles className="h-3 w-3" />
+                  <span>Templates ({templates.filter(t => t.type !== 'quick_reply').length})</span>
                 </button>
-              ))}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowQuickReplies(!showQuickReplies);
+                    setShowTemplates(false);
+                  }}
+                  className={`text-[10.5px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border ${
+                    showQuickReplies
+                      ? 'bg-amber-600 text-white border-transparent shadow-3xs'
+                      : 'bg-white dark:bg-[#2a3942] text-amber-800 dark:text-amber-400 border-[#e9edef] dark:border-slate-800 hover:bg-amber-50'
+                  }`}
+                >
+                  <Zap className="h-3 w-3 fill-current" />
+                  <span>Quick Replies ({templates.filter(t => t.type === 'quick_reply').length})</span>
+                </button>
+              </div>
+
+              <div className="text-[9.5px] text-[#667781] dark:text-[#8696a0] font-mono font-bold uppercase select-none">
+                <span>Enter to Send</span>
+              </div>
             </div>
-          </div>
-        )}
 
-        {/* Main Composer Row */}
-        <div className="flex items-center gap-2.5">
-          {/* Hidden File Input */}
-          <input
-            type="file"
-            ref={fileInputRef}
-            className="hidden"
-            onChange={handleFileChange}
-            accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
-          />
-
-          {/* Left Accessory Icon Actions */}
-          <div className="flex items-center gap-1.5">
-            {/* Emoji Trigger Button */}
-            <button
-              type="button"
-              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className={`p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 ${
-                showEmojiPicker
-                  ? 'text-[#00a884]'
-                  : 'text-[#54656f] dark:text-[#8696a0]'
-              }`}
-              title="Emoji"
-            >
-              <Smile className="h-6 w-6" />
-            </button>
-
-            {/* Attachment Button */}
-            <button
-              type="button"
-              onClick={handleFileUploadClick}
-              disabled={uploading || sending}
-              className="p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#8696a0]"
-              title="Attach Document or Media"
-            >
-              {uploading ? (
-                <RefreshCw className="h-5.5 w-5.5 animate-spin text-[#00a884]" />
-              ) : (
-                <Paperclip className="h-5.5 w-5.5 rotate-45" />
-              )}
-            </button>
-          </div>
-
-          {/* Textarea Input Field */}
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSendMessage();
-              }
-            }}
-            placeholder="Type a message"
-            className="flex-1 text-[14.5px] py-2.5 px-4 rounded-lg bg-white dark:bg-[#2a3942] border-none focus:outline-none focus:ring-0 text-[#111b21] dark:text-[#e9edef] placeholder-[#667781] dark:placeholder-[#8696a0] font-normal leading-normal max-h-36 min-h-[42px] resize-none overflow-y-auto"
-            style={{ height: '42px' }}
-          />
-
-          {/* Send Button - Rounded Circle style like true WhatsApp Web */}
-          <button
-            type="button"
-            onClick={() => handleSendMessage()}
-            disabled={(!inputText.trim() && !sending) || sending}
-            className={`h-11 w-11 rounded-full flex items-center justify-center shadow-md transition-all shrink-0 cursor-pointer ${
-              inputText.trim() 
-                ? 'bg-[#00a884] hover:bg-[#008f72] text-white active:scale-95' 
-                : 'bg-black/5 dark:bg-white/5 text-[#54656f] dark:text-[#8696a0] opacity-40 cursor-not-allowed'
-            }`}
-            title="Send message"
-          >
-            {sending ? (
-              <RefreshCw className="h-5 w-5 animate-spin text-white" />
-            ) : (
-              <Send className="h-5 w-5 text-white ml-0.5 fill-current" />
+            {/* Popover Emoji Picker */}
+            {showEmojiPicker && (
+              <div className="absolute bottom-[72px] left-3 bg-white dark:bg-[#111b21] border border-[#e9edef] dark:border-slate-800 rounded-xl shadow-xl p-3.5 z-30 w-64 text-left">
+                <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-[#e9edef] dark:border-slate-800">
+                  <span className="text-[10px] font-bold uppercase text-[#667781] dark:text-[#8696a0]">Emojis</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowEmojiPicker(false)}
+                    className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#667781] hover:text-[#111b21] dark:hover:text-white transition-colors"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-6 gap-2 max-h-44 overflow-y-auto pr-1">
+                  {emojis.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => {
+                        setInputText(prev => prev + emoji);
+                        textareaRef.current?.focus();
+                      }}
+                      className="text-lg p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md active:scale-90 transition-transform cursor-pointer select-none text-center flex items-center justify-center h-8 w-8"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
-          </button>
-        </div>
+
+            {/* Main Composer Row */}
+            <div className="flex items-center gap-2.5">
+              {/* Hidden File Input */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                onChange={handleFileChange}
+                accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
+              />
+
+              {/* Left Accessory Icon Actions */}
+              <div className="flex items-center gap-1.5">
+                {/* Emoji Trigger Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                  className={`p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 ${
+                    showEmojiPicker
+                      ? 'text-[#00a884]'
+                      : 'text-[#54656f] dark:text-[#8696a0]'
+                  }`}
+                  title="Emoji"
+                >
+                  <Smile className="h-6 w-6" />
+                </button>
+
+                {/* Attachment Button */}
+                <button
+                  type="button"
+                  onClick={handleFileUploadClick}
+                  disabled={uploading || sending}
+                  className="p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#8696a0]"
+                  title="Attach Document or Media"
+                >
+                  {uploading ? (
+                    <RefreshCw className="h-5.5 w-5.5 animate-spin text-[#00a884]" />
+                  ) : (
+                    <Paperclip className="h-5.5 w-5.5 rotate-45" />
+                  )}
+                </button>
+              </div>
+
+              {/* Textarea Input Field */}
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
+                placeholder="Type a message"
+                className="flex-1 text-[14.5px] py-2.5 px-4 rounded-lg bg-white dark:bg-[#2a3942] border-none focus:outline-none focus:ring-0 text-[#111b21] dark:text-[#e9edef] placeholder-[#667781] dark:placeholder-[#8696a0] font-normal leading-normal max-h-36 min-h-[42px] resize-none overflow-y-auto"
+                style={{ height: '42px' }}
+              />
+
+              {/* Send Button - Rounded Circle style like true WhatsApp Web */}
+              <button
+                type="button"
+                onClick={() => handleSendMessage()}
+                disabled={(!inputText.trim() && !sending) || sending}
+                className={`h-11 w-11 rounded-full flex items-center justify-center shadow-md transition-all shrink-0 cursor-pointer ${
+                  inputText.trim() 
+                    ? 'bg-[#00a884] hover:bg-[#008f72] text-white active:scale-95' 
+                    : 'bg-black/5 dark:bg-white/5 text-[#54656f] dark:text-[#8696a0] opacity-40 cursor-not-allowed'
+                }`}
+                title="Send message"
+              >
+                {sending ? (
+                  <RefreshCw className="h-5 w-5 animate-spin text-white" />
+                ) : (
+                  <Send className="h-5 w-5 text-white ml-0.5 fill-current" />
+                )}
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
     </div>
