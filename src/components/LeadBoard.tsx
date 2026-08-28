@@ -641,6 +641,12 @@ export default function LeadBoard({
           </span>
         )}
 
+        {lead.docEcrPassport && (
+          <span className="text-[11px] text-red-800 dark:text-red-300 bg-red-50 dark:bg-red-950/80 border border-red-300 dark:border-red-500/60 px-2.5 py-1 rounded-md font-black uppercase truncate block mt-1 text-left w-full font-sans tracking-wide flex items-center gap-1.5 shadow-2xs">
+            🛂 ECR Passport
+          </span>
+        )}
+
         {/* Telecaller & Admin Remarks Log Indicators */}
         {hasRemarks ? (
           <div className="bg-emerald-50 dark:bg-slate-900/90 p-2.5 rounded-lg border border-emerald-200/90 dark:border-slate-800 text-[11px] text-left mt-2 shadow-2xs transition-all group/remarks cursor-help hover:bg-emerald-100/80 dark:hover:bg-slate-800">

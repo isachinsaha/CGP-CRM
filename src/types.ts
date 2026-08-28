@@ -83,6 +83,8 @@ export interface Lead {
   docResume?: boolean;
   docOfficeVisited?: boolean;
   docOthers?: boolean;
+  docInterviewAttended?: boolean;
+  docEcrPassport?: boolean;
   reminderEnabled?: boolean;
   autoReplySent?: boolean;
   intake?: boolean;

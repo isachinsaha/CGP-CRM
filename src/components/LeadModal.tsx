@@ -208,6 +208,8 @@ export default function LeadModal({
     docResume: initialLead.docResume === true,
     docOfficeVisited: initialLead.docOfficeVisited === true,
     docOthers: initialLead.docOthers === true,
+    docInterviewAttended: initialLead.docInterviewAttended === true,
+    docEcrPassport: initialLead.docEcrPassport === true,
     reminderEnabled: !!initialLead.reminderEnabled,
     autoReplySent: initialLead.autoReplySent === true,
     intake: getEffectiveIntake(initialLead)
@@ -256,6 +258,8 @@ export default function LeadModal({
       docResume: initialLead.docResume === true,
       docOfficeVisited: initialLead.docOfficeVisited === true,
       docOthers: initialLead.docOthers === true,
+      docInterviewAttended: initialLead.docInterviewAttended === true,
+      docEcrPassport: initialLead.docEcrPassport === true,
       reminderEnabled: !!initialLead.reminderEnabled,
       autoReplySent: initialLead.autoReplySent === true,
       intake: getEffectiveIntake(initialLead)
@@ -1100,6 +1104,64 @@ export default function LeadModal({
                             : 'text-slate-100 dark:text-slate-300 font-bold'
                         }`}>
                           Other Documents
+                        </span>
+                      </button>
+
+                      {/* Interview Attended Checkbox */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormFields(prev => ({ ...prev, docInterviewAttended: !prev.docInterviewAttended }));
+                        }}
+                        className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
+                          formFields.docInterviewAttended
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                        }`}
+                        title="Toggle Interview Attended"
+                      >
+                        <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
+                          formFields.docInterviewAttended 
+                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs' 
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                        }`}>
+                          {formFields.docInterviewAttended && '✓'}
+                        </span>
+                        <span className={`text-xs transition-all ${
+                          formFields.docInterviewAttended 
+                            ? 'text-emerald-800 dark:text-emerald-300 font-extrabold' 
+                            : 'text-slate-100 dark:text-slate-300 font-bold'
+                        }`}>
+                          Interview Attended
+                        </span>
+                      </button>
+
+                      {/* ECR Passport Checkbox */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormFields(prev => ({ ...prev, docEcrPassport: !prev.docEcrPassport }));
+                        }}
+                        className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
+                          formFields.docEcrPassport
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                        }`}
+                        title="Toggle ECR Passport"
+                      >
+                        <span className={`h-5 w-5 rounded-md flex items-center justify-center border text-[11px] font-black shrink-0 transition-all ${
+                          formFields.docEcrPassport 
+                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs' 
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                        }`}>
+                          {formFields.docEcrPassport && '✓'}
+                        </span>
+                        <span className={`text-xs transition-all ${
+                          formFields.docEcrPassport 
+                            ? 'text-emerald-800 dark:text-emerald-300 font-extrabold' 
+                            : 'text-slate-100 dark:text-slate-300 font-bold'
+                        }`}>
+                          ECR Passport
                         </span>
                       </button>
                     </div>

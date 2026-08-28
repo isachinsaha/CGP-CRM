@@ -334,6 +334,8 @@ export default function LeadList({
         'Passport Copy Received': lead.docPassportCopy ? 'YES' : 'NO',
         'Resume Received': lead.docResume ? 'YES' : 'NO',
         'Office Visited': lead.docOfficeVisited ? 'YES' : 'NO',
+        'Interview Attended': lead.docInterviewAttended ? 'YES' : 'NO',
+        'ECR Passport': lead.docEcrPassport ? 'YES' : 'NO',
         'Remarks 1 (First Call)': lead.remarks1 || '',
         'Remarks 2 (Follow-up)': lead.remarks2 || '',
         'Remarks 3 (Final Status)': lead.remarks3 || '',
@@ -381,6 +383,8 @@ export default function LeadList({
         'Passport Copy Received': lead.docPassportCopy ? 'YES' : 'NO',
         'Resume Received': lead.docResume ? 'YES' : 'NO',
         'Office Visited': lead.docOfficeVisited ? 'YES' : 'NO',
+        'Interview Attended': lead.docInterviewAttended ? 'YES' : 'NO',
+        'ECR Passport': lead.docEcrPassport ? 'YES' : 'NO',
         'Remarks 1 (First Call)': lead.remarks1 || '',
         'Remarks 2 (Follow-up)': lead.remarks2 || '',
         'Remarks 3 (Final Status)': lead.remarks3 || '',
@@ -1590,7 +1594,7 @@ export default function LeadList({
                               ))}
                             </div>
                           )}
-                          {(lead.project || lead.source) && (
+                          {(lead.project || lead.source || lead.docEcrPassport) && (
                             <div className="flex flex-wrap gap-1 mt-1">
                               {lead.project && (
                                 <span className="bg-purple-950/40 text-accent-purple text-[9px] font-black uppercase px-1.5 py-0.5 rounded border border-purple-900/30">
@@ -1600,6 +1604,11 @@ export default function LeadList({
                               {lead.source && (
                                 <span className="bg-slate-800 text-slate-300 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border border-slate-700">
                                   📣 {lead.source}
+                                </span>
+                              )}
+                              {lead.docEcrPassport && (
+                                <span className="bg-rose-950/40 text-rose-500 text-[9px] font-black uppercase px-1.5 py-0.5 rounded border border-rose-900/30">
+                                  🛂 ECR Passport
                                 </span>
                               )}
                             </div>

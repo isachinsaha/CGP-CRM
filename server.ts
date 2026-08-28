@@ -1106,7 +1106,7 @@ app.put('/api/leads/:id', async (req, res) => {
       position, experience, qualification, adminRemarks, assignedTo, importance,
       remarks1, remarks2, remarks3, callConnected, tasks, timeline, tags, source, project,
       docPassportCopy, docResume, docOfficeVisited, docOthers, reminderEnabled,
-      autoReplySent, intake, assignedFrom
+      autoReplySent, intake, assignedFrom, docInterviewAttended, docEcrPassport
     } = req.body;
     const leads = await getLeads();
     const idx = leads.findIndex(l => l.id === req.params.id);
@@ -1336,6 +1336,58 @@ app.put('/api/leads/:id', async (req, res) => {
           console.error('Failed to auto-debit Office Visited reversal:', walletErr);
         }
       }
+
+      // 3b. Interview Attended Checkbox Trigger & Reversal (Independent INR 11)
+      const wasInterviewAttendedActive = !!lead.docInterviewAttended;
+      const isInterviewAttendedActiveNow = !!(
+        docInterviewAttended !== undefined ? docInterviewAttended : lead.docInterviewAttended
+      );
+
+      const isInterviewAttendedTransition = !wasInterviewAttendedActive && isInterviewAttendedActiveNow;
+      const isInterviewAttendedReversal = wasInterviewAttendedActive && !isInterviewAttendedActiveNow;
+
+      if (isInterviewAttendedTransition) {
+        try {
+          const wallet = await getWalletByUsername(cleanCoord);
+          const alreadyCredited = (wallet.transactions || []).some(
+            tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Interview Attended Incentive')
+          );
+          if (!alreadyCredited) {
+            await addWalletTransaction(
+              cleanCoord,
+              'credit',
+              11,
+              `Interview Attended Incentive for candidate: ${name || lead.name}`,
+              lead.id
+            );
+          }
+        } catch (walletErr) {
+          console.error('Failed to auto-credit Interview Attended incentive:', walletErr);
+        }
+      }
+
+      if (isInterviewAttendedReversal) {
+        try {
+          const wallet = await getWalletByUsername(prevCoord);
+          const creditsForLead = (wallet.transactions || []).filter(
+            tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Interview Attended Incentive')
+          );
+          const reversalsForLead = (wallet.transactions || []).filter(
+            tx => tx.leadId === lead.id && tx.type === 'debit' && tx.reason.includes('Reversal: Interview Attended Incentive')
+          );
+          if (creditsForLead.length > reversalsForLead.length) {
+            await addWalletTransaction(
+              prevCoord,
+              'debit',
+              11,
+              `Reversal: Interview Attended Incentive removed. Candidate: ${name || lead.name}`,
+              lead.id
+            );
+          }
+        } catch (walletErr) {
+          console.error('Failed to auto-debit Interview Attended reversal:', walletErr);
+        }
+      }
     }
     
     // Ensure lists exist
@@ -1500,6 +1552,8 @@ app.put('/api/leads/:id', async (req, res) => {
     if (docResume !== undefined) lead.docResume = Boolean(docResume);
     if (docOfficeVisited !== undefined) lead.docOfficeVisited = Boolean(docOfficeVisited);
     if (docOthers !== undefined) lead.docOthers = Boolean(docOthers);
+    if (docInterviewAttended !== undefined) lead.docInterviewAttended = Boolean(docInterviewAttended);
+    if (docEcrPassport !== undefined) lead.docEcrPassport = Boolean(docEcrPassport);
     if (reminderEnabled !== undefined) lead.reminderEnabled = Boolean(reminderEnabled);
     if (autoReplySent !== undefined) lead.autoReplySent = Boolean(autoReplySent);
     if (intake !== undefined) {
