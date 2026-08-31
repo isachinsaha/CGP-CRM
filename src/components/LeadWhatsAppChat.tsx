@@ -7,7 +7,7 @@ import {
   CornerUpLeft, Smile, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { formatPhoneForWhatsApp, replaceTemplatePlaceholders } from '../server/whatsapp.ts';
+import { formatPhoneForWhatsApp, replaceTemplatePlaceholders, resolveTemplateVariable } from '../server/whatsapp.ts';
 
 interface LeadWhatsAppChatProps {
   lead: Lead;
@@ -60,6 +60,70 @@ export default function LeadWhatsAppChat({
   const [selectedTemplateIdHistory, setSelectedTemplateIdHistory] = useState('');
   const [historyPreviewText, setHistoryPreviewText] = useState('');
   const [syncingMeta, setSyncingMeta] = useState(false);
+
+  // Parameter Customizer States
+  const [historyParamValues, setHistoryParamValues] = useState<Record<string, string>>({});
+  const [historyParamKeys, setHistoryParamKeys] = useState<string[]>([]);
+
+  const [selectedConfigTemplate, setSelectedConfigTemplate] = useState<WhatsAppTemplate | null>(null);
+  const [configParamValues, setConfigParamValues] = useState<Record<string, string>>({});
+  const [configParamKeys, setConfigParamKeys] = useState<string[]>([]);
+
+  // Local Storage Autocomplete cache state (grouped by parameter key/index to remember numbers vs names)
+  const [paramSuggestions, setParamSuggestions] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = localStorage.getItem('whatsapp_param_cache');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [activeSuggestionField, setActiveSuggestionField] = useState<{ type: 'config' | 'history', key: string } | null>(null);
+
+  const saveParamToCache = (paramKey: string, val: string) => {
+    if (!val || !val.trim()) return;
+    const trimmed = val.trim();
+    setParamSuggestions(prev => {
+      const existing = prev[paramKey] || [];
+      if (existing.includes(trimmed)) return prev;
+      const updated = [trimmed, ...existing].slice(0, 20); // Limit to 20 unique history items
+      const next = { ...prev, [paramKey]: updated };
+      try {
+        localStorage.setItem('whatsapp_param_cache', JSON.stringify(next));
+      } catch (e) {
+        console.error(e);
+      }
+      return next;
+    });
+  };
+
+  const extractTemplateParams = (text: string): string[] => {
+    const regex = /\{\{([^}]+)\}\}/g;
+    const keys: string[] = [];
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      keys.push(match[1].trim());
+    }
+    return Array.from(new Set(keys)).sort((a, b) => {
+      const aNum = parseInt(a, 10);
+      const bNum = parseInt(b, 10);
+      if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
+      if (!isNaN(aNum)) return -1;
+      if (!isNaN(bNum)) return 1;
+      return a.localeCompare(b);
+    });
+  };
+
+  const getFormattedPreviewText = (text: string, paramValues: Record<string, string>): string => {
+    let result = text;
+    Object.entries(paramValues).forEach(([key, val]) => {
+      const escapedKey = key.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const regex = new RegExp(`\\{\\{\\s*${escapedKey}\\s*\\}\\}`, 'gi');
+      result = result.replace(regex, val);
+    });
+    return result;
+  };
 
   const handleSyncMetaTemplates = async () => {
     try {
@@ -568,14 +632,35 @@ export default function LeadWhatsAppChat({
 
   // Handle template selection
   const handleSelectTemplate = (template: WhatsAppTemplate, directSend = false) => {
-    const formatted = replaceTemplatePlaceholders(template.text, lead, lead.assignedTo || currentAgentId, template.id);
-    if (directSend) {
-      handleSendMessage(formatted, template.title);
+    const keys = extractTemplateParams(template.text);
+    if (keys.length > 0) {
+      // It has variables! Open parameter configuration view
+      setSelectedConfigTemplate(template);
+      const initialParams: Record<string, string> = {};
+      keys.forEach(k => {
+        initialParams[k] = resolveTemplateVariable(
+          k,
+          template.id,
+          template.text,
+          lead,
+          lead.phone || '',
+          lead.name || '',
+          lead.assignedTo || currentAgentId
+        );
+      });
+      setConfigParamKeys(keys);
+      setConfigParamValues(initialParams);
     } else {
-      setInputText(formatted);
-      setShowTemplates(false);
-      if (textareaRef.current) {
-        textareaRef.current.focus();
+      // Direct send/insert since there are no parameters
+      const formatted = replaceTemplatePlaceholders(template.text, lead, lead.assignedTo || currentAgentId, template.id);
+      if (directSend) {
+        handleSendMessage(formatted, template.title);
+      } else {
+        setInputText(formatted);
+        setShowTemplates(false);
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+        }
       }
     }
   };
@@ -915,100 +1000,258 @@ export default function LeadWhatsAppChat({
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.18 }}
-            className="bg-white dark:bg-[#111b21] border-t border-[#e9edef] dark:border-slate-800 shadow-lg shrink-0 z-20 relative"
+            className="bg-white dark:bg-[#111b21] border-t border-[#e9edef] dark:border-slate-800 shadow-lg shrink-0 z-20 relative font-sans"
           >
-            <div className="p-3.5 border-b border-[#e9edef] dark:border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-[#00a884] dark:text-emerald-400 animate-pulse" />
-                <h5 className="text-xs font-bold text-[#111b21] dark:text-[#e9edef] uppercase tracking-wider">
-                  WhatsApp Recruitment Templates
-                </h5>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSyncMetaTemplates}
-                  disabled={syncingMeta}
-                  className="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 dark:text-emerald-450 dark:hover:text-emerald-400 cursor-pointer bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 px-2.5 py-1 rounded-md flex items-center gap-1.5"
-                >
-                  <RefreshCw className={`h-3 w-3 ${syncingMeta ? 'animate-spin' : ''}`} />
-                  <span>{syncingMeta ? 'Syncing...' : 'Sync Meta'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowTemplates(false)}
-                  className="text-xs font-bold text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer bg-black/5 dark:bg-white/5 px-2.5 py-1 rounded-md"
-                >
-                  ✕ Close
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1.5 p-2 px-3 bg-[#f0f2f5] dark:bg-[#202c33] overflow-x-auto select-none">
-              {[
-                { id: 'all', label: 'All Templates' },
-                { id: 'documentation', label: '📄 Documents & Passport' },
-                { id: 'interview', label: '📅 Interviews' },
-                { id: 'onboarding', label: '🏢 Office Visits' },
-                { id: 'offer', label: '🎉 Visa & Offer' },
-                { id: 'status', label: '📞 Callbacks' }
-              ].map(cat => (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className={`text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer border ${
-                    selectedCategory === cat.id
-                      ? 'bg-[#00a884] text-white border-transparent shadow-3xs'
-                      : 'bg-white dark:bg-[#2a3942] text-[#54656f] dark:text-[#8696a0] border-[#e9edef] dark:border-slate-800 hover:bg-[#f0f2f5]'
-                  }`}
-                >
-                  {cat.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="max-h-52 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
-              {filteredTemplates.map(tpl => {
-                const preview = replaceTemplatePlaceholders(tpl.text, lead, lead.assignedTo || currentAgentId, tpl.id);
-                return (
-                  <div
-                    key={tpl.id}
-                    className="p-3 bg-[#f0f2f5]/50 dark:bg-[#202c33]/40 rounded-xl border border-[#e9edef] dark:border-slate-800/80 hover:border-[#00a884] dark:hover:border-emerald-600 transition-all text-xs flex flex-col justify-between space-y-2 group"
+            {selectedConfigTemplate ? (
+              <div className="p-4 space-y-4 text-left">
+                {/* Back button and title header */}
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-850 pb-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedConfigTemplate(null);
+                      setConfigParamKeys([]);
+                      setConfigParamValues({});
+                    }}
+                    className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 flex items-center gap-1 cursor-pointer bg-transparent border-none"
                   >
-                    <div>
-                      <div className="flex items-center justify-between gap-1 mb-1">
-                        <span className="font-bold text-[#111b21] dark:text-[#e9edef] text-xs">{tpl.title}</span>
-                        <span className="text-[9px] font-bold uppercase text-[#00a884] dark:text-emerald-400 bg-[#d9fdd3] dark:bg-[#005c4b]/20 px-1.5 py-0.5 rounded">
-                          {tpl.category}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-[#667781] dark:text-[#8696a0] line-clamp-3 italic font-sans leading-relaxed">
-                        {preview}
-                      </p>
-                    </div>
+                    ← Back to Template List
+                  </button>
+                  <span className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">
+                    Configure Variables
+                  </span>
+                </div>
 
-                    <div className="flex items-center gap-1.5 pt-1.5 border-t border-[#000000]/05 dark:border-white/5">
-                      <button
-                        type="button"
-                        onClick={() => handleSelectTemplate(tpl, false)}
-                        className="flex-1 py-1 bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] font-bold rounded-lg text-[11px] border border-[#e9edef] dark:border-slate-800 transition-all cursor-pointer text-center"
-                      >
-                        Insert
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSelectTemplate(tpl, true)}
-                        className="py-1 px-3 bg-[#00a884] hover:bg-[#008f72] text-white font-bold rounded-lg text-[11px] transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
-                      >
-                        <Send className="h-3 w-3" />
-                        Send
-                      </button>
-                    </div>
+                <div className="space-y-1">
+                  <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                    {selectedConfigTemplate.title}
+                  </h4>
+                  <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">
+                    Category: {selectedConfigTemplate.category}
+                  </p>
+                </div>
+
+                {/* Parameters Editor Card (Aisensy Style) */}
+                <div className="bg-[#f0f2f5]/60 dark:bg-slate-900/40 p-3.5 rounded-xl border border-slate-200/60 dark:border-slate-800/60 space-y-3">
+                  <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider">
+                    <Info className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                    <span>Parameters</span>
                   </div>
-                );
-              })}
-            </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {configParamKeys.map((key) => (
+                      <div key={key} className="flex items-center gap-2 bg-white dark:bg-slate-850 p-1.5 rounded-lg border border-slate-150 dark:border-slate-800 shadow-3xs relative">
+                        <span className="text-[10px] font-mono font-extrabold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-2.5 py-0.5 rounded border border-blue-200/40 shrink-0">
+                          {"{{" + key + "}}"}
+                        </span>
+                        <input
+                          type="text"
+                          value={configParamValues[key] || ''}
+                          onChange={(e) => {
+                            const updated = { ...configParamValues, [key]: e.target.value };
+                            setConfigParamValues(updated);
+                          }}
+                          onFocus={() => setActiveSuggestionField({ type: 'config', key })}
+                          onBlur={() => setTimeout(() => setActiveSuggestionField(null), 200)}
+                          placeholder="value"
+                          className="flex-1 min-w-0 bg-transparent text-xs text-slate-800 dark:text-slate-200 focus:outline-hidden px-1 border-none placeholder-slate-400 dark:placeholder-slate-600 font-bold"
+                        />
+                        
+                        {/* Dropdown Suggestions matching AiSensy style (sleek black theme) */}
+                        {activeSuggestionField?.type === 'config' && activeSuggestionField.key === key && paramSuggestions[key] && paramSuggestions[key].length > 0 && (
+                          <div className="absolute top-[102%] left-0 right-0 bg-[#151d24] dark:bg-[#1f2c34] text-slate-100 rounded-lg border border-slate-700/80 dark:border-slate-800 shadow-xl max-h-36 overflow-y-auto z-50 py-1 font-sans text-xs">
+                            {paramSuggestions[key].map((suggestedVal, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onMouseDown={() => {
+                                  const updated = { ...configParamValues, [key]: suggestedVal };
+                                  setConfigParamValues(updated);
+                                  setActiveSuggestionField(null);
+                                }}
+                                className="w-full px-3 py-1.5 text-left hover:bg-emerald-600 dark:hover:bg-emerald-500 hover:text-white transition-colors text-slate-100 font-bold"
+                              >
+                                {suggestedVal}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Live Preview Panel */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">
+                      Preview
+                    </label>
+                    <span className="text-[8px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/20 px-1 py-0.2 rounded">
+                      Outbound Text
+                    </span>
+                  </div>
+                  <div className="p-2.5 bg-[#e1f3fc]/40 dark:bg-[#0b141a]/60 border border-[#b3e0f2]/50 dark:border-slate-800/60 rounded-md text-[11px] text-[#111b21] dark:text-[#e9edef] whitespace-pre-wrap font-sans leading-normal">
+                    {getFormattedPreviewText(selectedConfigTemplate.text, configParamValues)}
+                  </div>
+                </div>
+
+                 {/* Send / Insert Action Buttons */}
+                 <div className="flex items-center gap-2 pt-1">
+                   <button
+                     type="button"
+                     onClick={() => {
+                       const finalMsg = getFormattedPreviewText(selectedConfigTemplate.text, configParamValues);
+                       setInputText(finalMsg);
+                       
+                       // Cache parameter values for autocomplete suggestions next time
+                       Object.entries(configParamValues).forEach(([k, val]) => {
+                         saveParamToCache(k, val);
+                       });
+
+                       setSelectedConfigTemplate(null);
+                       setConfigParamKeys([]);
+                       setConfigParamValues({});
+                       setShowTemplates(false);
+                       if (textareaRef.current) {
+                         textareaRef.current.focus();
+                       }
+                     }}
+                     className="flex-1 py-2 bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] font-bold rounded-lg text-xs border border-[#e9edef] dark:border-slate-800 transition-all cursor-pointer text-center uppercase tracking-wider h-[34px]"
+                   >
+                     Insert to Chat
+                   </button>
+                   <button
+                     type="button"
+                     disabled={sending}
+                     onClick={async () => {
+                       const finalMsg = getFormattedPreviewText(selectedConfigTemplate.text, configParamValues);
+                       setSending(true);
+                       try {
+                         await handleSendMessage(finalMsg, selectedConfigTemplate.title);
+                         
+                         // Cache parameter values for autocomplete suggestions next time
+                         Object.entries(configParamValues).forEach(([k, val]) => {
+                           saveParamToCache(k, val);
+                         });
+
+                         setSelectedConfigTemplate(null);
+                         setConfigParamKeys([]);
+                         setConfigParamValues({});
+                         setShowTemplates(false);
+                       } catch (e) {
+                         console.error('Failed to send template outreach:', e);
+                       } finally {
+                         setSending(false);
+                       }
+                     }}
+                     className="py-2 px-4 bg-[#00a884] hover:bg-[#008f72] text-white font-bold rounded-lg text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-3xs uppercase tracking-wider h-[34px]"
+                   >
+                    {sending ? (
+                      <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                    ) : (
+                      <Send className="h-3.5 w-3.5" />
+                    )}
+                    <span>{sending ? 'Sending...' : 'Send Message'}</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="p-3.5 border-b border-[#e9edef] dark:border-slate-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-[#00a884] dark:text-emerald-400 animate-pulse" />
+                    <h5 className="text-xs font-bold text-[#111b21] dark:text-[#e9edef] uppercase tracking-wider">
+                      WhatsApp Recruitment Templates
+                    </h5>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSyncMetaTemplates}
+                      disabled={syncingMeta}
+                      className="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 dark:text-emerald-450 dark:hover:text-emerald-400 cursor-pointer bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 px-2.5 py-1 rounded-md flex items-center gap-1.5"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${syncingMeta ? 'animate-spin' : ''}`} />
+                      <span>{syncingMeta ? 'Syncing...' : 'Sync Meta'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowTemplates(false)}
+                      className="text-xs font-bold text-[#667781] hover:text-[#111b21] dark:text-[#8696a0] dark:hover:text-[#e9edef] cursor-pointer bg-black/5 dark:bg-white/5 px-2.5 py-1 rounded-md"
+                    >
+                      ✕ Close
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 p-2 px-3 bg-[#f0f2f5] dark:bg-[#202c33] overflow-x-auto select-none">
+                  {[
+                    { id: 'all', label: 'All Templates' },
+                    { id: 'documentation', label: '📄 Documents & Passport' },
+                    { id: 'interview', label: '📅 Interviews' },
+                    { id: 'onboarding', label: '🏢 Office Visits' },
+                    { id: 'offer', label: '🎉 Visa & Offer' },
+                    { id: 'status', label: '📞 Callbacks' }
+                  ].map(cat => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setSelectedCategory(cat.id)}
+                      className={`text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer border ${
+                        selectedCategory === cat.id
+                          ? 'bg-[#00a884] text-white border-transparent shadow-3xs'
+                          : 'bg-white dark:bg-[#2a3942] text-[#54656f] dark:text-[#8696a0] border-[#e9edef] dark:border-slate-800 hover:bg-[#f0f2f5]'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="max-h-52 overflow-y-auto p-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {filteredTemplates.map(tpl => {
+                    const preview = replaceTemplatePlaceholders(tpl.text, lead, lead.assignedTo || currentAgentId, tpl.id);
+                    return (
+                      <div
+                        key={tpl.id}
+                        className="p-3 bg-[#f0f2f5]/50 dark:bg-[#202c33]/40 rounded-xl border border-[#e9edef] dark:border-slate-800/80 hover:border-[#00a884] dark:hover:border-emerald-600 transition-all text-xs flex flex-col justify-between space-y-2 group"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <span className="font-bold text-[#111b21] dark:text-[#e9edef] text-xs">{tpl.title}</span>
+                            <span className="text-[9px] font-bold uppercase text-[#00a884] dark:text-emerald-400 bg-[#d9fdd3] dark:bg-[#005c4b]/20 px-1.5 py-0.5 rounded">
+                              {tpl.category}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-[#667781] dark:text-[#8696a0] line-clamp-3 italic font-sans leading-relaxed">
+                            {preview}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 pt-1.5 border-t border-[#000000]/05 dark:border-white/5">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectTemplate(tpl, false)}
+                            className="flex-1 py-1 bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] font-bold rounded-lg text-[11px] border border-[#e9edef] dark:border-slate-800 transition-all cursor-pointer text-center"
+                          >
+                            Insert
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectTemplate(tpl, true)}
+                            className="py-1 px-3 bg-[#00a884] hover:bg-[#008f72] text-white font-bold rounded-lg text-[11px] transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
+                          >
+                            <Send className="h-3 w-3" />
+                            Send
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </motion.div>
         )}
 
@@ -1226,12 +1469,30 @@ export default function LeadWhatsAppChat({
                 <select
                   value={selectedTemplateIdHistory}
                   onChange={(e) => {
-                    setSelectedTemplateIdHistory(e.target.value);
-                    const selected = templates.find(t => t.id === e.target.value);
+                    const val = e.target.value;
+                    setSelectedTemplateIdHistory(val);
+                    const selected = templates.find(t => t.id === val);
                     if (selected) {
-                      const formatted = replaceTemplatePlaceholders(selected.text, lead, lead.assignedTo || currentAgentId, selected.id);
+                      const keys = extractTemplateParams(selected.text);
+                      const initialParams: Record<string, string> = {};
+                      keys.forEach(k => {
+                        initialParams[k] = resolveTemplateVariable(
+                          k,
+                          selected.id,
+                          selected.text,
+                          lead,
+                          lead.phone || '',
+                          lead.name || '',
+                          lead.assignedTo || currentAgentId
+                        );
+                      });
+                      setHistoryParamKeys(keys);
+                      setHistoryParamValues(initialParams);
+                      const formatted = getFormattedPreviewText(selected.text, initialParams);
                       setHistoryPreviewText(formatted);
                     } else {
+                      setHistoryParamKeys([]);
+                      setHistoryParamValues({});
                       setHistoryPreviewText('');
                     }
                   }}
@@ -1267,8 +1528,16 @@ export default function LeadWhatsAppChat({
                       setSending(true);
                       try {
                         await handleSendMessage(historyPreviewText, selected.id);
+                        
+                        // Cache parameter values for next time
+                        Object.entries(historyParamValues).forEach(([k, val]) => {
+                          saveParamToCache(k, val);
+                        });
+
                         setSelectedTemplateIdHistory('');
                         setHistoryPreviewText('');
+                        setHistoryParamKeys([]);
+                        setHistoryParamValues({});
                       } catch (e) {
                         console.error('Failed to send template outreach:', e);
                       } finally {
@@ -1291,12 +1560,72 @@ export default function LeadWhatsAppChat({
                 </button>
               </div>
 
+              {/* Aisensy-style Parameters Grid for Session Expired */}
+              {selectedTemplateIdHistory && historyParamKeys.length > 0 && (
+                <div className="bg-slate-50 dark:bg-slate-900/40 p-3 rounded-lg border border-slate-200/60 dark:border-slate-800/60 space-y-2 text-left">
+                  <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider">
+                    <Info className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                    <span>Parameters</span>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {historyParamKeys.map((key) => (
+                      <div key={key} className="flex items-center gap-2 bg-white dark:bg-slate-850 p-1.5 rounded-lg border border-slate-150 dark:border-slate-800 shadow-3xs relative">
+                        <span className="text-[10px] font-mono font-extrabold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 rounded border border-blue-200/40 shrink-0">
+                          {"{{" + key + "}}"}
+                        </span>
+                        <input
+                          type="text"
+                          value={historyParamValues[key] || ''}
+                          onChange={(e) => {
+                            const updated = { ...historyParamValues, [key]: e.target.value };
+                            setHistoryParamValues(updated);
+                            const selected = templates.find(t => t.id === selectedTemplateIdHistory);
+                            if (selected) {
+                              setHistoryPreviewText(getFormattedPreviewText(selected.text, updated));
+                            }
+                          }}
+                          onFocus={() => setActiveSuggestionField({ type: 'history', key })}
+                          onBlur={() => setTimeout(() => setActiveSuggestionField(null), 200)}
+                          placeholder="value"
+                          className="flex-1 min-w-0 bg-transparent text-xs text-slate-800 dark:text-slate-200 focus:outline-hidden px-1 border-none placeholder-slate-400 dark:placeholder-slate-600 font-bold"
+                        />
+                        
+                        {/* Dropdown Suggestions matching AiSensy style (sleek black theme) */}
+                        {activeSuggestionField?.type === 'history' && activeSuggestionField.key === key && paramSuggestions[key] && paramSuggestions[key].length > 0 && (
+                          <div className="absolute top-[102%] left-0 right-0 bg-[#151d24] dark:bg-[#1f2c34] text-slate-100 rounded-lg border border-slate-700/80 dark:border-slate-800 shadow-xl max-h-36 overflow-y-auto z-50 py-1 font-sans text-xs">
+                            {paramSuggestions[key].map((suggestedVal, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onMouseDown={() => {
+                                  const updated = { ...historyParamValues, [key]: suggestedVal };
+                                  setHistoryParamValues(updated);
+                                  const selected = templates.find(t => t.id === selectedTemplateIdHistory);
+                                  if (selected) {
+                                    setHistoryPreviewText(getFormattedPreviewText(selected.text, updated));
+                                  }
+                                  setActiveSuggestionField(null);
+                                }}
+                                className="w-full px-3 py-1.5 text-left hover:bg-emerald-600 dark:hover:bg-emerald-500 hover:text-white transition-colors text-slate-100 font-bold"
+                              >
+                                {suggestedVal}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Live Preview Panel - Rendered compactly */}
               {selectedTemplateIdHistory && (
                 <div className="space-y-1 animate-fadeIn border-t border-slate-100 dark:border-slate-800/80 pt-2">
                   <div className="flex items-center justify-between">
                     <label className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">
-                      Live Preview
+                      Preview
                     </label>
                     <span className="text-[8px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/20 px-1 py-0.2 rounded">
                       Outbound Text
