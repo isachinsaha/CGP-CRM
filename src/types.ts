@@ -29,6 +29,7 @@ export interface Message {
   replyToId?: string;
   replyToText?: string;
   replyToSender?: string;
+  errorDetails?: string;
 }
 
 export interface WhatsAppTemplate {

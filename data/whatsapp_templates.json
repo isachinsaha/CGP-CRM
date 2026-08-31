@@ -1,0 +1,109 @@
+[
+  {
+    "title": "Assign",
+    "category": "status",
+    "id": "assign",
+    "type": "template",
+    "language": "en",
+    "description": "Meta Approved Template (MARKETING)",
+    "text": "Ms. *{{1}}* will assist you shortly.\nPlease save *{{2}}*.\nIf you miss her call, just call back on the same number."
+  },
+  {
+    "title": "Assign Edenla",
+    "type": "quick_reply",
+    "category": "status",
+    "description": "",
+    "text": "Ms. Edenla will assist you shortly.\nPlease save 6297920877.\n If you miss her call, just call back on the same number",
+    "id": "assign_edenla"
+  },
+  {
+    "description": "",
+    "id": "assign_joyce",
+    "category": "status",
+    "type": "quick_reply",
+    "title": "Assign Joyce",
+    "text": "Ms. Joyce will assist you shortly.\nPlease save 7863998208.\n If you miss her call, just call back on the same number"
+  },
+  {
+    "id": "assign_maryada",
+    "text": "Ms. Maryada will assist you shortly.\nPlease save 9749681192.\n If you miss her call, just call back on the same number",
+    "category": "status",
+    "description": "",
+    "title": "Assign Maryada",
+    "type": "quick_reply"
+  },
+  {
+    "text": "Ms. Sarina will assist you shortly.\nPlease save  9907779572.\n If you miss her call, just call back on the same number",
+    "description": "",
+    "category": "status",
+    "title": "Assign Sarina",
+    "type": "quick_reply",
+    "id": "assign_sarina"
+  },
+  {
+    "description": "",
+    "text": "Ms. Shreya will assist you shortly.\nPlease save 8653449043.\n If you miss her call, just call back on the same number",
+    "title": "Assign Shreya",
+    "id": "assign_shreya",
+    "category": "status",
+    "type": "quick_reply"
+  },
+  {
+    "type": "quick_reply",
+    "id": "feedback_joyce",
+    "text": "Hello 👋\n\nThank you for speaking with our team today. \nWe hope the discussion was clear and helpful.\n\nFor any queries, please contact us at:\n📞 +91 7863998208\n\nRegards,\nCareer Growth Placement (CGP)",
+    "title": "Feedack Joyce",
+    "category": "status",
+    "description": ""
+  },
+  {
+    "text": "Welcome and congratulations!! This message demonstrates your ability to send a WhatsApp message notification from the Cloud API, hosted by Meta. Thank you for taking the time to test with us.",
+    "type": "template",
+    "description": "Meta Approved Template (UTILITY)",
+    "id": "hello_world",
+    "title": "Hello World",
+    "language": "en_US",
+    "category": "documentation"
+  },
+  {
+    "description": "no response  text",
+    "category": "status",
+    "type": "quick_reply",
+    "title": "response",
+    "id": "no_response_",
+    "text": "Hello , I’ve tried reaching you but haven’t been able to connect. Just wanted to follow up and see if you’re available for a quick call."
+  },
+  {
+    "title": "Office Address",
+    "type": "quick_reply",
+    "category": "status",
+    "text": "📍 Our Office Address:\n\nMoktan Building, 3rd Floor,\nSister Nivedita Road, Ward No. 3,\nPradhan Nagar, Siliguri,\nWest Bengal – 734003\n\n🗺️ Find us easily on Google Maps:\n👉 https://share.google/EDygjBfGB7Hh28Fa6\n\nIf you need any assistance with directions, feel free to message us. We look forward to welcoming you! 😊",
+    "id": "office_address",
+    "description": ""
+  },
+  {
+    "type": "quick_reply",
+    "id": "opening_",
+    "text": "Hello, \n\nJoyce this side from Career Growth Placement.\n\nWe received your enquiry regarding overseas job vacancies and I wanted to personally connect with you regarding the same.\n\nIf you’re still looking for an opportunity abroad, please share your latest CV here on WhatsApp. I’ll have a look at your profile and check which of our current openings would be a good fit for you.\n\nOnce I’ve reviewed it, I’ll share the relevant options with you along with the basic job details.\n\nHope to hear from you soon! 😊",
+    "title": "JOYCE",
+    "description": "OPENING TEXT FROM JOYCE",
+    "category": "status"
+  },
+  {
+    "description": "Meta Approved Template (UTILITY)",
+    "id": "re_activate_chat",
+    "category": "documentation",
+    "text": "Hello Jobseeker 👋\nSorry for the delay in getting back to you!\nAre you free to continue our conversation about open vacancies? \n*Reply YES to connect!*",
+    "title": "Re Activate Chat",
+    "language": "en",
+    "type": "template"
+  },
+  {
+    "text": "*📲 Follow our WhatsApp Channel for the latest job opportunities & updates!*\n\nhttps://whatsapp.com/channel/0029VbANRcW6WaKm1o3uY22S",
+    "id": "whatsapp_channel",
+    "category": "status",
+    "type": "quick_reply",
+    "description": "",
+    "title": "WhatsApp Channel"
+  }
+]

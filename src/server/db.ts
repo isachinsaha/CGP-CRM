@@ -434,7 +434,7 @@ async function markDatabaseUpdated(key: string): Promise<string> {
   try {
     const timestamp = new Date().toISOString();
     const docRef = doc(db, 'metadata', 'sync');
-    await runWithTimeout(setDoc(docRef, { [key]: timestamp, lastUpdatedAt: timestamp }, { merge: true }), 5000);
+    await runWithTimeout(setDoc(docRef, { [key]: timestamp, lastUpdatedAt: timestamp }, { merge: true }), 15000);
     console.log(`[Firestore Client] Marked database updated for "${key}" at ${timestamp}`);
     return timestamp;
   } catch (err) {
@@ -1073,7 +1073,7 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
   let remoteLeadsTimestamp = '';
   if (checkCloudStatus()) {
     try {
-      const syncSnap = await runWithTimeout(getDoc(doc(db, 'metadata', 'sync')), 5000);
+      const syncSnap = await runWithTimeout(getDoc(doc(db, 'metadata', 'sync')), 15000);
       if (syncSnap.exists()) {
         const syncData = syncSnap.data();
         remoteLeadsTimestamp = syncData?.leads || '';
@@ -1114,7 +1114,7 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
       if (doFullSync) {
         console.log('[Firestore Client] Performing FULL sync of leads to check for deletions and reconcile all changes...');
         const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
-        const snapshot = await runWithTimeout(getDocs(q), 5000);
+        const snapshot = await runWithTimeout(getDocs(q), 15000);
         snapshot.forEach(docSnap => {
           cloudLeads.push(docSnap.data() as Lead);
         });
@@ -1143,7 +1143,7 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
           collection(db, 'leads'),
           where('updatedAt', '>=', lastSyncThreshold)
         );
-        const snapshot = await runWithTimeout(getDocs(q), 5000);
+        const snapshot = await runWithTimeout(getDocs(q), 15000);
         
         const cloudLeadsDelta: Lead[] = [];
         snapshot.forEach(docSnap => {
@@ -1173,7 +1173,7 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
       // Handle any pending uploads to Firestore (which are local-only modifications or creations)
       if (mergeResult.pendingUpload.length > 0) {
         console.log(`[Firestore Client] Found ${mergeResult.pendingUpload.length} pending local changes/creations to upload to Firestore...`);
-        const CHUNK_SIZE = 400;
+        const CHUNK_SIZE = 100;
         for (let i = 0; i < mergeResult.pendingUpload.length; i += CHUNK_SIZE) {
           const chunk = mergeResult.pendingUpload.slice(i, i + CHUNK_SIZE);
           const batch = writeBatch(db);
@@ -1181,7 +1181,7 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
             const docRef = doc(db, 'leads', l.id);
             batch.set(docRef, cleanForFirestore(l));
           });
-          await runWithTimeout(batch.commit(), 5000);
+          await runWithTimeout(batch.commit(), 15000);
         }
         console.log(`[Firestore Client] Uploaded ${mergeResult.pendingUpload.length} pending leads successfully.`);
       }
@@ -1189,7 +1189,7 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
       // Handle any pending deletes from Firestore (deleted locally but still on cloud)
       if (mergeResult.pendingDeleteIds.length > 0) {
         console.log(`[Firestore Client] Found ${mergeResult.pendingDeleteIds.length} pending deletes to propagate to cloud...`);
-        const CHUNK_SIZE = 400;
+        const CHUNK_SIZE = 100;
         for (let i = 0; i < mergeResult.pendingDeleteIds.length; i += CHUNK_SIZE) {
           const chunk = mergeResult.pendingDeleteIds.slice(i, i + CHUNK_SIZE);
           const batch = writeBatch(db);
@@ -1197,7 +1197,7 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
             const docRef = doc(db, 'leads', id);
             batch.delete(docRef);
           });
-          await runWithTimeout(batch.commit(), 5000);
+          await runWithTimeout(batch.commit(), 15000);
         }
         console.log(`[Firestore Client] Deleted ${mergeResult.pendingDeleteIds.length} leads from cloud successfully.`);
       }
@@ -1318,9 +1318,9 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
         console.log(`[Firestore Client] Syncing saveLeads diff: ${leadsToSave.length} leads to set, ${leadsToDelete.length} leads to delete (total: ${normalizedLeads.length})`);
       }
 
-      // Write changes in batches of 400
+      // Write changes in batches of 100
       if (leadsToSave.length > 0) {
-        const CHUNK_SIZE = 400;
+        const CHUNK_SIZE = 100;
         for (let i = 0; i < leadsToSave.length; i += CHUNK_SIZE) {
           const chunk = leadsToSave.slice(i, i + CHUNK_SIZE);
           const batch = writeBatch(db);
@@ -1328,14 +1328,14 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
             const docRef = doc(db, 'leads', l.id);
             batch.set(docRef, cleanForFirestore(l));
           });
-          await runWithTimeout(batch.commit(), 5000);
+          await runWithTimeout(batch.commit(), 15000);
         }
       }
 
       // Safety guardrail: Convert removed documents to soft-deleted on Cloud to prevent physical data loss
       if (leadsToDelete.length > 0) {
         console.log(`[Firestore Client] Converting ${leadsToDelete.length} removed leads to soft-deleted on Cloud...`);
-        const CHUNK_SIZE = 400;
+        const CHUNK_SIZE = 100;
         for (let i = 0; i < leadsToDelete.length; i += CHUNK_SIZE) {
           const chunk = leadsToDelete.slice(i, i + CHUNK_SIZE);
           const batch = writeBatch(db);
@@ -1347,7 +1347,7 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
               updatedAt: new Date().toISOString() 
             }, { merge: true });
           });
-          await runWithTimeout(batch.commit(), 5000);
+          await runWithTimeout(batch.commit(), 15000);
         }
       }
 

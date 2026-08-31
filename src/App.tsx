@@ -570,9 +570,19 @@ export default function App() {
         const isOlderThan24Hours = (lead: Lead) => {
           const msgs = (lead.messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
           if (msgs.length === 0) return true;
-          const latestMsg = msgs[msgs.length - 1];
-          if (!latestMsg?.timestamp) return true;
-          const latestTime = new Date(latestMsg.timestamp).getTime();
+          
+          // If the last message in the entire chat is outbound (not from lead),
+          // it means we sent a template (or message) and the candidate has not replied to it yet.
+          const lastMsg = msgs[msgs.length - 1];
+          if (lastMsg && lastMsg.sender !== 'lead') {
+            return true; // Keep in history until they reply
+          }
+
+          const leadMsgs = msgs.filter(m => m.sender === 'lead');
+          if (leadMsgs.length === 0) return true;
+          const latestLeadMsg = leadMsgs[leadMsgs.length - 1];
+          if (!latestLeadMsg?.timestamp) return true;
+          const latestTime = new Date(latestLeadMsg.timestamp).getTime();
           if (isNaN(latestTime)) return true;
           const now = Date.now();
           const diffMs = now - latestTime;

@@ -153,13 +153,24 @@ export default function LeadWhatsAppChat({
   };
 
   // Determine if the chat's latest message is older than 24 hours (24h Window Expired)
+  // Or if the last action was outbound and the candidate has not replied to our template yet.
   const isChatOlderThan24Hours = () => {
     const msgs = (messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
-    if (msgs.length === 0) return false; // If empty/new chat, do not restrict.
-    const latestMsg = msgs[msgs.length - 1];
-    if (!latestMsg?.timestamp) return false;
-    const latestTime = new Date(latestMsg.timestamp).getTime();
-    if (isNaN(latestTime)) return false;
+    if (msgs.length === 0) return true; // Require templates for brand new chats
+    
+    // If the last message in the entire chat is outbound (not from lead),
+    // it means we sent a template (or message) and the candidate has not replied to it yet.
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.sender !== 'lead') {
+      return true; // Keep chat locked (templates only) until they reply
+    }
+
+    const leadMsgs = msgs.filter(m => m.sender === 'lead');
+    if (leadMsgs.length === 0) return true; // Require templates if candidate hasn't replied yet
+    const latestLeadMsg = leadMsgs[leadMsgs.length - 1];
+    if (!latestLeadMsg?.timestamp) return true;
+    const latestTime = new Date(latestLeadMsg.timestamp).getTime();
+    if (isNaN(latestTime)) return true;
     const now = new Date().getTime();
     const diffMs = now - latestTime;
     return diffMs > 24 * 60 * 60 * 1000;
@@ -373,7 +384,8 @@ export default function LeadWhatsAppChat({
   const handleSendMessage = async (
     customText?: string, 
     templateName?: string, 
-    mediaParams?: { type: 'image' | 'pdf' | 'document'; mediaUrl: string; fileName: string; fileSize: string }
+    mediaParams?: { type: 'image' | 'pdf' | 'document'; mediaUrl: string; fileName: string; fileSize: string },
+    templateParams?: Record<string, string>
   ) => {
     const textToSend = (customText !== undefined ? customText : inputText).trim();
     if (!textToSend && !mediaParams && !sending) return;
@@ -394,6 +406,7 @@ export default function LeadWhatsAppChat({
           sender: 'user',
           senderName,
           templateName: templateName || undefined,
+          templateParams: templateParams || undefined,
           channel: 'whatsapp',
           ...(mediaParams || {}),
           replyToId: replyingToMessage?.id || undefined,
@@ -856,19 +869,25 @@ export default function LeadWhatsAppChat({
                     {isUser && (
                       <span 
                         className={`inline-flex items-center ${
-                          msg.status === 'read' 
-                            ? 'text-[#53bdeb]' 
-                            : 'text-[#8696a0]'
+                          msg.status === 'failed'
+                            ? 'text-red-500 font-bold cursor-help'
+                            : msg.status === 'read' 
+                              ? 'text-[#53bdeb]' 
+                              : 'text-[#8696a0]'
                         }`} 
                         title={
-                          msg.status === 'read' 
-                            ? "Read by candidate (Blue tick)" 
-                            : msg.status === 'delivered' 
-                              ? "Delivered to candidate" 
-                              : "Sent to candidate"
+                          msg.status === 'failed'
+                            ? `Failed to send: ${msg.errorDetails || 'Meta Template validation or setup error. Check WABA configuration.'}`
+                            : msg.status === 'read' 
+                              ? "Read by candidate (Blue tick)" 
+                              : msg.status === 'delivered' 
+                                ? "Delivered to candidate" 
+                                : "Sent to candidate"
                         }
                       >
-                        {msg.status === 'sent' ? (
+                        {msg.status === 'failed' ? (
+                          <AlertCircle className="h-3.5 w-3.5 stroke-[2.5]" />
+                        ) : msg.status === 'sent' ? (
                           <Check className="h-3.5 w-3.5 stroke-[2.5]" />
                         ) : (
                           <CheckCheck className="h-3.5 w-3.5 stroke-[2.5]" />
@@ -1128,7 +1147,7 @@ export default function LeadWhatsAppChat({
                        const finalMsg = getFormattedPreviewText(selectedConfigTemplate.text, configParamValues);
                        setSending(true);
                        try {
-                         await handleSendMessage(finalMsg, selectedConfigTemplate.title);
+                         await handleSendMessage(finalMsg, selectedConfigTemplate.title, undefined, configParamValues);
                          
                          // Cache parameter values for autocomplete suggestions next time
                          Object.entries(configParamValues).forEach(([k, val]) => {
@@ -1527,7 +1546,7 @@ export default function LeadWhatsAppChat({
                     if (selected) {
                       setSending(true);
                       try {
-                        await handleSendMessage(historyPreviewText, selected.id);
+                        await handleSendMessage(historyPreviewText, selected.id, undefined, historyParamValues);
                         
                         // Cache parameter values for next time
                         Object.entries(historyParamValues).forEach(([k, val]) => {

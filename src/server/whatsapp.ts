@@ -225,7 +225,8 @@ export async function sendWhatsAppMessage(
   mediaType?: 'text' | 'image' | 'pdf' | 'document',
   fileName?: string,
   lead?: Partial<Lead>,
-  matchedTemplate?: WhatsAppTemplate
+  matchedTemplate?: WhatsAppTemplate,
+  templateParams?: Record<string, string>
 ): Promise<SendWhatsAppResult> {
   const formattedPhone = formatPhoneForWhatsApp(phone);
   const messageId = `wa_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -254,7 +255,9 @@ export async function sendWhatsAppMessage(
         }
 
         const parameters = variables.map(v => {
-          const val = resolveTemplateVariable(
+          // Check if custom parameter value was explicitly passed by the client
+          const customVal = templateParams ? (templateParams[v] || templateParams[v.toUpperCase()]) : undefined;
+          const val = (customVal !== undefined && customVal !== null) ? customVal : resolveTemplateVariable(
             v,
             matchedTemplate.id,
             matchedTemplate.text,
@@ -268,18 +271,21 @@ export async function sendWhatsAppMessage(
           };
         });
 
+        const components: any[] = [];
+        if (parameters.length > 0) {
+          components.push({
+            type: 'body',
+            parameters
+          });
+        }
+
         payload = {
           template: {
             name: matchedTemplate.id,
             language: {
               code: matchedTemplate.language || 'en'
             },
-            components: [
-              {
-                type: 'body',
-                parameters
-              }
-            ]
+            ...(components.length > 0 ? { components } : {})
           }
         };
       } else if (mediaUrl) {
@@ -320,7 +326,7 @@ export async function sendWhatsAppMessage(
           success: true,
           messageId: data.messages[0].id || messageId,
           channel: 'meta_cloud_api',
-          status: 'delivered',
+          status: 'sent',
           details: data
         };
       } else {
@@ -335,6 +341,18 @@ export async function sendWhatsAppMessage(
       }
     } catch (err: any) {
       console.error('Error sending message via Meta WhatsApp Cloud API:', err);
+      return {
+        success: false,
+        messageId,
+        channel: 'meta_cloud_api',
+        status: 'failed',
+        details: {
+          error: {
+            message: err.message || String(err),
+            type: 'exception'
+          }
+        }
+      };
     }
   }
 

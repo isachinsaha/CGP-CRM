@@ -2037,6 +2037,184 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
   }
 });
 
+// App Settings Public Routes (Required by Meta for Webhook/API Go-Live Verification)
+app.get('/privacy', (req, res) => {
+  res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - Career Growth Placement CRM</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; color: #334155; max-width: 800px; margin: 40px auto; padding: 0 20px; background-color: #f8fafc; }
+    h1 { color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-bottom: 20px; }
+    h2 { color: #1e293b; margin-top: 30px; }
+    p, li { color: #475569; }
+    ul { padding-left: 20px; }
+    .container { background-color: #ffffff; padding: 40px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05); border: 1px solid #f1f5f9; }
+    .meta-info { font-size: 0.875rem; color: #64748b; margin-bottom: 30px; }
+    .contact { background-color: #f1f5f9; padding: 20px; border-radius: 6px; margin-top: 30px; border-left: 4px solid #3b82f6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Privacy Policy</h1>
+    <p class="meta-info">Last Updated: August 31, 2026</p>
+    
+    <p>Welcome to <strong>Career Growth Placement CRM</strong>. We value your privacy and are deeply committed to protecting your personal data. This Privacy Policy explains how we collect, use, and protect your personal information when you use our recruitment platform, recruitment tracking tools, and WhatsApp communication features.</p>
+    
+    <h2>1. Data We Collect</h2>
+    <p>To provide high-quality recruitment and career placement assistance, we collect the following candidate information:</p>
+    <ul>
+      <li>Candidate Full Name</li>
+      <li>Mobile Number and Alternative Phone Number</li>
+      <li>Gender and Age</li>
+      <li>State/Origin</li>
+      <li>Target Job Position</li>
+      <li>Years of Experience</li>
+      <li>Educational Qualifications</li>
+    </ul>
+
+    <h2>2. How We Use Your Data</h2>
+    <p>The information we collect is strictly utilized to:</p>
+    <ul>
+      <li>Facilitate placement matchmaking with active job openings.</li>
+      <li>Track candidate pipelines and update recruitment statuses.</li>
+      <li>Send automated status updates, notifications, and scheduled check-ins via Meta's WhatsApp Business Cloud API.</li>
+      <li>Coordinate job opportunities between recruiters and candidates.</li>
+    </ul>
+
+    <h2>3. Data Protection & Security</h2>
+    <p>We implement strict administrative, technical, and physical security measures to protect your personal data against unauthorized access, loss, or alteration. Your data is stored securely and is only accessible by authorized administrators and recruiting coordinators.</p>
+
+    <h2>4. Data Sharing & Third Parties</h2>
+    <p>We <strong>do not sell, trade, or rent</strong> your personal data to third parties. Candidate details are only shared with potential hiring employers as part of the job matchmaking process, and only after receiving your explicit interest in the specific opening.</p>
+
+    <h2>5. Data Access and Your Rights</h2>
+    <p>Candidates and users have the right to access, correct, or request the permanent deletion of their personal information from our CRM database at any time. For information on how to permanently purge your data, please see our Data Deletion Instructions.</p>
+
+    <div class="contact">
+      <strong>Contact Us:</strong><br>
+      For any questions, concerns, or inquiries regarding this Privacy Policy or your data, please email us at:<br>
+      <a href="mailto:sahasachin511@gmail.com">sahasachin511@gmail.com</a>
+    </div>
+  </div>
+</body>
+</html>
+  `);
+});
+
+app.get('/terms', (req, res) => {
+  res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terms of Service - Career Growth Placement CRM</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; color: #334155; max-width: 800px; margin: 40px auto; padding: 0 20px; background-color: #f8fafc; }
+    h1 { color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-bottom: 20px; }
+    h2 { color: #1e293b; margin-top: 30px; }
+    p, li { color: #475569; }
+    .container { background-color: #ffffff; padding: 40px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05); border: 1px solid #f1f5f9; }
+    .meta-info { font-size: 0.875rem; color: #64748b; margin-bottom: 30px; }
+    .contact { background-color: #f1f5f9; padding: 20px; border-radius: 6px; margin-top: 30px; border-left: 4px solid #3b82f6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Terms of Service</h1>
+    <p class="meta-info">Last Updated: August 31, 2026</p>
+    
+    <p>By accessing or using the services of <strong>Career Growth Placement CRM</strong>, you agree to be bound by these Terms of Service. Please read them carefully.</p>
+    
+    <h2>1. Acceptance of Terms</h2>
+    <p>Our platform provides candidate tracking, recruitment pipelines, and notifications using WhatsApp. By interacting with our recruiting coordinators or submitting your profile to our platform, you acknowledge and accept these terms in full.</p>
+
+    <h2>2. Accurate Candidate Information</h2>
+    <p>Candidates agree to provide truthful, accurate, and current information regarding their credentials, qualifications, work experience, and contact details. Providing false information may lead to removal from candidate lists.</p>
+
+    <h2>3. Consent for Communications (WhatsApp)</h2>
+    <p>By registering on our placement portal or expressing interest in our recruiting services, you provide explicit consent to receive informational messages, job matching alerts, and status updates on your registered WhatsApp mobile number. You can opt out of these updates at any time by replying with 'STOP' or contacting us directly.</p>
+
+    <h2>4. Liability & Placements</h2>
+    <p>We act as a facilitating platform to bridge jobseekers with potential employers. While we strive to match candidates with high-quality job opportunities, we do not guarantee job offers, placement outcomes, or specific employment contract terms.</p>
+
+    <div class="contact">
+      <strong>Inquiries:</strong><br>
+      If you have any questions regarding these Terms of Service, please contact us at:<br>
+      <a href="mailto:sahasachin511@gmail.com">sahasachin511@gmail.com</a>
+    </div>
+  </div>
+</body>
+</html>
+  `);
+});
+
+app.get('/data-deletion', (req, res) => {
+  res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Deletion Instructions - Career Growth Placement CRM</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; color: #334155; max-width: 800px; margin: 40px auto; padding: 0 20px; background-color: #f8fafc; }
+    h1 { color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-bottom: 20px; }
+    h2 { color: #1e293b; margin-top: 30px; }
+    p, li { color: #475569; }
+    ol { padding-left: 20px; }
+    .container { background-color: #ffffff; padding: 40px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05); border: 1px solid #f1f5f9; }
+    .meta-info { font-size: 0.875rem; color: #64748b; margin-bottom: 30px; }
+    .step-box { background-color: #f8fafc; border: 1px dashed #cbd5e1; padding: 20px; border-radius: 6px; margin: 20px 0; }
+    .contact { background-color: #f1f5f9; padding: 20px; border-radius: 6px; margin-top: 30px; border-left: 4px solid #ef4444; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Data Deletion Instructions</h1>
+    <p class="meta-info">Last Updated: August 31, 2026</p>
+    
+    <p>At <strong>Career Growth Placement CRM</strong>, we respect your right to privacy and control over your personal data. In compliance with Meta Developer Platform regulations and standard data protection principles, we provide an easy, explicit way for candidates to request the permanent deletion of their account, communication records, and candidate profile.</p>
+
+    <h2>How to Request Your Data Purge</h2>
+    <p>If you wish to delete your placement profile, history, and contact details from our active recruiting systems, you can request a manual deletion at any time by following these simple steps:</p>
+    
+    <div class="step-box">
+      <ol>
+        <li>Send an email from your registered email address to <a href="mailto:sahasachin511@gmail.com"><strong>sahasachin511@gmail.com</strong></a>.</li>
+        <li>Set the email subject line to: <strong>"Candidate Data Deletion Request"</strong>.</li>
+        <li>In the email body, please specify:
+          <ul>
+            <li>Your Full Name</li>
+            <li>The WhatsApp Mobile Number registered under your candidate record</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <h2>Processing Timeline</h2>
+    <p>Upon receipt of your deletion request, our administration team will:</p>
+    <ul>
+      <li>Verify the matching record in our CRM database.</li>
+      <li>Permanently delete and scrub your profile, timeline actions, resumes, metadata, and WhatsApp logs from our system.</li>
+      <li>Complete the operation within <strong>48 to 72 business hours</strong>.</li>
+      <li>Reply with a confirmation email to inform you that your personal records have been successfully and permanently purged.</li>
+    </ul>
+
+    <div class="contact">
+      <strong>Data Security Notice:</strong><br>
+      Please note that once deleted, your candidate profile and placement history cannot be restored. If you wish to match with open jobs again in the future, you will need to re-register as a new candidate.
+    </div>
+  </div>
+</body>
+</html>
+  `);
+});
+
 // Meta Webhook Verification (GET endpoint required for Meta Developer Portal Webhook validation)
 app.get('/api/whatsapp/webhook', (req, res) => {
   const mode = req.query['hub.mode'] || req.query['hub_mode'] || req.query['mode'];
@@ -2166,7 +2344,7 @@ app.post('/api/leads/:id/read', async (req, res) => {
 // POST send WhatsApp message to a lead (Outbound via Meta Cloud API)
 app.post('/api/leads/:id/messages', async (req, res) => {
   try {
-    const { text, sender, senderName, templateName, channel, type, mediaUrl, fileName, fileSize, replyToId, replyToText, replyToSender } = req.body;
+    const { text, sender, senderName, templateName, templateParams, channel, type, mediaUrl, fileName, fileSize, replyToId, replyToText, replyToSender } = req.body;
     
     // For media messages, body text is optional (can act as a caption)
     const msgType = type || 'text';
@@ -2210,18 +2388,20 @@ app.post('/api/leads/:id/messages', async (req, res) => {
         msgType,
         fileName,
         lead,
-        matchedTemplate
+        matchedTemplate,
+        templateParams
       );
     }
 
     const isOutboundSender = (sender || 'user') !== 'lead';
+    const isFailed = isOutboundSender && deliveryResult?.success === false;
     const newMessage: Message = {
       id: deliveryResult?.messageId || `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       sender: sender || 'user',
       senderName: senderName || (sender === 'lead' ? lead.name : (agentId === 'admin' ? 'Administrator' : agentId)),
       text: messageText,
       timestamp: new Date().toISOString(),
-      status: isOutboundSender ? 'sent' : 'delivered',
+      status: isFailed ? 'failed' : (isOutboundSender ? 'sent' : 'delivered'),
       templateName: templateName || undefined,
       channel: channel || 'whatsapp',
       type: msgType,
@@ -2230,7 +2410,8 @@ app.post('/api/leads/:id/messages', async (req, res) => {
       fileSize: fileSize || undefined,
       replyToId: replyToId || undefined,
       replyToText: replyToText || undefined,
-      replyToSender: replyToSender || undefined
+      replyToSender: replyToSender || undefined,
+      errorDetails: isFailed ? (deliveryResult?.details?.error?.message || JSON.stringify(deliveryResult?.details)) : undefined
     };
 
     if (!Array.isArray(lead.messages)) {
@@ -2238,8 +2419,8 @@ app.post('/api/leads/:id/messages', async (req, res) => {
     }
     lead.messages.push(newMessage);
 
-    // Transition outbound message to 'delivered' in background after 1.5 seconds
-    if (isOutboundSender) {
+    // Transition outbound message to 'delivered' in background after 1.5 seconds if not failed and not using real Meta API
+    if (isOutboundSender && !isFailed && deliveryResult?.channel !== 'meta_cloud_api') {
       const msgId = newMessage.id;
       const targetLeadId = lead.id;
       setTimeout(async () => {
@@ -2367,9 +2548,21 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     const payload = req.body || {};
     console.log(`[Meta Webhook POST] Received payload:`, JSON.stringify(payload, null, 2));
 
+    // Persist webhook payloads to a local file for live diagnostics
+    try {
+      const logDir = path.join(process.cwd(), 'data');
+      fs.appendFileSync(
+        path.join(logDir, 'webhooks.log'),
+        `[${new Date().toISOString()}] ${JSON.stringify(payload)}\n`,
+        'utf8'
+      );
+    } catch (logErr) {
+      console.warn('Failed to write webhook to webhooks.log:', logErr);
+    }
+
     // Handle Meta WhatsApp Status Webhook (read receipts, delivery ticks)
     let isStatusUpdate = false;
-    const statusesToProcess: { id: string; status: string; recipient_id?: string }[] = [];
+    const statusesToProcess: { id: string; status: string; recipient_id?: string; errorDetails?: string }[] = [];
 
     // 1. Check for standard Meta nested statuses array
     if (payload.entry && Array.isArray(payload.entry)) {
@@ -2380,10 +2573,16 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
             if (val && val.statuses && Array.isArray(val.statuses)) {
               for (const s of val.statuses) {
                 if (s.id && s.status) {
+                  let errStr: string | undefined = undefined;
+                  if (s.errors && Array.isArray(s.errors) && s.errors[0]) {
+                    const e = s.errors[0];
+                    errStr = `[Code ${e.code}] ${e.message || e.title || 'Error'}`;
+                  }
                   statusesToProcess.push({
                     id: String(s.id),
                     status: String(s.status),
-                    recipient_id: s.recipient_id ? String(s.recipient_id) : undefined
+                    recipient_id: s.recipient_id ? String(s.recipient_id) : undefined,
+                    errorDetails: errStr
                   });
                 }
               }
@@ -2409,10 +2608,12 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
       const validStatuses = ['sent', 'delivered', 'read', 'failed'];
       if (validStatuses.includes(flatStatus)) {
+        const flatError = payload.error || payload.reason || payload.errorMessage || payload.error_message || payload.errorDetails || payload.error_details;
         statusesToProcess.push({
           id: String(flatId),
           status: flatStatus,
-          recipient_id: flatPhone ? String(flatPhone) : undefined
+          recipient_id: flatPhone ? String(flatPhone) : undefined,
+          errorDetails: flatError ? String(flatError) : undefined
         });
       }
     }
@@ -2445,6 +2646,9 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
               if (newPriority > oldPriority || newStatus === 'failed') {
                 lead.messages[mIdx].status = newStatus as 'sent' | 'delivered' | 'read' | 'failed';
+                if (s.errorDetails) {
+                  lead.messages[mIdx].errorDetails = s.errorDetails;
+                }
                 leadsUpdated = true;
                 console.log(`[Meta Webhook POST] Match exact ID: Updated message "${wamid}" status from "${oldStatus}" to "${newStatus}" for lead "${lead.name}"`);
                 
@@ -2484,8 +2688,17 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                     if (m && m.sender !== 'lead') {
                       const oldStatus = m.status;
                       const oldPriority = statusPriority[oldStatus as keyof typeof statusPriority] || 0;
-                      if (newPriority > oldPriority || newStatus === 'failed') {
+                      
+                      // Only update if the new status is a higher priority (e.g. sent -> delivered -> read)
+                      // OR if we are marking a pending message as failed.
+                      // NEVER mark an already read or delivered message as failed via secondary phone match!
+                      const isFailedTransition = newStatus === 'failed' && (oldStatus === 'sent' || !oldStatus || oldStatus === 'delivered');
+                      
+                      if (newPriority > oldPriority || isFailedTransition) {
                         m.status = newStatus as 'sent' | 'delivered' | 'read' | 'failed';
+                        if (s.errorDetails) {
+                          m.errorDetails = s.errorDetails;
+                        }
                         updatedAny = true;
                         console.log(`[Meta Webhook POST] Match phone secondary: Updated message "${m.id}" status from "${oldStatus}" to "${newStatus}" for lead "${lead.name}"`);
 
@@ -2500,6 +2713,8 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                             timestamp: new Date().toISOString()
                           });
                         }
+                        // Break after updating the single most recent matching message
+                        break;
                       }
                     }
                   }
