@@ -2953,11 +2953,33 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 
 // GET WhatsApp Media proxy from Meta
 app.get('/api/whatsapp/media/:mediaId', async (req, res) => {
+  const { mediaId } = req.params;
+  
+  // Elegant SVG placeholder helper in case of failure or missing config
+  const servePlaceholder = (reason: string) => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 250" width="100%" height="100%">
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <rect x="10" y="10" width="380" height="230" rx="8" fill="none" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="6,6"/>
+  <g transform="translate(200, 105)" text-anchor="middle">
+    <!-- Icon container -->
+    <circle cx="0" cy="-25" r="28" fill="#f1f5f9"/>
+    <!-- Slash indicator indicating unavailable -->
+    <line x1="-12" y1="-37" x2="12" y2="-13" stroke="#ef4444" stroke-width="3" stroke-linecap="round"/>
+    <line x1="12" y1="-37" x2="-12" y2="-13" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="2,2"/>
+    <text y="25" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="600" fill="#334155">Media Attachment Expired</text>
+    <text y="48" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="500" fill="#64748b">${reason}</text>
+    <text y="68" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#94a3b8">ID: ${mediaId}</text>
+  </g>
+</svg>`;
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'public, max-age=60'); // short cache for errors
+    return res.status(200).send(svg);
+  };
+
   try {
-    const { mediaId } = req.params;
     const metaToken = process.env.WHATSAPP_API_KEY || process.env.META_WA_ACCESS_TOKEN;
     if (!metaToken || metaToken === 'MY_WHATSAPP_API_KEY' || !metaToken.trim()) {
-      return res.status(400).send('WhatsApp API Key is not configured in CRM.');
+      return servePlaceholder('WhatsApp API Key is not configured in CRM.');
     }
 
     console.log(`[Meta Media Proxy] Fetching media info for ID="${mediaId}"`);
@@ -2970,13 +2992,18 @@ app.get('/api/whatsapp/media/:mediaId', async (req, res) => {
     if (!infoRes.ok) {
       const errorText = await infoRes.text();
       console.error('[Meta Media Proxy] Meta returned error:', errorText);
-      return res.status(infoRes.status).send(`Failed to fetch media metadata: ${errorText}`);
+      
+      let reason = 'This media has expired or is invalid';
+      if (errorText.includes('does not exist') || errorText.includes('permissions') || errorText.includes('support this operation')) {
+        reason = 'Attachment expired or missing Graph API permissions';
+      }
+      return servePlaceholder(reason);
     }
 
     const info = await infoRes.json() as any;
     const mediaUrl = info.url;
     if (!mediaUrl) {
-      return res.status(404).send('Media download URL not found in Meta response.');
+      return servePlaceholder('Download URL not found in Meta response.');
     }
 
     console.log(`[Meta Media Proxy] Fetching binary media from Lookaside URL`);
@@ -2987,7 +3014,7 @@ app.get('/api/whatsapp/media/:mediaId', async (req, res) => {
     });
 
     if (!binaryRes.ok) {
-      return res.status(binaryRes.status).send('Failed to fetch binary file from Facebook server.');
+      return servePlaceholder('Failed to retrieve binary file from Meta Lookaside.');
     }
 
     // Set content type and disposition to stream it directly to the browser
@@ -3001,7 +3028,14 @@ app.get('/api/whatsapp/media/:mediaId', async (req, res) => {
     res.send(buffer);
   } catch (err: any) {
     console.error('[Meta Media Proxy] Exception:', err);
-    res.status(500).send(`Internal Media Proxy Error: ${err.message}`);
+    res.setHeader('Content-Type', 'image/svg+xml');
+    return res.status(200).send(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 250" width="100%" height="100%">
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <g transform="translate(200, 110)" text-anchor="middle">
+    <text font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="600" fill="#334155">Failed to Proxy Media</text>
+    <text y="25" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="#64748b">${err.message}</text>
+  </g>
+</svg>`);
   }
 });
 
