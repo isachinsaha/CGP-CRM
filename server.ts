@@ -2297,10 +2297,30 @@ app.post('/api/whatsapp/templates/sync', async (req, res) => {
     console.log('[System] Syncing templates from Meta Business...');
     const metaTemplates = await fetchMetaWhatsAppTemplates();
     if (metaTemplates.length > 0) {
+      // Get current templates stored in the database (local JSON & Firestore)
+      const currentTemplates = await getWhatsAppTemplates();
+      const metaTemplateIds = new Set(metaTemplates.map(t => t.id));
+      
+      let deletedCount = 0;
+      // Filter out templates of type 'template' (Meta templates) that are no longer present on Meta Business
+      for (const t of currentTemplates) {
+        if ((!t.type || t.type === 'template') && !metaTemplateIds.has(t.id)) {
+          console.log(`[System] Template '${t.id}' has been deleted from Meta. Cleaning up from CRM database...`);
+          await deleteWhatsAppTemplate(t.id);
+          deletedCount++;
+        }
+      }
+
+      // Save/update the remaining templates from Meta
       for (const t of metaTemplates) {
         await saveWhatsAppTemplate(t);
       }
-      res.json({ success: true, count: metaTemplates.length, message: `Successfully synced ${metaTemplates.length} templates from Meta.` });
+      
+      res.json({ 
+        success: true, 
+        count: metaTemplates.length, 
+        message: `Successfully synced ${metaTemplates.length} templates from Meta. Cleaned up ${deletedCount} deleted templates from the CRM.` 
+      });
     } else {
       res.status(400).json({ error: 'No templates found on Meta or Meta integration is not configured with active API keys.' });
     }
