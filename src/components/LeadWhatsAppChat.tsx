@@ -156,24 +156,51 @@ export default function LeadWhatsAppChat({
   // Or if the last action was outbound and the candidate has not replied to our template yet.
   const isChatOlderThan24Hours = () => {
     const msgs = (messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
-    if (msgs.length === 0) return true; // Require templates for brand new chats
     
-    // If the last message in the entire chat is outbound (not from lead),
-    // it means we sent a template (or message) and the candidate has not replied to it yet.
-    const lastMsg = msgs[msgs.length - 1];
-    if (lastMsg && lastMsg.sender !== 'lead') {
-      return true; // Keep chat locked (templates only) until they reply
+    // 1. If there are no messages at all (brand new, or older lead but never texted), allow free-text
+    if (msgs.length === 0) return false;
+
+    // Check outbound messages (sent by us / administrator)
+    const outboundMsgs = msgs.filter(m => m.sender !== 'lead');
+    
+    // 2. If we have NEVER sent any outbound messages yet, standard free-text is unlocked
+    if (outboundMsgs.length === 0) return false;
+
+    // 3. If we DID send outbound messages, but the latest outbound is within the last 24 hours,
+    // standard typing is fully unlocked (starting the 24-hour cap from our first/last sent message)
+    const latestOutboundMsg = outboundMsgs[outboundMsgs.length - 1];
+    if (latestOutboundMsg?.timestamp) {
+      const latestOutboundTime = new Date(latestOutboundMsg.timestamp).getTime();
+      if (!isNaN(latestOutboundTime)) {
+        const now = new Date().getTime();
+        const diffMs = now - latestOutboundTime;
+        if (diffMs <= 24 * 60 * 60 * 1000) {
+          return false; // NOT expired, because our last sent message was within 24 hours!
+        }
+      }
     }
 
     const leadMsgs = msgs.filter(m => m.sender === 'lead');
-    if (leadMsgs.length === 0) return true; // Require templates if candidate hasn't replied yet
+    
+    // 4. If we sent messages but the candidate has never replied, require templates (expired)
+    if (leadMsgs.length === 0) return true;
+
+    // 5. If they did reply, check if their last reply was more than 24 hours ago
     const latestLeadMsg = leadMsgs[leadMsgs.length - 1];
-    if (!latestLeadMsg?.timestamp) return true;
-    const latestTime = new Date(latestLeadMsg.timestamp).getTime();
-    if (isNaN(latestTime)) return true;
-    const now = new Date().getTime();
-    const diffMs = now - latestTime;
-    return diffMs > 24 * 60 * 60 * 1000;
+    if (latestLeadMsg?.timestamp) {
+      const latestTime = new Date(latestLeadMsg.timestamp).getTime();
+      if (!isNaN(latestTime)) {
+        const now = new Date().getTime();
+        const diffMs = now - latestTime;
+        if (diffMs > 24 * 60 * 60 * 1000) {
+          return true; // Expired/locked only if candidate's last message is older than 24 hours
+        } else {
+          return false; // Within 24 hours, allow free text
+        }
+      }
+    }
+
+    return false;
   };
   const sessionExpired = isChatOlderThan24Hours();
 

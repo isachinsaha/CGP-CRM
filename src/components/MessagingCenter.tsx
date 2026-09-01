@@ -172,21 +172,41 @@ export default function MessagingCenter({
   // Or if the last action was outbound and the candidate has not replied to our template yet.
   const isOlderThan24Hours = (lead: Lead) => {
     const msgs = (lead.messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
-    if (msgs.length === 0) return true;
     
-    // If the last message in the entire chat is outbound (not from lead),
-    // it means we sent a template (or message) and the candidate has not replied to it yet.
-    const lastMsg = msgs[msgs.length - 1];
-    if (lastMsg && lastMsg.sender !== 'lead') {
-      return true; // Keep in history until they reply
+    // 1. If there are no messages at all (brand new, or older lead but never texted), allow free-text (not in history)
+    if (msgs.length === 0) return false;
+
+    // Check outbound messages (sent by us / administrator)
+    const outboundMsgs = msgs.filter(m => m.sender !== 'lead');
+    
+    // 2. If we have NEVER sent any outbound messages yet, it is active / not in history
+    if (outboundMsgs.length === 0) return false;
+
+    // 3. If we DID send outbound messages, but the latest outbound is within the last 24 hours,
+    // it stays in active / not in history (starting the 24-hour cap from our first/last sent message)
+    const latestOutboundMsg = outboundMsgs[outboundMsgs.length - 1];
+    if (latestOutboundMsg?.timestamp) {
+      const latestOutboundTime = new Date(latestOutboundMsg.timestamp).getTime();
+      if (!isNaN(latestOutboundTime)) {
+        const now = new Date().getTime();
+        const diffMs = now - latestOutboundTime;
+        if (diffMs <= 24 * 60 * 60 * 1000) {
+          return false; // NOT expired/locked, because our last sent message was within 24 hours!
+        }
+      }
     }
 
     const leadMsgs = msgs.filter(m => m.sender === 'lead');
+    
+    // 4. If we sent messages but the candidate has never replied, require templates (history)
     if (leadMsgs.length === 0) return true;
+
+    // 5. If they did reply, check if their last reply was more than 24 hours ago
     const latestLeadMsg = leadMsgs[leadMsgs.length - 1];
     if (!latestLeadMsg?.timestamp) return true;
     const latestTime = new Date(latestLeadMsg.timestamp).getTime();
     if (isNaN(latestTime)) return true;
+    
     const now = new Date().getTime();
     const diffMs = now - latestTime;
     return diffMs > 24 * 60 * 60 * 1000;
