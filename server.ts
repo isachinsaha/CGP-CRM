@@ -1978,7 +1978,8 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
         timestamp: nowIso,
         status: deliveryResult?.status || 'sent',
         channel: 'whatsapp',
-        templateName: templateName || undefined
+        templateName: templateName || undefined,
+        templateType: matchedTemplate?.type === 'quick_reply' ? 'quick_reply' : (matchedTemplate ? 'template' : undefined)
       };
 
       if (!Array.isArray(targetLead.messages)) {
@@ -2375,9 +2376,10 @@ app.post('/api/leads/:id/messages', async (req, res) => {
       channel: 'simulation',
       status: 'delivered'
     };
+    let matchedTemplate: any = null;
     if (isOutbound && lead.phone) {
       const templates = await getWhatsAppTemplates().catch(() => DEFAULT_WHATSAPP_TEMPLATES);
-      const matchedTemplate = templates.find(t => t.id === templateName || t.title === templateName);
+      matchedTemplate = templates.find(t => t.id === templateName || t.title === templateName);
 
       deliveryResult = await sendWhatsAppMessage(
         lead.phone,
@@ -2403,6 +2405,7 @@ app.post('/api/leads/:id/messages', async (req, res) => {
       timestamp: new Date().toISOString(),
       status: isFailed ? 'failed' : (isOutboundSender ? 'sent' : 'delivered'),
       templateName: templateName || undefined,
+      templateType: matchedTemplate?.type === 'quick_reply' ? 'quick_reply' : (matchedTemplate ? 'template' : undefined),
       channel: channel || 'whatsapp',
       type: msgType,
       mediaUrl: mediaUrl || undefined,

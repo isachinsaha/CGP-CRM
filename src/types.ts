@@ -21,6 +21,7 @@ export interface Message {
   senderName?: string;
   status?: 'sent' | 'delivered' | 'read' | 'failed';
   templateName?: string;
+  templateType?: 'template' | 'quick_reply';
   channel?: 'whatsapp' | 'sms' | 'system';
   type?: 'text' | 'image' | 'pdf' | 'document';
   mediaUrl?: string;

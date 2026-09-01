@@ -822,10 +822,19 @@ export default function LeadWhatsAppChat({
                     <div className="absolute top-0 -left-1.5 w-1.5 h-2.5 bg-white dark:bg-[#202c33]" style={{ clipPath: 'polygon(100% 0, 0 0, 100% 100%)' }} />
                   )}
 
-                  {/* Template tag if sent from template */}
+                  {/* Template tag if sent from template or quick reply */}
                   {msg.templateName && (
                     <div className="mb-1.5 pb-0.5 border-b border-[#000000]/05 dark:border-white/10 text-[10px] font-bold uppercase text-[#00a884] dark:text-emerald-400 flex items-center gap-1 select-none">
-                      <span>📑 Template:</span>
+                      {msg.templateType === 'quick_reply' ? (
+                        <>
+                          <Zap className="h-2.5 w-2.5 text-amber-500 fill-current" />
+                          <span>Quick Reply:</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>📑 Template:</span>
+                        </>
+                      )}
                       <span className="truncate">{msg.templateName}</span>
                     </div>
                   )}

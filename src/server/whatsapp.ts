@@ -243,7 +243,7 @@ export async function sendWhatsAppMessage(
       let type = 'text';
       let payload: any = {};
 
-      if (matchedTemplate) {
+      if (matchedTemplate && matchedTemplate.type !== 'quick_reply') {
         type = 'template';
         
         // Extract variables in order of appearance in original template text
