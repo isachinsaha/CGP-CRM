@@ -336,7 +336,16 @@ function handleCloudError(context: string | any, err?: any) {
   const errMsg = errorObj?.message || String(errorObj);
   const isQuota = errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota') || errMsg.includes('quota') || errMsg.includes('limit exceeded');
   const isTimeout = errMsg.includes('timed out') || errMsg.includes('timeout');
+  const isOffline = errMsg.toLowerCase().includes('offline') || 
+                    errMsg.toLowerCase().includes('unavailable') || 
+                    errMsg.toLowerCase().includes('unreachable') || 
+                    errMsg.toLowerCase().includes('connection') || 
+                    errMsg.toLowerCase().includes('network') || 
+                    errorObj?.code === 'unavailable';
   
+  // Set dbVerified to false because the connection has failed or is unhealthy
+  dbVerified = false;
+
   if (isQuota) {
     if (!quotaLimitExceeded) {
       console.warn(`[Firestore Client] Daily quota limit reached (${contextStr}). Operating seamlessly in local JSON storage mode.`);
@@ -345,6 +354,11 @@ function handleCloudError(context: string | any, err?: any) {
     cloudSyncEnabled = false;
     lastCloudErrorTime = Date.now();
     cloudBreakerCooldownMs = 60 * 60 * 1000; // 1 hour cooldown for Quota errors
+  } else if (isOffline) {
+    console.warn(`[Firestore Client] Network/Offline error detected during ${contextStr} (${errMsg}). Tripping circuit breaker immediately to maintain server responsiveness.`);
+    cloudSyncEnabled = false;
+    lastCloudErrorTime = Date.now();
+    cloudBreakerCooldownMs = 3 * 60 * 1000; // 3 minutes cooldown for offline errors
   } else if (isTimeout) {
     cloudErrorCount++;
     if (cloudErrorCount >= 2) {
@@ -355,6 +369,13 @@ function handleCloudError(context: string | any, err?: any) {
     }
   } else {
     console.warn(`[Firestore Client] Cloud error during ${contextStr}: ${errMsg}`);
+    cloudErrorCount++;
+    if (cloudErrorCount >= 3) {
+      console.warn(`[Firestore Client] Circuit breaker tripped due to persistent cloud errors (${contextStr}). Temporarily disabling cloud sync for 3 minutes.`);
+      cloudSyncEnabled = false;
+      lastCloudErrorTime = Date.now();
+      cloudBreakerCooldownMs = 3 * 60 * 1000;
+    }
   }
 }
 
@@ -427,12 +448,19 @@ const dbCache = {
 
 let lastFullLeadsSyncTime = 0;
 let lastReadLeadsTimestamp = '';
+let lastMetadataReadTime = 0;
+let lastMetadataValue = '';
+const METADATA_READ_COOLDOWN_MS = 15000; // 15 seconds cooldown for reading metadata/sync from Cloud
 
 // Helper to update metadata sync timestamp
 async function markDatabaseUpdated(key: string): Promise<string> {
   if (!checkCloudStatus()) return '';
   try {
     const timestamp = new Date().toISOString();
+    if (key === 'leads') {
+      lastMetadataValue = timestamp;
+      lastMetadataReadTime = Date.now();
+    }
     const docRef = doc(db, 'metadata', 'sync');
     await runWithTimeout(setDoc(docRef, { [key]: timestamp, lastUpdatedAt: timestamp }, { merge: true }), 15000);
     console.log(`[Firestore Client] Marked database updated for "${key}" at ${timestamp}`);
@@ -1073,20 +1101,28 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
   let remoteLeadsTimestamp = '';
   if (checkCloudStatus()) {
     try {
-      const syncSnap = await runWithTimeout(getDoc(doc(db, 'metadata', 'sync')), 15000);
-      if (syncSnap.exists()) {
-        const syncData = syncSnap.data();
-        remoteLeadsTimestamp = syncData?.leads || '';
-        
-        // If we have cached leads AND the cloud leads timestamp hasn't changed,
-        // we can return the cache immediately and skip the full/delta reads entirely!
-        if (dbCache.leads && remoteLeadsTimestamp && remoteLeadsTimestamp === lastReadLeadsTimestamp) {
-          console.log('[Firestore Client] Cache is still fresh (metadata sync timestamps match). Skipping full/delta read.');
-          return dbCache.leads.data;
+      const now = Date.now();
+      if (lastMetadataValue && (now - lastMetadataReadTime < METADATA_READ_COOLDOWN_MS)) {
+        remoteLeadsTimestamp = lastMetadataValue;
+      } else {
+        const syncSnap = await runWithTimeout(getDoc(doc(db, 'metadata', 'sync')), 15000);
+        if (syncSnap.exists()) {
+          const syncData = syncSnap.data();
+          remoteLeadsTimestamp = syncData?.leads || '';
+          lastMetadataValue = remoteLeadsTimestamp;
+          lastMetadataReadTime = now;
         }
+      }
+      
+      // If we have cached leads AND the cloud leads timestamp hasn't changed,
+      // we can return the cache immediately and skip the full/delta reads entirely!
+      if (dbCache.leads && remoteLeadsTimestamp && remoteLeadsTimestamp === lastReadLeadsTimestamp) {
+        console.log('[Firestore Client] Cache is still fresh (metadata sync timestamps match). Skipping full/delta read.');
+        return dbCache.leads.data;
       }
     } catch (err) {
       console.warn('[Firestore Client] Failed to read sync metadata:', err);
+      handleCloudError('Read Sync Metadata', err);
     }
   }
 

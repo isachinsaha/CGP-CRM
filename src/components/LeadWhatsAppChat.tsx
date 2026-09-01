@@ -322,7 +322,7 @@ export default function LeadWhatsAppChat({
     fetchConfigAndTemplates();
   }, []);
 
-  // Poll for new messages every 3 seconds
+  // Poll for new messages every 5 seconds
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
@@ -342,7 +342,7 @@ export default function LeadWhatsAppChat({
           console.error('Error polling for new messages:', err);
         }
       }
-    }, 1000);
+    }, 5000);
     return () => clearInterval(interval);
   }, [lead.id, onLeadUpdated]);
 
