@@ -579,7 +579,7 @@ app.post('/api/leads', async (req, res) => {
       return;
     }
 
-    const leads = await getLeads();
+    const leads = await getLeads(true);
     
     // Auto increment serial number
     const sequence = leads.length + 1;
@@ -662,7 +662,7 @@ app.post('/api/leads/bulk', async (req, res) => {
       return;
     }
 
-    const currentLeads = await getLeads();
+    const currentLeads = await getLeads(true);
     const enrolledNames: string[] = [];
     const skipped: string[] = [];
     const newLeadsToAdd: any[] = [];
@@ -950,7 +950,7 @@ app.put('/api/coordinators/:id', async (req, res) => {
 
     // If username/displayName changed, optionally update the leads that were assigned to the old username/displayName
     if (cleanUsername && cleanUsername.toLowerCase() !== originalUsername.toLowerCase()) {
-      const leads = await getLeads();
+      const leads = await getLeads(true);
       let updatedLeadsCount = 0;
       leads.forEach(l => {
         if (l.assignedTo && l.assignedTo.toLowerCase() === originalUsername.toLowerCase()) {
@@ -995,7 +995,7 @@ app.delete('/api/coordinators/:id', async (req, res) => {
     await saveCoordinators(filtered);
 
     // Unassign leads previously assigned to this coordinator
-    const leads = await getLeads();
+    const leads = await getLeads(true);
     let updatedLeadsCount = 0;
     leads.forEach(l => {
       if (l.assignedTo && l.assignedTo.toLowerCase() === targetCoord.username.toLowerCase()) {
@@ -1108,7 +1108,7 @@ app.put('/api/leads/:id', async (req, res) => {
       docPassportCopy, docResume, docOfficeVisited, docOthers, reminderEnabled,
       autoReplySent, intake, assignedFrom, docInterviewAttended, docEcrPassport
     } = req.body;
-    const leads = await getLeads();
+    const leads = await getLeads(true);
     const idx = leads.findIndex(l => l.id === req.params.id);
     if (idx === -1) {
       res.status(404).json({ error: 'Lead not found' });
@@ -1629,7 +1629,7 @@ async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadN
     }
 
     // Check 1 (Before scheduling): Ensure no auto-reply has ever been sent/scheduled for this lead
-    const initialLeads = await getLeads();
+    const initialLeads = await getLeads(true);
     const leadIdx = initialLeads.findIndex(l => l.id === leadId);
     if (leadIdx === -1) return;
     const initialLead = initialLeads[leadIdx];
@@ -1675,7 +1675,7 @@ async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadN
     setTimeout(async () => {
       try {
         // Check 2 (Upon execution): Re-fetch freshest state and double-check messages
-        const leads = await getLeads();
+        const leads = await getLeads(true);
         const matchIdx = leads.findIndex(l => l.id === leadId);
         if (matchIdx === -1) return;
 
@@ -1866,7 +1866,7 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
     const userRole = (req.headers['x-user-role'] as string) || 'user';
     const agentId = (req.headers['x-agent-id'] as string) || 'Coordinator';
 
-    const leads = await getLeads();
+    const leads = await getLeads(true);
 
     // Check if a lead with this phone already exists (normalizing digits)
     const rawTargetDigits = cleanPhone.replace(/[^0-9]/g, '').slice(-10);
@@ -1992,7 +1992,7 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
       const targetLeadId = targetLead.id;
       setTimeout(async () => {
         try {
-          const latestLeads = await getLeads();
+          const latestLeads = await getLeads(true);
           const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
           if (lIdx !== -1) {
             const l = latestLeads[lIdx];
@@ -2333,7 +2333,7 @@ app.post('/api/whatsapp/templates/sync', async (req, res) => {
 // POST mark all WhatsApp messages for a lead as read
 app.post('/api/leads/:id/read', async (req, res) => {
   try {
-    const leads = await getLeads();
+    const leads = await getLeads(true);
     const idx = leads.findIndex(l => l.id === req.params.id);
     if (idx === -1) {
       res.status(404).json({ error: 'Lead not found' });
@@ -2372,7 +2372,7 @@ app.post('/api/leads/:id/messages', async (req, res) => {
     const isMedia = msgType !== 'text';
     const messageText = (text || '').trim() || (msgType === 'image' ? 'Sent an image' : msgType === 'pdf' ? 'Sent a PDF document' : 'Sent a document');
 
-    const leads = await getLeads();
+    const leads = await getLeads(true);
     const idx = leads.findIndex(l => l.id === req.params.id);
     if (idx === -1) {
       res.status(404).json({ error: 'Lead not found' });
@@ -2644,7 +2644,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     // Process all identified status updates (nested and flat)
     if (statusesToProcess.length > 0) {
       isStatusUpdate = true;
-      const leads = await getLeads();
+      const leads = await getLeads(true);
       let leadsUpdated = false;
 
       for (const s of statusesToProcess) {
@@ -2839,7 +2839,7 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
         parsedMediaUrl = `/api/whatsapp/media/${mediaUrl}`;
       }
 
-      const leads = await getLeads();
+      const leads = await getLeads(true);
       const matchIdx = leads.findIndex(l => {
         const leadDigits = String(l.phone || '').replace(/\D/g, '');
         if (!leadDigits || !cleanPhone) return false;
@@ -3063,7 +3063,7 @@ app.get('/api/whatsapp/media/:mediaId', async (req, res) => {
 // DELETE a lead (Soft Delete to prevent any accidental permanent data loss)
 app.delete('/api/leads/:id', async (req, res) => {
   try {
-    const leads = await getLeads();
+    const leads = await getLeads(true);
     const leadIndex = leads.findIndex(l => l.id === req.params.id);
     if (leadIndex === -1) {
       res.status(404).json({ error: 'Lead not found' });
@@ -3086,7 +3086,7 @@ app.delete('/api/leads/:id', async (req, res) => {
 // POST restore a soft-deleted lead
 app.post('/api/leads/:id/restore', async (req, res) => {
   try {
-    const leads = await getLeads();
+    const leads = await getLeads(true);
     const leadIndex = leads.findIndex(l => l.id === req.params.id);
     if (leadIndex === -1) {
       res.status(404).json({ error: 'Lead not found' });
@@ -3638,7 +3638,7 @@ Suggest the next message a sales rep should send. Output ONLY the response text 
 // POST AI re-qualify lead parameters based on conversations
 app.post('/api/leads/:id/ai-requalify', async (req, res) => {
   try {
-    const leads = await getLeads();
+    const leads = await getLeads(true);
     const idx = leads.findIndex(l => l.id === req.params.id);
     if (idx === -1) {
       res.status(404).json({ error: 'Lead not found' });

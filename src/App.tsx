@@ -424,14 +424,14 @@ export default function App() {
     pullCrmData();
   }, [currentPage, filterKey, activeTab]);
 
-  // Set up background polling to fetch new WhatsApp replies or lead modifications every 15 seconds only when tab is active
+  // Set up background polling to fetch new WhatsApp replies or lead modifications every 45 seconds only when tab is active
   useEffect(() => {
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') {
         // Pass silent = true, forceRefresh = true to bypass memory cache on the server
         pullCrmData(true, true);
       }
-    }, 15000);
+    }, 45000);
 
     return () => clearInterval(timer);
   }, [currentPage, filterKey, activeTab]);

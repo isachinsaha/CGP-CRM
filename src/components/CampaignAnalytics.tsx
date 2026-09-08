@@ -348,14 +348,37 @@ export default function CampaignAnalytics({
       return task;
     });
 
+    const targetTask = (lead.tasks || []).find(t => t.id === taskId);
+    const actionText = 'Completed follow-up task';
+    const actor = userRole === 'admin' ? 'Administrator' : `Agent (${currentAgentId || 'System'})`;
+
+    const updatedTimeline = [
+      ...(lead.timeline || []),
+      {
+        id: `tl_${Date.now()}_task_complete`,
+        type: 'task' as const,
+        text: `${actionText}: "${targetTask?.title}"`,
+        actor,
+        timestamp: new Date().toISOString()
+      }
+    ];
+
+    // Auto-disable reminder bell if all tasks are completed
+    const hasPending = updatedTasks.some(t => !t.completed);
+    const updatedReminderEnabled = hasPending ? lead.reminderEnabled : false;
+
     try {
       const res = await fetch(`/api/leads/${leadId}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'x-user-role': userRole || 'admin',
+          'x-agent-id': currentAgentId || ''
         },
         body: JSON.stringify({
-          tasks: updatedTasks
+          tasks: updatedTasks,
+          timeline: updatedTimeline,
+          reminderEnabled: updatedReminderEnabled
         })
       });
       if (res.ok) {
@@ -368,9 +391,9 @@ export default function CampaignAnalytics({
     }
   };
 
-  // Extract all leads with active reminders
+  // Extract all leads with active reminders (ensuring they actually have pending tasks)
   const reminderLeads = useMemo(() => {
-    let filtered = activeLeads.filter(l => l.reminderEnabled);
+    let filtered = activeLeads.filter(l => l.reminderEnabled && l.tasks && l.tasks.some(t => !t.completed));
     if (todoCoordFilter !== 'All') {
       filtered = filtered.filter(l => todoCoordFilter === 'Unassigned'
         ? (!l.assignedTo || l.assignedTo.trim() === '' || l.assignedTo === 'Unassigned')

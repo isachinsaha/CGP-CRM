@@ -3,9 +3,9 @@ import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
 import { 
   X, Info, Sparkles, CheckCircle2, RefreshCw, AlertTriangle, 
   Calendar, Clipboard, Check, Star, ListTodo, History, 
-  Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Bell, Plus, PhoneCall, Search, Copy
+  Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Bell, Plus, PhoneCall, PhoneOff, Search, Copy
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { getCountryFlagUrl, formatCandidateName, isDefaultExperience, extractExperienceFromRemarks, getEffectiveExperience, getEffectiveIntake } from '../utils';
 import { SearchableSelect } from './SearchableSelect.tsx';
 import LeadWhatsAppChat from './LeadWhatsAppChat.tsx';
@@ -217,6 +217,21 @@ export default function LeadModal({
 
   const [savingForm, setSavingForm] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  
+  // Call connection verification popup state variables
+  const [showConnectionCheckModal, setShowConnectionCheckModal] = useState(false);
+  const [isNotConnectedMode, setIsNotConnectedMode] = useState(false);
+  const [popupTaskTitle, setPopupTaskTitle] = useState('Follow-up Callback');
+  const [popupTaskDueDate, setPopupTaskDueDate] = useState(() => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow.toISOString().split('T')[0];
+  });
+  const [popupError, setPopupError] = useState<string | null>(null);
+
+  // Compute active tasks and strict disabled flag to prevent any saves without scheduled follow-ups
+  const activeTasksCount = (lead.tasks || []).filter((t: any) => !t.completed).length;
+  const isSaveButtonDisabled = formFields.callConnected === 'not_connected' && activeTasksCount === 0;
   const isFirstMountOrChangeRef = useRef<boolean>(true);
 
   // Sync state on lead changes
@@ -335,14 +350,36 @@ export default function LeadModal({
   };
 
   // Submit profile updates to backend server
-  const saveProfileEdits = async (e?: React.FormEvent) => {
+  const saveProfileEdits = async (
+    e?: React.FormEvent,
+    isBypassed?: boolean,
+    overrideCallConnected?: string,
+    customTasks?: any[],
+    customTimeline?: any[]
+  ) => {
     if (e) e.preventDefault();
 
+    // Check if any of the three remarks was changed (entered or edited)
+    const remarksChanged = 
+      (formFields.remarks1 || '').trim() !== (lead.remarks1 || '').trim() ||
+      (formFields.remarks2 || '').trim() !== (lead.remarks2 || '').trim() ||
+      (formFields.remarks3 || '').trim() !== (lead.remarks3 || '').trim();
+
+    // Intercept with the connection popup modal if a remark changed and we aren't bypassed
+    if (remarksChanged && !isBypassed) {
+      setPopupError(null);
+      setIsNotConnectedMode(false);
+      setShowConnectionCheckModal(true);
+      return;
+    }
+
     // Validation for "Not Connected" calls - Callback task must be scheduled
-    if (formFields.callConnected === 'not_connected') {
-      const activeTasksCount = (lead.tasks || []).filter(t => !t.completed).length;
+    const effectiveCallConnected = overrideCallConnected || formFields.callConnected;
+    if (effectiveCallConnected === 'not_connected') {
+      const activeTasks = customTasks || lead.tasks || [];
+      const activeTasksCount = activeTasks.filter(t => !t.completed).length;
       if (activeTasksCount === 0) {
-        alert("Action Required: When the call is marked as 'Not Connected', you must schedule a callback task/reminder in the right panel before saving.");
+        alert("Action Required: When the call is marked as 'Not Connected', you must schedule a callback task/reminder before saving.");
         return;
       }
     }
@@ -363,6 +400,25 @@ export default function LeadModal({
         }
       }
 
+      // Build fields payload with optional overrides
+      const payload: any = {
+        ...formFields,
+        experience: finalExp,
+        age: Number(formFields.age) || 0,
+        importance: Number(formFields.importance) || 3,
+        tags
+      };
+
+      if (overrideCallConnected) {
+        payload.callConnected = overrideCallConnected;
+      }
+      if (customTasks) {
+        payload.tasks = customTasks;
+      }
+      if (customTimeline) {
+        payload.timeline = customTimeline;
+      }
+
       const res = await fetch(`/api/leads/${lead.id}`, {
         method: 'PUT',
         headers: { 
@@ -370,20 +426,15 @@ export default function LeadModal({
           'x-user-role': actorRole,
           'x-agent-id': actorId
         },
-        body: JSON.stringify({
-          ...formFields,
-          experience: finalExp,
-          age: Number(formFields.age) || 0,
-          importance: Number(formFields.importance) || 3,
-          tags
-        })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (res.ok) {
         setLead(data);
         setFormFields(prev => ({
           ...prev,
-          stage: data.stage
+          stage: data.stage,
+          callConnected: data.callConnected || prev.callConnected
         }));
         onLeadUpdated();
         setSaveSuccess(true);
@@ -488,6 +539,10 @@ export default function LeadModal({
       }
     ];
 
+    // Auto-sync reminder bell with task completion status
+    const hasPending = updatedTasks.some(t => !t.completed);
+    const updatedReminderEnabled = hasPending;
+
     try {
       const res = await fetch(`/api/leads/${lead.id}`, {
         method: 'PUT',
@@ -496,11 +551,16 @@ export default function LeadModal({
           'x-user-role': userRole,
           'x-agent-id': currentAgentId
         },
-        body: JSON.stringify({ tasks: updatedTasks, timeline: updatedTimeline })
+        body: JSON.stringify({ 
+          tasks: updatedTasks, 
+          timeline: updatedTimeline,
+          reminderEnabled: updatedReminderEnabled
+        })
       });
       const data = await res.json();
       if (res.ok) {
         setLead(data);
+        setFormFields(prev => ({ ...prev, reminderEnabled: updatedReminderEnabled }));
         onLeadUpdated();
       }
     } catch (err) {
@@ -510,16 +570,43 @@ export default function LeadModal({
 
   // Delete a task
   const handleDeleteTask = async (taskId: string) => {
+    const targetTask = (lead.tasks || []).find(t => t.id === taskId);
     const updatedTasks = (lead.tasks || []).filter(t => t.id !== taskId);
+    const actor = userRole === 'admin' ? 'Administrator' : `Agent (${currentAgentId})`;
+
+    const updatedTimeline = [
+      ...(lead.timeline || []),
+      {
+        id: `tl_${Date.now()}_task_delete`,
+        type: 'task' as const,
+        text: `Deleted follow-up task: "${targetTask?.title || 'Unknown Task'}"`,
+        actor,
+        timestamp: new Date().toISOString()
+      }
+    ];
+
+    // Auto-disable reminder bell if all remaining tasks are completed
+    const hasPending = updatedTasks.some(t => !t.completed);
+    const updatedReminderEnabled = hasPending;
+
     try {
       const res = await fetch(`/api/leads/${lead.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tasks: updatedTasks })
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId
+        },
+        body: JSON.stringify({ 
+          tasks: updatedTasks, 
+          timeline: updatedTimeline,
+          reminderEnabled: updatedReminderEnabled
+        })
       });
       const data = await res.json();
       if (res.ok) {
         setLead(data);
+        setFormFields(prev => ({ ...prev, reminderEnabled: updatedReminderEnabled }));
         onLeadUpdated();
       }
     } catch (err) {
@@ -727,12 +814,17 @@ export default function LeadModal({
             {/* Top-Right Save Changes Button */}
             <button
               type="button"
-              onClick={() => saveProfileEdits()}
-              disabled={savingForm}
-              className={`flex items-center justify-center gap-1.5 py-2 px-5 rounded-xl shadow-xs font-black text-xs sm:text-sm uppercase tracking-wider transition-all duration-200 cursor-pointer disabled:opacity-50 select-none shrink-0 text-white ${
-                saveSuccess 
-                  ? 'bg-emerald-600' 
-                  : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95'
+              onClick={() => {
+                if (isSaveButtonDisabled) return;
+                saveProfileEdits();
+              }}
+              disabled={savingForm || isSaveButtonDisabled}
+              className={`flex items-center justify-center gap-1.5 py-2 px-5 rounded-xl shadow-xs font-black text-xs sm:text-sm uppercase tracking-wider transition-all duration-200 select-none shrink-0 border ${
+                isSaveButtonDisabled
+                  ? 'bg-slate-300 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-300 dark:border-slate-800 cursor-not-allowed opacity-60'
+                  : saveSuccess 
+                    ? 'bg-emerald-600 text-white border-emerald-600' 
+                    : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white border-emerald-600 cursor-pointer'
               }`}
             >
               {savingForm ? (
@@ -964,9 +1056,16 @@ export default function LeadModal({
 
                       <button
                         type="button"
-                        onClick={() => saveProfileEdits()}
-                        disabled={savingForm}
-                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-sm shrink-0 cursor-pointer border border-emerald-600"
+                        onClick={() => {
+                          if (isSaveButtonDisabled) return;
+                          saveProfileEdits();
+                        }}
+                        disabled={savingForm || isSaveButtonDisabled}
+                        className={`w-full py-3 font-extrabold rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-sm shrink-0 border ${
+                          isSaveButtonDisabled
+                            ? 'bg-slate-300 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-300 dark:border-slate-800 cursor-not-allowed opacity-60'
+                            : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600 cursor-pointer'
+                        }`}
                       >
                         {savingForm ? 'Saving Updates to cloud DB...' : 'Commit Remarks & Profile Changes'}
                         {saveSuccess && <CheckCircle2 className="h-4 w-4 text-white animate-bounce" />}
@@ -1643,8 +1742,12 @@ export default function LeadModal({
 
                   <button
                     type="submit"
-                    disabled={savingForm}
-                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-xs shrink-0 cursor-pointer uppercase tracking-wider"
+                    disabled={savingForm || isSaveButtonDisabled}
+                    className={`w-full py-3 font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-xs shrink-0 uppercase tracking-wider border ${
+                      isSaveButtonDisabled
+                        ? 'bg-slate-300 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-300 dark:border-slate-800 cursor-not-allowed opacity-60'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 cursor-pointer'
+                    }`}
                   >
                     {savingForm ? 'Saving Updates to cloud DB...' : 'Commit Remarks & Profile Changes'}
                     {saveSuccess && <CheckCircle2 className="h-4 w-4 text-white animate-bounce" />}
@@ -2042,6 +2145,190 @@ export default function LeadModal({
         </div>
 
       </motion.div>
+
+      {/* Modern Call Connection Verification Popup */}
+      <AnimatePresence>
+        {showConnectionCheckModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="bg-[#0b0f19] border border-[#1e2538] w-full max-w-md rounded-2xl shadow-2xl overflow-hidden text-left"
+            >
+              {/* Header */}
+              <div className="p-6 flex items-start gap-4">
+                <span className="p-3 bg-[#161e35] text-indigo-400 rounded-xl border border-indigo-500/20 shrink-0">
+                  <PhoneCall className="h-6 w-6" />
+                </span>
+                <div className="space-y-1">
+                  <h3 className="font-extrabold text-sm sm:text-base text-white tracking-wide uppercase">
+                    CALL CONNECTION VERIFICATION
+                  </h3>
+                  <p className="text-xs text-slate-400 font-medium leading-relaxed">
+                    You entered or updated a call remark. Did the call successfully connect with the candidate?
+                  </p>
+                </div>
+              </div>
+
+              {/* Content Body */}
+              <div className="px-6 pb-6 space-y-5">
+                {/* CONNECTED / NOT CONNECTED GRID */}
+                <div className="grid grid-cols-2 gap-3.5">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsNotConnectedMode(false);
+                      setShowConnectionCheckModal(false);
+                      await saveProfileEdits(undefined, true, 'connected');
+                    }}
+                    className={`flex flex-col items-center justify-center p-5 rounded-xl border transition-all gap-2 cursor-pointer shadow-xs active:scale-98 ${
+                      !isNotConnectedMode
+                        ? 'border-slate-800 bg-[#121727] text-slate-100 hover:border-slate-700'
+                        : 'border-slate-800/40 bg-[#121727]/40 text-slate-500 opacity-40'
+                    }`}
+                  >
+                    <span className={`p-1.5 rounded-full ${!isNotConnectedMode ? 'bg-[#152e2a] text-[#10b981]' : 'bg-slate-800/40 text-slate-600'}`}>
+                      <Check className="h-4 w-4 stroke-[3px]" />
+                    </span>
+                    <span className="font-extrabold text-[11px] uppercase tracking-wider">CONNECTED</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsNotConnectedMode(true);
+                      setPopupTaskTitle('Follow-up: Call not connected');
+                      setPopupError(null);
+                    }}
+                    className={`flex flex-col items-center justify-center p-5 rounded-xl border transition-all gap-2 cursor-pointer shadow-xs active:scale-98 ${
+                      isNotConnectedMode
+                        ? 'border-rose-600 text-rose-500 bg-[#251520]'
+                        : 'border-slate-800 bg-[#121727] text-slate-100 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className={`p-1.5 rounded-full ${isNotConnectedMode ? 'bg-[#3b1219] text-rose-500' : 'bg-slate-800/40 text-slate-600'}`}>
+                      <PhoneOff className="h-4 w-4" />
+                    </span>
+                    <span className="font-extrabold text-[11px] uppercase tracking-wider">NOT CONNECTED</span>
+                  </button>
+                </div>
+
+                {isNotConnectedMode && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                    {/* FORCED CALLBACK SCHEDULER BANNER */}
+                    <div className="p-4 bg-[#1f1a14] border border-[#d97706]/30 rounded-xl space-y-1 text-left">
+                      <span className="text-[10px] font-black uppercase text-[#d97706] tracking-wider flex items-center gap-1.5">
+                        <AlertTriangle className="h-4 w-4" /> FORCED CALLBACK SCHEDULER
+                      </span>
+                      <p className="text-[11px] text-[#f59e0b]/90 leading-normal font-semibold">
+                        Since the call did not connect, scheduling a follow-up action item is strictly mandatory to save this candidate profile.
+                      </p>
+                    </div>
+
+                    {/* FIELDS CARD */}
+                    <div className="p-4 bg-[#121727] border border-slate-800/60 rounded-xl space-y-4 text-left">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider">
+                          FOLLOW-UP CALLBACK DATE
+                        </label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-rose-500">
+                            <Calendar className="h-4 w-4" />
+                          </span>
+                          <input
+                            type="date"
+                            value={popupTaskDueDate}
+                            onChange={(e) => setPopupTaskDueDate(e.target.value)}
+                            className="w-full pl-10 pr-3 py-2.5 bg-[#0b0f19] text-xs text-white border border-slate-800 rounded-xl focus:border-rose-500 focus:ring-1 focus:ring-rose-500/30 font-mono tracking-wide font-extrabold leading-normal transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider">
+                          ACTION DESCRIPTION
+                        </label>
+                        <input
+                          type="text"
+                          value={popupTaskTitle}
+                          onChange={(e) => {
+                            setPopupTaskTitle(e.target.value);
+                            setPopupError(null);
+                          }}
+                          placeholder="e.g. Follow-up: Call not connected"
+                          className="w-full px-3 py-2.5 bg-[#0b0f19] text-xs text-white border border-slate-800 rounded-xl focus:border-rose-500 focus:ring-1 focus:ring-rose-500/30 font-bold leading-normal transition-all"
+                        />
+                      </div>
+
+                      {popupError && (
+                        <div className="text-[11px] text-rose-500 font-extrabold bg-[#251520] px-3 py-1.5 rounded-lg border border-rose-900/40 animate-pulse">
+                          ⚠️ {popupError}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!popupTaskTitle.trim()) {
+                            setPopupError("Please enter a descriptive task title to schedule.");
+                            return;
+                          }
+
+                          // Construct a new callback task
+                          const newTask = {
+                            id: `task_${Date.now()}`,
+                            title: popupTaskTitle.trim(),
+                            dueDate: popupTaskDueDate || new Date().toISOString().split('T')[0],
+                            completed: false
+                          };
+
+                          const updatedTasks = [...(lead.tasks || []), newTask];
+
+                          // Construct updated timeline event
+                          const updatedTimeline = [
+                            {
+                              id: `tl_${Date.now()}_task`,
+                              type: 'task' as const,
+                              text: `Scheduled callback reminder: "${popupTaskTitle.trim()}" (Due: ${popupTaskDueDate})`,
+                              actor: userRole === 'admin' ? 'Administrator' : `Coordinator ${formFields.assignedTo || 'Agent'}`,
+                              timestamp: new Date().toISOString()
+                            },
+                            ...(lead.timeline || [])
+                          ];
+
+                          setShowConnectionCheckModal(false);
+                          setIsNotConnectedMode(false);
+                          await saveProfileEdits(undefined, true, 'not_connected', updatedTasks, updatedTimeline);
+                        }}
+                        className="w-full py-3 rounded-xl bg-[#e11d48] hover:bg-[#be123c] text-white font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-98"
+                      >
+                        <ArrowRight className="h-4 w-4 stroke-[3px]" />
+                        <span>SCHEDULE CALLBACK & SAVE</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Thin Divider & Cancel button at the bottom */}
+              <div className="border-t border-slate-800/80 px-6 py-4 flex justify-end bg-[#090c15]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConnectionCheckModal(false);
+                    setIsNotConnectedMode(false);
+                  }}
+                  className="text-xs uppercase font-extrabold tracking-widest text-slate-400 hover:text-white transition-all cursor-pointer"
+                >
+                  CANCEL
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
