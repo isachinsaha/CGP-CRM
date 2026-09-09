@@ -562,9 +562,9 @@ export default function LeadBoard({
         className="bg-slate-850 rounded-2xl border border-emerald-600/35 dark:border-emerald-500/20 p-4 shadow-xs cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full hover:shadow-lg hover:shadow-accent-emerald/5"
         onClick={() => onSelectLead(lead)}
       >
-        {/* Target country badge & Stars */}
-        <div className="flex justify-between items-center gap-1.5 mb-2">
-          <span className="text-[10px] font-extrabold text-[#0f172a] dark:text-slate-200 bg-[#e2e8f0] dark:bg-slate-800 border border-[#cbd5e1] dark:border-slate-700 px-2.5 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1.5 shadow-2xs font-sans">
+        {/* Top row: Target country badge on the left, document badges on the right */}
+        <div className="flex justify-between items-center gap-1.5 mb-1.5 flex-wrap">
+          <span className="text-[10px] font-extrabold text-[#0f172a] dark:text-slate-200 bg-[#e2e8f0] dark:bg-slate-800 border border-[#cbd5e1] dark:border-slate-700 px-2 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1.5 shadow-2xs font-sans shrink-0">
             {lead.country && getCountryFlagUrl(String(lead.country)) ? (
               <img 
                 src={getCountryFlagUrl(String(lead.country))} 
@@ -577,6 +577,24 @@ export default function LeadBoard({
             )}
             {lead.country || 'Pending'}
           </span>
+
+          {/* Dynamic CV / Passport Received Badges on the right side */}
+          <div className="flex items-center gap-1 shrink-0">
+            {lead.docResume && (
+              <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-2 py-0.5 rounded-md tracking-wider shrink-0 uppercase animate-in fade-in zoom-in-95 duration-200">
+                CV ✓
+              </span>
+            )}
+            {lead.docPassportCopy && (
+              <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-2 py-0.5 rounded-md tracking-wider shrink-0 uppercase animate-in fade-in zoom-in-95 duration-200">
+                PASSPORT ✓
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Stars rating below the top row on the right (below the document badges) */}
+        <div className="flex justify-end items-center mb-2">
           <div className="flex items-center gap-0.5" title={`${lead.importance || 3} Stars`}>
             {Array.from({ length: 5 }).map((_, i) => (
               <Star 

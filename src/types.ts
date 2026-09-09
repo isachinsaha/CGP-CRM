@@ -1,3 +1,12 @@
+export interface DeletedDocument {
+  id: string;
+  type: 'passport' | 'resume';
+  url: string;
+  name: string;
+  deletedAt: string;
+  deletedBy?: string;
+}
+
 export type LeadStage = 
   | 'new' 
   | 'in_discussion' 
@@ -82,7 +91,12 @@ export interface Lead {
   callConnected?: string;
   tags?: string[];
   docPassportCopy?: boolean;
+  passportCopyUrl?: string;
+  passportCopyName?: string;
   docResume?: boolean;
+  resumeUrl?: string;
+  resumeName?: string;
+  deletedDocuments?: DeletedDocument[];
   docOfficeVisited?: boolean;
   docOthers?: boolean;
   docInterviewAttended?: boolean;

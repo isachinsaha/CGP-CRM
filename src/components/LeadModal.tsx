@@ -205,7 +205,12 @@ export default function LeadModal({
     source: initialLead.source || '',
     project: initialLead.project || '',
     docPassportCopy: initialLead.docPassportCopy === true,
+    passportCopyUrl: initialLead.passportCopyUrl || '',
+    passportCopyName: initialLead.passportCopyName || '',
     docResume: initialLead.docResume === true,
+    resumeUrl: initialLead.resumeUrl || '',
+    resumeName: initialLead.resumeName || '',
+    deletedDocuments: (initialLead as any).deletedDocuments || [],
     docOfficeVisited: initialLead.docOfficeVisited === true,
     docOthers: initialLead.docOthers === true,
     docInterviewAttended: initialLead.docInterviewAttended === true,
@@ -217,6 +222,10 @@ export default function LeadModal({
 
   const [savingForm, setSavingForm] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [passportUploading, setPassportUploading] = useState(false);
+  const [resumeUploading, setResumeUploading] = useState(false);
+  const [passportError, setPassportError] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   
   // Call connection verification popup state variables
   const [showConnectionCheckModal, setShowConnectionCheckModal] = useState(false);
@@ -270,7 +279,12 @@ export default function LeadModal({
       source: initialLead.source || '',
       project: initialLead.project || '',
       docPassportCopy: initialLead.docPassportCopy === true,
+      passportCopyUrl: initialLead.passportCopyUrl || '',
+      passportCopyName: initialLead.passportCopyName || '',
       docResume: initialLead.docResume === true,
+      resumeUrl: initialLead.resumeUrl || '',
+      resumeName: initialLead.resumeName || '',
+      deletedDocuments: (initialLead as any).deletedDocuments || [],
       docOfficeVisited: initialLead.docOfficeVisited === true,
       docOthers: initialLead.docOthers === true,
       docInterviewAttended: initialLead.docInterviewAttended === true,
@@ -347,6 +361,119 @@ export default function LeadModal({
       
       return updated;
     });
+  };
+
+  // Reusable document file uploader supporting Base64 upload with 3MB restriction
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'passport' | 'resume') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const setError = type === 'passport' ? setPassportError : setResumeError;
+    const setUploading = type === 'passport' ? setPassportUploading : setResumeUploading;
+
+    setError(null);
+
+    // Strict 3MB size limit check
+    const MAX_SIZE = 3 * 1024 * 1024; // 3MB in bytes
+    if (file.size > MAX_SIZE) {
+      setError(`File too large (${(file.size / (1024 * 1024)).toFixed(2)} MB). Max limit is 3.00 MB.`);
+      return;
+    }
+
+    setUploading(true);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64Data = reader.result as string;
+        try {
+          const response = await fetch('/api/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fileName: file.name,
+              fileType: file.type,
+              base64Data
+            })
+          });
+
+          const data = await response.json();
+          if (response.ok && data.success) {
+            setFormFields(prev => ({
+              ...prev,
+              [type === 'passport' ? 'passportCopyUrl' : 'resumeUrl']: data.url,
+              [type === 'passport' ? 'passportCopyName' : 'resumeName']: file.name,
+              [type === 'passport' ? 'docPassportCopy' : 'docResume']: true
+            }));
+          } else {
+            setError(data.error || 'Failed to upload file to server');
+          }
+        } catch (uploadErr) {
+          setError('Server connection failed. Could not upload file.');
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      reader.onerror = () => {
+        setError('Failed to read the file local content.');
+        setUploading(false);
+      };
+
+      reader.readAsDataURL(file);
+    } catch (err) {
+      setError('An unexpected error occurred.');
+      setUploading(false);
+    }
+  };
+
+  // Securely backups a document to candidate's deletedDocuments Recycle Bin before removing active pointers
+  const deleteDocumentSecurely = (type: 'passport' | 'resume') => {
+    const docUrl = type === 'passport' ? formFields.passportCopyUrl : formFields.resumeUrl;
+    const docName = type === 'passport' ? formFields.passportCopyName : formFields.resumeName;
+    if (!docUrl) return;
+
+    const backupDoc = {
+      id: Math.random().toString(36).substring(2, 9),
+      type,
+      url: docUrl,
+      name: docName || (type === 'passport' ? 'passport_copy' : 'resume_cv'),
+      deletedAt: new Date().toISOString(),
+      deletedBy: userRole === 'admin' ? 'Administrator' : `Agent (${currentAgentId})`
+    };
+
+    setFormFields(prev => ({
+      ...prev,
+      [type === 'passport' ? 'passportCopyUrl' : 'resumeUrl']: '',
+      [type === 'passport' ? 'passportCopyName' : 'resumeName']: '',
+      deletedDocuments: [...((prev as any).deletedDocuments || []), backupDoc]
+    }));
+  };
+
+  // Restores a previously soft-deleted document from the candidate's custom Recycle Bin
+  const restoreDocumentSecurely = (backupId: string) => {
+    const backups = (formFields as any).deletedDocuments || [];
+    const backupDoc = backups.find((d: any) => d.id === backupId);
+    if (!backupDoc) return;
+
+    setFormFields(prev => {
+      const filteredBackups = ((prev as any).deletedDocuments || []).filter((d: any) => d.id !== backupId);
+      return {
+        ...prev,
+        [backupDoc.type === 'passport' ? 'passportCopyUrl' : 'resumeUrl']: backupDoc.url,
+        [backupDoc.type === 'passport' ? 'passportCopyName' : 'resumeName']: backupDoc.name,
+        [backupDoc.type === 'passport' ? 'docPassportCopy' : 'docResume']: true,
+        deletedDocuments: filteredBackups
+      };
+    });
+  };
+
+  // Permanently purges a backup from the candidate's custom Recycle Bin
+  const purgeBackupSecurely = (backupId: string) => {
+    setFormFields(prev => ({
+      ...prev,
+      deletedDocuments: ((prev as any).deletedDocuments || []).filter((d: any) => d.id !== backupId)
+    }));
   };
 
   // Submit profile updates to backend server
@@ -1264,6 +1391,235 @@ export default function LeadModal({
                         </span>
                       </button>
                     </div>
+
+                    {/* Upload Segment for Checked Passport / Resume documents */}
+                    {(formFields.docPassportCopy || formFields.docResume) && (
+                      <div className="mt-4 pt-3.5 border-t border-slate-200 dark:border-slate-800/80 space-y-3 animate-in fade-in slide-in-from-top-1 duration-250">
+                        <span className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 tracking-wider block">
+                          Document Upload Centre (3MB Max)
+                        </span>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                          {/* Passport Copy Uploader */}
+                          {formFields.docPassportCopy && (
+                            <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2 text-left">
+                              <div className="flex items-center justify-between">
+                                <span className="font-extrabold text-[11px] text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                                  Passport Scan Copy
+                                </span>
+                                {formFields.passportCopyUrl ? (
+                                  <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md">
+                                    Uploaded ✓
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-2 py-0.5 rounded-md">
+                                    Pending Upload
+                                  </span>
+                                )}
+                              </div>
+
+                              {formFields.passportCopyUrl ? (
+                                <div className="space-y-2">
+                                  <div className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-lg flex items-center justify-between text-xs gap-1.5">
+                                    <span className="truncate font-semibold text-slate-600 dark:text-slate-400 flex-1 max-w-[130px] text-[11px]" title={formFields.passportCopyName || 'passport_copy'}>
+                                      {formFields.passportCopyName || 'passport_copy'}
+                                    </span>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <a
+                                        href={formFields.passportCopyUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        referrerPolicy="no-referrer"
+                                        className="px-2 py-1 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 rounded-md font-extrabold uppercase text-[9px] tracking-wider transition-all"
+                                      >
+                                        View
+                                      </a>
+                                      <button
+                                        type="button"
+                                        onClick={() => deleteDocumentSecurely('passport')}
+                                        className="px-2 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-md font-extrabold uppercase text-[9px] tracking-wider transition-all"
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <label className="flex flex-col items-center justify-center py-4 bg-white dark:bg-slate-900 hover:bg-slate-100/50 dark:hover:bg-slate-800/40 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl cursor-pointer transition-all">
+                                  {passportUploading ? (
+                                    <div className="flex flex-col items-center gap-1.5 text-slate-500">
+                                      <RefreshCw className="h-4 w-4 animate-spin text-indigo-500" />
+                                      <span className="text-[10px] font-bold uppercase tracking-wider">Uploading...</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-1 text-center px-2">
+                                      <span className="text-indigo-600 dark:text-indigo-400 font-extrabold text-[10px] uppercase tracking-wider">
+                                        Select Passport File
+                                      </span>
+                                      <span className="text-[9px] text-slate-400 font-medium">PDF, JPG, PNG up to 3MB</span>
+                                    </div>
+                                  )}
+                                  <input
+                                    type="file"
+                                    accept=".pdf,image/*"
+                                    className="hidden"
+                                    disabled={passportUploading}
+                                    onChange={(e) => handleFileUpload(e, 'passport')}
+                                  />
+                                </label>
+                              )}
+
+                              {passportError && (
+                                <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20 p-2 rounded-lg border border-rose-100 dark:border-rose-950/50 leading-relaxed">
+                                  ⚠️ {passportError}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Resume Uploader */}
+                          {formFields.docResume && (
+                            <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2 text-left">
+                              <div className="flex items-center justify-between">
+                                <span className="font-extrabold text-[11px] text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                                  Resume / CV File
+                                </span>
+                                {formFields.resumeUrl ? (
+                                  <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md">
+                                    Uploaded ✓
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-2 py-0.5 rounded-md">
+                                    Pending Upload
+                                  </span>
+                                )}
+                              </div>
+
+                              {formFields.resumeUrl ? (
+                                <div className="space-y-2">
+                                  <div className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-lg flex items-center justify-between text-xs gap-1.5">
+                                    <span className="truncate font-semibold text-slate-600 dark:text-slate-400 flex-1 max-w-[130px] text-[11px]" title={formFields.resumeName || 'resume_cv'}>
+                                      {formFields.resumeName || 'resume_cv'}
+                                    </span>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <a
+                                        href={formFields.resumeUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        referrerPolicy="no-referrer"
+                                        className="px-2 py-1 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 rounded-md font-extrabold uppercase text-[9px] tracking-wider transition-all"
+                                      >
+                                        View
+                                      </a>
+                                      <button
+                                        type="button"
+                                        onClick={() => deleteDocumentSecurely('resume')}
+                                        className="px-2 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-md font-extrabold uppercase text-[9px] tracking-wider transition-all"
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <label className="flex flex-col items-center justify-center py-4 bg-white dark:bg-slate-900 hover:bg-slate-100/50 dark:hover:bg-slate-800/40 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl cursor-pointer transition-all">
+                                  {resumeUploading ? (
+                                    <div className="flex flex-col items-center gap-1.5 text-slate-500">
+                                      <RefreshCw className="h-4 w-4 animate-spin text-indigo-500" />
+                                      <span className="text-[10px] font-bold uppercase tracking-wider">Uploading...</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-1 text-center px-2">
+                                      <span className="text-indigo-600 dark:text-indigo-400 font-extrabold text-[10px] uppercase tracking-wider">
+                                        Select Resume/CV
+                                      </span>
+                                      <span className="text-[9px] text-slate-400 font-medium">PDF, Word, Images up to 3MB</span>
+                                    </div>
+                                  )}
+                                  <input
+                                    type="file"
+                                    accept=".pdf,.doc,.docx,image/*"
+                                    className="hidden"
+                                    disabled={resumeUploading}
+                                    onChange={(e) => handleFileUpload(e, 'resume')}
+                                  />
+                                </label>
+                              )}
+
+                              {resumeError && (
+                                <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20 p-2 rounded-lg border border-rose-100 dark:border-rose-950/50 leading-relaxed">
+                                  ⚠️ {resumeError}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Safeguarded Document Recycle Bin */}
+                        {((formFields as any).deletedDocuments || []).length > 0 && (
+                          <div className="mt-4 p-3 bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200/60 dark:border-amber-900/35 rounded-xl space-y-2.5">
+                            <div className="flex items-center gap-2 text-amber-800 dark:text-amber-400">
+                              <History className="h-4 w-4 shrink-0 animate-pulse text-amber-600 dark:text-amber-500" />
+                              <span className="text-[11px] font-black uppercase tracking-wider">
+                                Document Recycle Bin (Safeguarded)
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-amber-700/90 dark:text-amber-400/80 leading-relaxed font-semibold text-left">
+                              System automatic backups prevent any loss of candidate files. If a file was deleted accidentally, click <strong className="text-emerald-700 dark:text-emerald-400">Restore</strong> to retrieve it instantly.
+                            </p>
+                            
+                            <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                              {((formFields as any).deletedDocuments || []).map((doc: any) => (
+                                <div 
+                                  key={doc.id} 
+                                  className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg flex items-center justify-between gap-2 shadow-3xs hover:border-amber-300 dark:hover:border-amber-900 transition-all text-left"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400">
+                                        {doc.type === 'passport' ? 'Passport' : 'CV / Resume'}
+                                      </span>
+                                      <span className="text-[10px] text-slate-500 dark:text-slate-450 font-bold truncate max-w-[120px]" title={doc.name}>
+                                        {doc.name}
+                                      </span>
+                                    </div>
+                                    <div className="text-[9px] text-slate-400 dark:text-slate-500 font-semibold mt-0.5">
+                                      Deleted: {new Date(doc.deletedAt).toLocaleString()} by {doc.deletedBy || 'System'}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <a
+                                      href={doc.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      referrerPolicy="no-referrer"
+                                      className="px-2 py-1 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-600 dark:text-slate-300 rounded-md font-extrabold uppercase text-[9px] tracking-wider transition-all"
+                                    >
+                                      View
+                                    </a>
+                                    <button
+                                      type="button"
+                                      onClick={() => restoreDocumentSecurely(doc.id)}
+                                      className="px-2 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-md font-extrabold uppercase text-[9px] tracking-wider transition-all"
+                                    >
+                                      Restore
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => purgeBackupSecurely(doc.id)}
+                                      className="p-1 hover:text-rose-500 text-slate-300 dark:text-slate-600 transition-all"
+                                      title="Purge Permanently"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Manual Observations (Editable Notes) */}

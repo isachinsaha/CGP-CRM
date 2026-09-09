@@ -1106,7 +1106,8 @@ app.put('/api/leads/:id', async (req, res) => {
       position, experience, qualification, adminRemarks, assignedTo, importance,
       remarks1, remarks2, remarks3, callConnected, tasks, timeline, tags, source, project,
       docPassportCopy, docResume, docOfficeVisited, docOthers, reminderEnabled,
-      autoReplySent, intake, assignedFrom, docInterviewAttended, docEcrPassport
+      autoReplySent, intake, assignedFrom, docInterviewAttended, docEcrPassport,
+      passportCopyUrl, passportCopyName, resumeUrl, resumeName, deletedDocuments
     } = req.body;
     const leads = await getLeads(true);
     const idx = leads.findIndex(l => l.id === req.params.id);
@@ -1275,37 +1276,27 @@ app.put('/api/leads/:id', async (req, res) => {
         }
       }
 
-      // 3. Interview Attended / Office Visited Trigger & Reversal
-      const wasOfficeVisitedActive = !!(
-        lead.docOfficeVisited || 
-        lead.stage === 'proposal' || 
-        lead.stage === 'won'
-      );
-      
+      // 3. Office Visited Checkbox Trigger & Reversal (Independent INR 11)
+      const wasOfficeVisitedActive = !!lead.docOfficeVisited;
       const isOfficeVisitedActiveNow = !!(
-        (docOfficeVisited !== undefined ? docOfficeVisited : lead.docOfficeVisited) || 
-        (stage !== undefined ? stage : lead.stage) === 'proposal' ||
-        (stage !== undefined ? stage : lead.stage) === 'won'
+        docOfficeVisited !== undefined ? docOfficeVisited : lead.docOfficeVisited
       );
 
-      const isOfficeVisitedTransition = 
-        (!wasOfficeVisitedActive && isOfficeVisitedActiveNow) || 
-        (stage === 'proposal' && lead.stage !== 'proposal' && lead.stage !== 'won') ||
-        (docOfficeVisited === true && !lead.docOfficeVisited);
+      const isOfficeVisitedTransition = !wasOfficeVisitedActive && isOfficeVisitedActiveNow;
       const isOfficeVisitedReversal = wasOfficeVisitedActive && !isOfficeVisitedActiveNow;
 
       if (isOfficeVisitedTransition) {
         try {
           const wallet = await getWalletByUsername(cleanCoord);
           const alreadyCredited = (wallet.transactions || []).some(
-            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Interview Attended') || tx.reason.includes('Office Visited'))
+            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Office Visited Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
           );
           if (!alreadyCredited) {
             await addWalletTransaction(
               cleanCoord,
               'credit',
               11,
-              `Interview Attended / Office Visited incentive for candidate: ${name || lead.name}`,
+              `Office Visited Incentive for candidate: ${name || lead.name}`,
               lead.id
             );
           }
@@ -1318,17 +1309,17 @@ app.put('/api/leads/:id', async (req, res) => {
         try {
           const wallet = await getWalletByUsername(prevCoord);
           const creditsForLead = (wallet.transactions || []).filter(
-            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Interview Attended') || tx.reason.includes('Office Visited'))
+            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Office Visited Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
           );
           const reversalsForLead = (wallet.transactions || []).filter(
-            tx => tx.leadId === lead.id && tx.type === 'debit' && tx.reason.includes('Reversal: Interview Attended')
+            tx => tx.leadId === lead.id && tx.type === 'debit' && (tx.reason.includes('Reversal: Office Visited Incentive') || tx.reason.includes('Reversal: Interview Attended / Office Visited milestone removed'))
           );
           if (creditsForLead.length > reversalsForLead.length) {
             await addWalletTransaction(
               prevCoord,
               'debit',
               11,
-              `Reversal: Interview Attended / Office Visited milestone removed. Candidate: ${name || lead.name}`,
+              `Reversal: Office Visited Incentive removed. Candidate: ${name || lead.name}`,
               lead.id
             );
           }
@@ -1350,7 +1341,7 @@ app.put('/api/leads/:id', async (req, res) => {
         try {
           const wallet = await getWalletByUsername(cleanCoord);
           const alreadyCredited = (wallet.transactions || []).some(
-            tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Interview Attended Incentive')
+            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Interview Attended Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
           );
           if (!alreadyCredited) {
             await addWalletTransaction(
@@ -1370,10 +1361,10 @@ app.put('/api/leads/:id', async (req, res) => {
         try {
           const wallet = await getWalletByUsername(prevCoord);
           const creditsForLead = (wallet.transactions || []).filter(
-            tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Interview Attended Incentive')
+            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Interview Attended Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
           );
           const reversalsForLead = (wallet.transactions || []).filter(
-            tx => tx.leadId === lead.id && tx.type === 'debit' && tx.reason.includes('Reversal: Interview Attended Incentive')
+            tx => tx.leadId === lead.id && tx.type === 'debit' && (tx.reason.includes('Reversal: Interview Attended Incentive') || tx.reason.includes('Reversal: Interview Attended / Office Visited milestone removed'))
           );
           if (creditsForLead.length > reversalsForLead.length) {
             await addWalletTransaction(
@@ -1549,7 +1540,12 @@ app.put('/api/leads/:id', async (req, res) => {
 
     // Document received status flags
     if (docPassportCopy !== undefined) lead.docPassportCopy = Boolean(docPassportCopy);
+    if (passportCopyUrl !== undefined) lead.passportCopyUrl = passportCopyUrl;
+    if (passportCopyName !== undefined) lead.passportCopyName = passportCopyName;
     if (docResume !== undefined) lead.docResume = Boolean(docResume);
+    if (resumeUrl !== undefined) lead.resumeUrl = resumeUrl;
+    if (resumeName !== undefined) lead.resumeName = resumeName;
+    if (deletedDocuments !== undefined) lead.deletedDocuments = deletedDocuments;
     if (docOfficeVisited !== undefined) lead.docOfficeVisited = Boolean(docOfficeVisited);
     if (docOthers !== undefined) lead.docOthers = Boolean(docOthers);
     if (docInterviewAttended !== undefined) lead.docInterviewAttended = Boolean(docInterviewAttended);
@@ -4308,6 +4304,75 @@ async function startServer() {
       }
     } catch (initErr) {
       console.warn('[AutoBackup] Initial baseline backup notice:', initErr);
+    }
+
+    // Run self-healing to automatically clean up any historic duplicate active wallet incentives
+    try {
+      console.log('[Self-Healing] Scanning coordinator wallets for legacy duplicate document/milestone incentive credits...');
+      const wallets = await getWallets();
+      let hasGlobalUpdates = false;
+
+      for (const wallet of wallets) {
+        const transactions = wallet.transactions || [];
+        const filteredTransactions: any[] = [];
+        let hasWalletUpdates = false;
+
+        // Group transactions by leadId
+        const leadTxMap = new Map<string, any[]>();
+        for (const tx of transactions) {
+          if (tx.leadId) {
+            if (!leadTxMap.has(tx.leadId)) {
+              leadTxMap.set(tx.leadId, []);
+            }
+            leadTxMap.get(tx.leadId)!.push(tx);
+          } else {
+            filteredTransactions.push(tx);
+          }
+        }
+
+        // Process transactions for each lead
+        for (const [leadId, txList] of leadTxMap.entries()) {
+          const hasCombinedCredit = txList.some(t => t.type === 'credit' && t.reason.includes('Interview Attended / Office Visited'));
+          const hasNewCredit = txList.some(t => t.type === 'credit' && (t.reason.includes('Interview Attended Incentive') || t.reason.includes('Office Visited Incentive')));
+
+          if (hasCombinedCredit && hasNewCredit) {
+            console.log(`[Self-Healing] Found duplicate combined + independent credits in wallet ${wallet.username} for candidate: ${leadId}. Healing by removing legacy combined credit...`);
+            
+            // Filter out the redundant legacy combined credit
+            const prunedList = txList.filter(t => !(t.type === 'credit' && t.reason.includes('Interview Attended / Office Visited')));
+            filteredTransactions.push(...prunedList);
+            hasWalletUpdates = true;
+            hasGlobalUpdates = true;
+          } else {
+            filteredTransactions.push(...txList);
+          }
+        }
+
+        if (hasWalletUpdates) {
+          // Recompute balance based on transaction sums
+          let balance = 0;
+          for (const tx of filteredTransactions) {
+            const amt = Number(tx.amount) || 0;
+            if (tx.type === 'credit') {
+              balance += amt;
+            } else if (tx.type === 'debit') {
+              balance -= amt;
+            }
+          }
+          wallet.transactions = filteredTransactions;
+          wallet.balance = balance;
+          wallet.updatedAt = new Date().toISOString();
+        }
+      }
+
+      if (hasGlobalUpdates) {
+        await saveWallets(wallets);
+        console.log('[Self-Healing] Wallets successfully cleaned and persisted to database.');
+      } else {
+        console.log('[Self-Healing] No duplicate active incentive credits found.');
+      }
+    } catch (err) {
+      console.error('[Self-Healing] Failed to execute duplicate wallet incentives correction:', err);
     }
   }, 5000);
 
