@@ -44,7 +44,9 @@ import {
   deleteWhatsAppTemplate,
   getWhatsAppAutoReplySettings,
   saveWhatsAppAutoReplySettings,
-  extractMetaMediaId
+  extractMetaMediaId,
+  backupFileToFirestore,
+  syncAndRestoreMissingUploadsFromFirestore
 } from './src/server/db.ts';
 import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings } from './src/types.ts';
 import { isDefaultExperience, getEffectiveExperience, getEffectiveIntake } from './src/utils.ts';
@@ -83,6 +85,11 @@ app.post('/api/upload', (req, res) => {
     
     const filePath = path.join(UPLOADS_DIR, safeName);
     fs.writeFileSync(filePath, buffer);
+
+    // Dispatch permanent cloud backup asynchronously (non-blocking safety net)
+    backupFileToFirestore(safeName, filePath).catch(backupErr => {
+      console.error(`[UploadSystem] Cloud backup trigger failed for ${safeName}:`, backupErr);
+    });
 
     const fileUrl = `/uploads/${safeName}`;
     console.log(`[UploadSystem] File uploaded: ${safeName} (${buffer.length} bytes)`);
@@ -4373,6 +4380,13 @@ async function startServer() {
       }
     } catch (err) {
       console.error('[Self-Healing] Failed to execute duplicate wallet incentives correction:', err);
+    }
+
+    // Run automated files backup and recovery synchronization
+    try {
+      await syncAndRestoreMissingUploadsFromFirestore();
+    } catch (restoreFilesErr) {
+      console.error('[FileBackup System] Error synchronizing uploaded files on startup:', restoreFilesErr);
     }
   }, 5000);
 

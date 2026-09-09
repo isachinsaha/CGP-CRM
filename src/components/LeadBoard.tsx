@@ -68,16 +68,18 @@ export default function LeadBoard({
   // Remarks filter state
   const [remarksFilter, setRemarksFilter] = useState('All');
 
-  // Country, Position, and Gender Filters for selected stage
+  // Country, Position, Gender, and Tag Filters for selected stage
   const [boardCountryFilter, setBoardCountryFilter] = useState('All');
   const [boardPositionFilter, setBoardPositionFilter] = useState('All');
   const [boardGenderFilter, setBoardGenderFilter] = useState('All');
+  const [boardTagFilter, setBoardTagFilter] = useState('All');
 
   // Reset stage filters when stage is switched
   React.useEffect(() => {
     setBoardCountryFilter('All');
     setBoardPositionFilter('All');
     setBoardGenderFilter('All');
+    setBoardTagFilter('All');
   }, [selectedStage]);
 
   // Memoized options list for searchable coordinator select
@@ -493,7 +495,55 @@ export default function LeadBoard({
     ];
   }, [boardGenderCounts, stageLeads.length]);
 
-  // Dynamically filter and sort active column leads by Country, Position, and Gender
+  const searchableTagOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    stageLeads.forEach(l => {
+      if (l.tags && Array.isArray(l.tags)) {
+        l.tags.forEach(t => {
+          if (t && t.trim()) set.add(t.trim());
+        });
+      }
+    });
+    
+    // Sort and map tags
+    const sortedTags = Array.from(set).sort((a, b) => a.localeCompare(b));
+    
+    // Create Tag Count map for current stageLeads
+    const tagCounts: { [tag: string]: number } = {};
+    stageLeads.forEach(l => {
+      if (l.tags && Array.isArray(l.tags)) {
+        // Dedup tags per lead to avoid double counting
+        const uniqueLeadTags = Array.from(new Set(l.tags.map(t => t.trim().toLowerCase())));
+        uniqueLeadTags.forEach(lowTag => {
+          // Find original case
+          const orig = sortedTags.find(ot => ot.toLowerCase() === lowTag);
+          if (orig) {
+            tagCounts[orig] = (tagCounts[orig] || 0) + 1;
+          }
+        });
+      }
+    });
+
+    const options = [
+      {
+        value: 'All',
+        label: `All Tags (${stageLeads.length})`,
+        icon: <span className="text-xs">🏷️</span>
+      }
+    ];
+
+    sortedTags.forEach(tag => {
+      options.push({
+        value: tag,
+        label: `${tag} (${tagCounts[tag] || 0})`,
+        icon: <span className="text-xs text-indigo-400">🏷️</span>
+      });
+    });
+
+    return options;
+  }, [stageLeads]);
+
+  // Dynamically filter and sort active column leads by Country, Position, Gender, and Tags
   const filteredStageLeads = React.useMemo(() => {
     const filtered = stageLeads.filter(l => {
       // Country filter
@@ -513,12 +563,19 @@ export default function LeadBoard({
         if (leadGender !== targetGender && leadGender !== boardGenderFilter) return false;
       }
 
+      // Tag filter
+      if (boardTagFilter !== 'All') {
+        if (!l.tags || !Array.isArray(l.tags) || !l.tags.some(t => t.trim().toLowerCase() === boardTagFilter.trim().toLowerCase())) {
+          return false;
+        }
+      }
+
       return true;
     });
 
     // Prioritize candidates with unread replies, then sort by date desc
     return sortLeadsByUnreadAndDate(filtered);
-  }, [stageLeads, boardCountryFilter, boardPositionFilter, boardGenderFilter]);
+  }, [stageLeads, boardCountryFilter, boardPositionFilter, boardGenderFilter, boardTagFilter]);
 
   // Lead Card Render Helper to avoid duplicate JSX
   const renderLeadCard = (lead: Lead) => {
@@ -547,11 +604,9 @@ export default function LeadBoard({
     return (
       <motion.div
         key={lead.id}
-        initial={{ opacity: 0, y: 12, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        whileHover={{ scale: 1.015, y: -3, borderColor: "var(--color-accent-emerald)" }}
-        whileTap={{ scale: 0.995 }}
-        transition={{ type: "spring", stiffness: 400, damping: 28 }}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.15, ease: "easeOut" }}
         draggable="true"
         onDragStart={(e: any) => {
           if (e.dataTransfer) {
@@ -559,161 +614,176 @@ export default function LeadBoard({
             e.dataTransfer.effectAllowed = 'move';
           }
         }}
-        className="bg-slate-850 rounded-2xl border border-emerald-600/35 dark:border-emerald-500/20 p-4 shadow-xs cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full hover:shadow-lg hover:shadow-accent-emerald/5"
+        className="bg-slate-900/95 rounded-xl border border-slate-800/90 p-4.5 shadow-[0_0_15px_rgba(16,185,129,0.02)] cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full transition-all duration-150 ease-out transform hover:-translate-y-1 hover:border-emerald-500/50 hover:shadow-[0_0_22px_rgba(16,185,129,0.12)] select-none"
         onClick={() => onSelectLead(lead)}
       >
-        {/* Top row: Target country badge on the left, document badges on the right */}
-        <div className="flex justify-between items-center gap-1.5 mb-1.5 flex-wrap">
-          <span className="text-[10px] font-extrabold text-[#0f172a] dark:text-slate-200 bg-[#e2e8f0] dark:bg-slate-800 border border-[#cbd5e1] dark:border-slate-700 px-2 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1.5 shadow-2xs font-sans shrink-0">
-            {lead.country && getCountryFlagUrl(String(lead.country)) ? (
-              <img 
-                src={getCountryFlagUrl(String(lead.country))} 
-                alt="" 
-                className="w-4 h-3 object-cover rounded-2xs inline-block shadow-2xs"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <span>🌐</span>
-            )}
-            {lead.country || 'Pending'}
-          </span>
+        {/* Top Row: Country Badge on Left, Document Checklists on Right */}
+        <div className="flex justify-between items-center gap-1.5 mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] font-bold text-slate-200 bg-slate-805/90 border border-slate-700/80 px-2.5 py-1 rounded-md uppercase tracking-wider flex items-center gap-1.5 font-sans shrink-0 shadow-2xs">
+              {lead.country && getCountryFlagUrl(String(lead.country)) ? (
+                <img 
+                  src={getCountryFlagUrl(String(lead.country))} 
+                  alt="" 
+                  className="w-4.5 h-3.5 object-cover rounded-2xs inline-block shadow-2xs shrink-0"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <span>🌐</span>
+              )}
+              {lead.country || 'Pending'}
+            </span>
 
-          {/* Dynamic CV / Passport Received Badges on the right side */}
-          <div className="flex items-center gap-1 shrink-0">
+            {(() => {
+              const unreadCount = (lead.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
+              if (unreadCount > 0) {
+                return (
+                  <span 
+                    className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs font-mono border text-emerald-950 dark:text-emerald-100 bg-emerald-400 dark:bg-emerald-900/60 border-emerald-500/50 dark:border-emerald-500/60 animate-pulse"
+                    title={`${unreadCount} unread WhatsApp message${unreadCount > 1 ? 's' : ''} received`}
+                  >
+                    <MessageSquare className="h-3 w-3 fill-emerald-400 text-emerald-100" />
+                    <span>{unreadCount}</span>
+                  </span>
+                );
+              }
+              return null;
+            })()}
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
             {lead.docResume && (
-              <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-2 py-0.5 rounded-md tracking-wider shrink-0 uppercase animate-in fade-in zoom-in-95 duration-200">
+              <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/30 border border-emerald-900/40 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs">
                 CV ✓
               </span>
             )}
             {lead.docPassportCopy && (
-              <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-2 py-0.5 rounded-md tracking-wider shrink-0 uppercase animate-in fade-in zoom-in-95 duration-200">
-                PASSPORT ✓
+              <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/30 border border-emerald-900/40 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs">
+                Passport ✓
               </span>
             )}
           </div>
         </div>
 
-        {/* Stars rating below the top row on the right (below the document badges) */}
-        <div className="flex justify-end items-center mb-2">
-          <div className="flex items-center gap-0.5" title={`${lead.importance || 3} Stars`}>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Star 
-                key={i} 
-                className={`h-2.5 w-2.5 ${
-                  i < (lead.importance || 3) 
-                    ? 'text-amber-500 fill-amber-500' 
-                    : 'text-slate-700'
-                }`} 
-                id={`lead-board-star-${lead.id}-${i}`}
-              />
-            ))}
+        {/* Name, Stars & Message Count Section */}
+        <div className="flex items-start justify-between gap-1.5 mb-1.5">
+          <div className="min-w-0 flex-1">
+            <h4 className="font-bold text-slate-100 text-[17.5px] leading-tight tracking-wide uppercase font-sans truncate" title={lead.name}>
+              {formatCandidateName(String(lead.name || 'Candidate'))}
+            </h4>
+          </div>
+          
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Stars rating inline on the right */}
+            <div className="flex items-center gap-0.5" title={`${lead.importance || 3} Stars`}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Star 
+                  key={i} 
+                  className={`h-3.5 w-3.5 ${
+                    i < (lead.importance || 3) 
+                      ? 'text-amber-400 fill-amber-400' 
+                      : 'text-slate-700'
+                  }`} 
+                  id={`lead-board-star-${lead.id}-${i}`}
+                />
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Name / Phone & Message Count Badge */}
-        <div className="flex items-center justify-between gap-1.5">
-          <h4 className="font-extrabold text-slate-100 text-sm tracking-wide uppercase font-sans truncate">{formatCandidateName(String(lead.name || 'Candidate'))}</h4>
-          {(() => {
-            const inboundCount = (lead.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
-            const totalMsgCount = (lead.messages || []).filter(m => m && m.sender !== 'system').length;
-            if (inboundCount > 0) {
-              return (
-                <span 
-                  className="shrink-0 text-[10px] font-black text-emerald-950 dark:text-emerald-300 bg-emerald-400 dark:bg-emerald-950/90 border border-emerald-500/50 dark:border-emerald-700/80 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs animate-pulse font-mono"
-                  title={`${inboundCount} unread WhatsApp message${inboundCount > 1 ? 's' : ''} received (${totalMsgCount} total messages)`}
-                >
-                  <MessageSquare className="h-2.5 w-2.5 fill-current" />
-                  <span>{inboundCount}</span>
-                </span>
-              );
-            }
-            return null;
-          })()}
-        </div>
-        <div className="flex items-center justify-between mt-1 pb-1.5 border-b border-slate-700">
-          <span className="text-[11px] text-slate-300 font-semibold font-mono tracking-wide">{lead.phone || 'N/A'}</span>
-          <span className="text-[10px] bg-[#e2e8f0] dark:bg-slate-800 border border-[#cbd5e1] dark:border-slate-700 font-extrabold px-2.5 py-0.5 rounded-md text-[#0f172a] dark:text-slate-200 uppercase tracking-wider font-mono shadow-2xs">
+        {/* Sub-Header: Contact Info & Gender-Age inline */}
+        <div className="flex items-center justify-between text-[13.5px] text-slate-400 font-sans pb-2 border-b border-slate-800/60 mb-2">
+          <span className="font-mono tracking-wider font-bold text-slate-200">{lead.phone || 'No Phone'}</span>
+          <span className="font-mono text-slate-400 text-[12px] font-bold">
             {(() => {
               const g = String(lead.gender || '').toUpperCase().trim();
               if (g === 'F' || g === 'FEMALE') return 'F';
               if (g === 'M' || g === 'MALE') return 'M';
               return 'N/A';
-            })()}, Age {lead.age || 'N/A'}
+            })()} • Age {lead.age || 'N/A'}
           </span>
         </div>
 
-        {/* Position Indicator */}
-        <span className="text-[11px] text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-600/60 px-2.5 py-1 rounded-md font-bold uppercase truncate block mt-2 text-left w-full font-sans tracking-wide">
-          💼 {lead.position || 'General Applicant'}
-        </span>
-
-        {lead.project && (
-          <span className="text-[11px] text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-600/60 px-2.5 py-1 rounded-md font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
-            🎯 Project: {lead.project}
-          </span>
-        )}
-
-        {lead.source && (
-          <span className="text-[11px] text-purple-800 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/80 border border-purple-300 dark:border-purple-500/60 px-2.5 py-1 rounded-md font-bold uppercase truncate block mt-1 text-left w-full font-sans tracking-wide">
-            📣 Source: {lead.source}
-          </span>
-        )}
-
-        {lead.docEcrPassport && (
-          <span className="text-[11px] text-red-800 dark:text-red-300 bg-red-50 dark:bg-red-950/80 border border-red-300 dark:border-red-500/60 px-2.5 py-1 rounded-md font-black uppercase truncate block mt-1 text-left w-full font-sans tracking-wide flex items-center gap-1.5 shadow-2xs">
-            🛂 ECR Passport
-          </span>
-        )}
-
-        {/* Telecaller & Admin Remarks Log Indicators */}
-        {hasRemarks ? (
-          <div className="bg-emerald-50 dark:bg-slate-900/90 p-2.5 rounded-lg border border-emerald-200/90 dark:border-slate-800 text-[11px] text-left mt-2 shadow-2xs transition-all group/remarks cursor-help hover:bg-emerald-100/80 dark:hover:bg-slate-800">
-            <span className="text-[10px] uppercase font-black text-emerald-800 dark:text-emerald-400 block mb-1 tracking-wider flex justify-between items-center font-sans">
-              <span>{latestRemarkLabel}</span>
-              <span className="text-[8px] text-emerald-700/80 dark:text-slate-500 normal-case font-normal group-hover/remarks:hidden">Hover for full</span>
+        {/* Layer 1 Container: Candidate Info (SSW, JAPAN SSW, Source, etc.) */}
+        <div className="bg-slate-950/40 dark:bg-slate-950/30 border border-slate-800/80 rounded-lg p-3 space-y-2 mt-4">
+          <div className="flex items-center gap-1.5 truncate text-[12.5px] text-slate-200">
+            <span className="text-slate-500 shrink-0">💼</span>
+            <span className="font-bold truncate">
+              {lead.position || 'General Applicant'}
             </span>
-            <p className="text-slate-100 font-extrabold italic font-mono text-[11px] leading-snug truncate group-hover/remarks:whitespace-normal group-hover/remarks:break-words">
-              "{latestRemarkValue}"
-            </p>
           </div>
-        ) : adminR !== '' ? (
-          <div className="bg-red-50 dark:bg-slate-900/90 p-2.5 rounded-lg border border-red-200 dark:border-red-900/60 text-[11px] text-left mt-2 shadow-2xs transition-all group/adminRemarks cursor-help hover:bg-red-100/80 dark:hover:bg-slate-800">
-            <span className="text-[10px] uppercase font-black text-red-700 dark:text-red-400 block mb-1 tracking-wider flex justify-between items-center font-sans">
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-1.5 h-1.5 bg-red-600 dark:bg-red-500 rounded-full animate-pulse" />
-                👑 ADMIN REMARK
+
+          {lead.project && (
+            <>
+              <div className="h-[1px] bg-slate-800/40 w-full" />
+              <div className="flex items-center gap-1.5 truncate text-[12.5px] text-slate-300">
+                <span className="text-slate-500 shrink-0">🎯</span>
+                <span className="truncate">
+                  Project: <span className="text-white font-extrabold">{lead.project}</span>
+                </span>
+              </div>
+            </>
+          )}
+
+          {lead.source && (
+            <>
+              <div className="h-[1px] bg-slate-800/40 w-full" />
+              <div className="flex items-center gap-1.5 truncate text-[12.5px] text-slate-300">
+                <span className="text-slate-500 shrink-0">📣</span>
+                <span className="truncate">
+                  Source: <span className="text-white font-extrabold">{lead.source}</span>
+                </span>
+              </div>
+            </>
+          )}
+
+          {lead.docEcrPassport && (
+            <>
+              <div className="h-[1px] bg-slate-800/40 w-full" />
+              <div className="inline-flex items-center gap-1.5 bg-red-950/20 border border-red-900/35 text-red-400 px-2 py-0.5 rounded-sm text-[10.5px] mt-1">
+                <span>🛂 ECR Passport</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Layer 2 Container: Remarks */}
+        <div className="bg-slate-950/40 dark:bg-slate-950/30 border border-slate-800/80 rounded-lg p-3 mt-2.5">
+          {hasRemarks ? (
+            <div className="border-l-2 border-emerald-500/40 pl-2.5 py-0.5 text-left transition-all group/remarks cursor-help">
+              <span className="text-[10px] uppercase font-bold text-emerald-400 block mb-1 tracking-wider flex justify-between items-center font-sans">
+                <span>{latestRemarkLabel}</span>
+                <span className="text-[9px] text-slate-500 normal-case font-normal group-hover/remarks:opacity-0 transition-opacity">Hover for full</span>
               </span>
-              <span className="text-[8px] text-red-700/80 dark:text-slate-500 normal-case font-normal group-hover/adminRemarks:hidden">Hover for full</span>
-            </span>
-            <p className="text-red-950 dark:text-red-200 font-extrabold italic font-mono text-[11px] leading-snug truncate group-hover/adminRemarks:whitespace-normal group-hover/adminRemarks:break-words">
-              "{adminR}"
-            </p>
-          </div>
-        ) : (
-          <div className="text-[11px] text-left text-slate-400 mt-2 font-sans font-medium italic">
-            No Remarks Logged
-          </div>
-        )}
-
-        {/* Coordinator Badge */}
-        <div className="text-[11px] mt-2 flex justify-between items-center border-t border-slate-200 dark:border-slate-800/80 pt-2 text-left">
-          <span className="text-slate-600 dark:text-slate-300 font-extrabold">Coordinator:</span>
-          {assigned !== '' && assigned.toLowerCase() !== 'unassigned' ? (
-            <span className="text-purple-800 dark:text-purple-300 font-black bg-purple-50 dark:bg-purple-950/80 border border-purple-300 dark:border-purple-500/60 px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider font-sans shadow-2xs">
-              👤 {assigned}
-            </span>
+              <p className="text-slate-100 italic font-sans text-[13px] leading-relaxed line-clamp-1 group-hover/remarks:line-clamp-none transition-all font-medium">
+                "{latestRemarkValue}"
+              </p>
+            </div>
+          ) : adminR !== '' ? (
+            <div className="border-l-2 border-amber-500/40 pl-2.5 py-0.5 text-left transition-all group/adminRemarks cursor-help">
+              <span className="text-[10px] uppercase font-bold text-amber-400 block mb-1 tracking-wider flex justify-between items-center font-sans">
+                <span className="flex items-center gap-1">
+                  <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                  👑 ADMIN REMARK
+                </span>
+                <span className="text-[9px] text-slate-500 normal-case font-normal group-hover/adminRemarks:opacity-0 transition-opacity">Hover for full</span>
+              </span>
+              <p className="text-slate-100 italic font-sans text-[13px] leading-relaxed line-clamp-1 group-hover/adminRemarks:line-clamp-none transition-all font-medium">
+                "{adminR}"
+              </p>
+            </div>
           ) : (
-            <span className="text-purple-800 dark:text-purple-300 font-black bg-purple-50 dark:bg-purple-950/80 border border-purple-300 dark:border-purple-500/60 px-2.5 py-1 rounded text-[10px] uppercase tracking-wider font-sans shadow-2xs">
-              👤 UNASSIGNED
-            </span>
+            <div className="text-[11.5px] text-left text-slate-500 font-sans font-medium italic">
+              No Remarks Logged
+            </div>
           )}
         </div>
 
         {/* Spacer */}
-        <div className="flex-1 min-h-[8px]" />
+        <div className="flex-1 min-h-[12px]" />
 
         {/* Move Controls */}
-        <div className="flex justify-between items-center gap-1 pt-1.5 border-t border-slate-750 mt-2">
+        <div className="flex justify-between items-center gap-1 pt-2 border-t border-slate-800/60 mt-1">
           <div>
             {prev ? (
               <button
@@ -722,7 +792,7 @@ export default function LeadBoard({
                   e.stopPropagation();
                   onUpdateStage(lead.id, prev);
                 }}
-                className="p-1 px-2 rounded-md bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-slate-100 transition-all flex items-center gap-0.5 border border-slate-700/60 cursor-pointer"
+                className="p-1 px-2.5 rounded-md bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-slate-100 transition-all flex items-center gap-0.5 border border-slate-700/40 cursor-pointer"
                 title={`Move back to ${prev}`}
               >
                 <ArrowLeft className="h-3 w-3" />
@@ -730,9 +800,21 @@ export default function LeadBoard({
             ) : <div className="w-6" />}
           </div>
 
-          <span className="text-[9px] text-slate-500 font-bold font-mono">
-            {formattedDate}
-          </span>
+          <div className="flex items-center gap-2 select-none text-center justify-center font-sans text-[11.5px] font-bold text-slate-400">
+            <span className="font-mono tracking-wider">
+              {formattedDate}
+            </span>
+            <span className="text-slate-600 font-normal">|</span>
+            {assigned !== '' && assigned.toLowerCase() !== 'unassigned' ? (
+              <span className="text-indigo-400 font-black tracking-wider uppercase flex items-center gap-0.5">
+                👤 {assigned}
+              </span>
+            ) : (
+              <span className="text-slate-500 font-extrabold tracking-wider uppercase flex items-center gap-0.5">
+                👤 UNASSIGNED
+              </span>
+            )}
+          </div>
 
           <div>
             {next ? (
@@ -1066,13 +1148,23 @@ export default function LeadBoard({
                         dropdownClassName="dark:bg-slate-950 border-slate-700 w-48"
                       />
 
+                      {/* Tags Filter */}
+                      <SearchableSelect
+                        value={boardTagFilter}
+                        onChange={setBoardTagFilter}
+                        options={searchableTagOptions}
+                        className="text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs shrink-0 max-w-[160px]"
+                        dropdownClassName="dark:bg-slate-950 border-slate-700 w-52"
+                      />
+
                       {/* Reset Filters button if any are active */}
-                      {(boardCountryFilter !== 'All' || boardPositionFilter !== 'All' || boardGenderFilter !== 'All') && (
+                      {(boardCountryFilter !== 'All' || boardPositionFilter !== 'All' || boardGenderFilter !== 'All' || boardTagFilter !== 'All') && (
                         <button
                           onClick={() => {
                             setBoardCountryFilter('All');
                             setBoardPositionFilter('All');
                             setBoardGenderFilter('All');
+                            setBoardTagFilter('All');
                           }}
                           className="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-black rounded-xl transition cursor-pointer border border-slate-700"
                         >

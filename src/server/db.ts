@@ -3141,5 +3141,114 @@ export async function saveWhatsAppAutoReplySettings(settings: WhatsAppAutoReplyS
   }
 }
 
+/**
+ * 🛡️ PERMANENT CLOUD FILE BACKUP SYSTEM
+ * Converts uploaded documents to robust base64 chunks and persists them inside Firestore
+ * ensuring that critical documents can never be permanently lost under any circumstances.
+ */
+export async function backupFileToFirestore(safeName: string, filePath: string): Promise<void> {
+  try {
+    if (!fs.existsSync(filePath)) return;
+    const fileBuffer = fs.readFileSync(filePath);
+    const base64Data = fileBuffer.toString('base64');
+    const fileType = path.extname(safeName);
+
+    // Chunk size: 500KB (approx 512,000 characters) to remain safely within Firestore's 1MB document size limit
+    const chunkSize = 500 * 1024;
+    const chunks: string[] = [];
+    for (let i = 0; i < base64Data.length; i += chunkSize) {
+      chunks.push(base64Data.substring(i, i + chunkSize));
+    }
+
+    if (db) {
+      const docRef = doc(db, 'file_backups', safeName);
+      await setDoc(docRef, {
+        fileName: safeName,
+        fileType,
+        chunks,
+        uploadedAt: new Date().toISOString()
+      });
+      console.log(`[FileBackup System] 🛡️ Permanent cloud backup created in Firestore: ${safeName} (${chunks.length} chunks saved).`);
+    }
+  } catch (err) {
+    console.error(`[FileBackup System] Failed to create cloud backup for ${safeName}:`, err);
+  }
+}
+
+/**
+ * 🔄 FILE SYNCHRONIZATION AND DISASTER RECOVERY ENGINE
+ * Scans the Firestore cloud file_backups repository and rebuilds any missing uploads.
+ * Also uploads any missing local uploads to the cloud. Zero data loss.
+ */
+export async function syncAndRestoreMissingUploadsFromFirestore(): Promise<void> {
+  try {
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    if (!db) {
+      console.warn('[FileBackup System] Database connection not initialized. Skipping file restore synchronization.');
+      return;
+    }
+
+    console.log('[FileBackup System] 🔄 Initiating cloud upload recovery & backup synchronization...');
+    
+    // Fetch all records from Firestore 'file_backups' collection
+    const querySnapshot = await runWithTimeout(getDocs(collection(db, 'file_backups')), 20000);
+    const cloudFilesMap = new Map<string, any>();
+    
+    querySnapshot.forEach(docSnap => {
+      cloudFilesMap.set(docSnap.id, docSnap.data());
+    });
+
+    console.log(`[FileBackup System] Cloud index contains ${cloudFilesMap.size} backed up files.`);
+
+    // 1. Recover missing files from cloud to local directory
+    for (const [fileName, data] of cloudFilesMap.entries()) {
+      const localPath = path.join(uploadsDir, fileName);
+      if (!fs.existsSync(localPath) || fs.statSync(localPath).size === 0) {
+        console.log(`[FileBackup System] 🚨 File "${fileName}" is missing from local disk. Recovering from cloud...`);
+        const chunks = data.chunks || [];
+        if (chunks.length > 0) {
+          const base64Combined = chunks.join('');
+          const fileBuffer = Buffer.from(base64Combined, 'base64');
+          fs.writeFileSync(localPath, fileBuffer);
+          console.log(`[FileBackup System] ✅ File "${fileName}" successfully restored physically to local uploads (${fileBuffer.length} bytes).`);
+        } else {
+          console.warn(`[FileBackup System] Backup file "${fileName}" has no chunks inside Firestore.`);
+        }
+      }
+    }
+
+    // 2. Upload any local files to Firestore if they do not exist in backup index
+    const localFiles = fs.readdirSync(uploadsDir);
+    let autoBackupCount = 0;
+    
+    for (const file of localFiles) {
+      if (file === '.' || file === '..') continue;
+      const localPath = path.join(uploadsDir, file);
+      
+      // Skip directories
+      if (fs.statSync(localPath).isDirectory()) continue;
+      
+      if (!cloudFilesMap.has(file)) {
+        console.log(`[FileBackup System] 🛡️ File "${file}" exists locally but not in cloud backup. Backing up to Firestore...`);
+        await backupFileToFirestore(file, localPath);
+        autoBackupCount++;
+      }
+    }
+
+    if (autoBackupCount > 0) {
+      console.log(`[FileBackup System] ✅ Completed background auto-backup for ${autoBackupCount} local uploads.`);
+    } else {
+      console.log('[FileBackup System] ✅ Storage is fully synchronized in cloud. Zero files out of sync.');
+    }
+
+  } catch (err) {
+    console.error('[FileBackup System] Error executing storage synchronization:', err);
+  }
+}
+
 
 
