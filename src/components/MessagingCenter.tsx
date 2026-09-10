@@ -1524,24 +1524,7 @@ export default function MessagingCenter({
                         )}
                       </div>
 
-                      {/* Pipeline Stage */}
-                      <div>
-                        <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase block mb-1">
-                          Pipeline Stage
-                        </label>
-                        <select
-                          value={leadFormData.stage}
-                          onChange={(e) => setLeadFormData({ ...leadFormData, stage: e.target.value as LeadStage })}
-                          className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
-                        >
-                          <option value="new">New Inbound</option>
-                          <option value="negotiating">In Discussion</option>
-                          <option value="rotations">In Rotations / Follow-up</option>
-                          <option value="proposal">Office Visited / Document</option>
-                          <option value="won">Closed Won / Visa Process</option>
-                          <option value="lost">Closed Lost</option>
-                        </select>
-                      </div>
+
 
                       {/* ASSIGN TO COORDINATOR (CRITICAL TRANSFER SECTION) */}
                       <div className="p-3.5 bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-xl space-y-2">

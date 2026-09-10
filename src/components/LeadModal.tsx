@@ -24,6 +24,29 @@ interface LeadModalProps {
   tagsList?: string[];
 }
 
+// Helper to check if a timeline log is a remark change and extract its field and value for restoration
+const getRestoreAction = (text: string) => {
+  const lowerText = text.toLowerCase();
+  let field: 'remarks1' | 'remarks2' | 'remarks3' | 'adminRemarks' | null = null;
+  if (lowerText.includes('1st remark')) field = 'remarks1';
+  else if (lowerText.includes('2nd remark')) field = 'remarks2';
+  else if (lowerText.includes('3rd remark')) field = 'remarks3';
+  else if (lowerText.includes('admin remark')) field = 'adminRemarks';
+
+  if (!field) return null;
+
+  // Extract content between first and last double quotes
+  const firstQuote = text.indexOf('"');
+  const lastQuote = text.lastIndexOf('"');
+  if (firstQuote !== -1 && lastQuote > firstQuote) {
+    const content = text.substring(firstQuote + 1, lastQuote);
+    if (content !== 'cleared') {
+      return { field, content };
+    }
+  }
+  return null;
+};
+
 export default function LeadModal({ 
   lead: initialLead, 
   onClose, 
@@ -2432,6 +2455,49 @@ export default function LeadModal({
                                 </div>
 
                                 <div className="flex items-center gap-2">
+                                  {isRemark && (() => {
+                                    const restoreAction = getRestoreAction(event.text);
+                                    if (restoreAction) {
+                                      const fieldLabel = restoreAction.field === 'adminRemarks' ? 'Admin' : restoreAction.field === 'remarks1' ? '1st' : restoreAction.field === 'remarks2' ? '2nd' : '3rd';
+                                      return (
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            const confirmText = `Are you sure you want to restore this ${fieldLabel} Remark to:\n\n"${restoreAction.content}"?`;
+                                            if (!window.confirm(confirmText)) return;
+                                            
+                                            try {
+                                              setFormFields(prev => ({
+                                                ...prev,
+                                                [restoreAction.field]: restoreAction.content
+                                              }));
+                                              
+                                              const res = await fetch(`/api/leads/${lead.id}`, {
+                                                method: 'PUT',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ [restoreAction.field]: restoreAction.content })
+                                              });
+                                              if (res.ok) {
+                                                const freshLead = await res.json();
+                                                setLead(freshLead);
+                                                onLeadUpdated();
+                                                alert('Remark restored successfully!');
+                                              } else {
+                                                alert('Failed to save restored remark.');
+                                              }
+                                            } catch (err) {
+                                              console.error('Error restoring remark:', err);
+                                              alert('Failed to restore remark.');
+                                            }
+                                          }}
+                                          className="text-[10px] bg-amber-500/10 hover:bg-amber-500/25 text-amber-700 dark:text-amber-400 border border-amber-500/20 px-2.5 py-0.5 rounded-md cursor-pointer transition-colors font-bold flex items-center gap-1 shadow-2xs"
+                                          title={`Restore this historical value to ${fieldLabel} Remarks`}
+                                        >
+                                          <span>↩️ Restore</span>
+                                        </button>
+                                      );
+                                    }
+                                  })()}
                                   <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
                                     {formattedDate}
                                   </span>

@@ -893,7 +893,11 @@ export default function LeadWhatsAppChat({
                   )}
 
                   {/* Bubble Footer Info - Floated gracefully in the bottom-right corner */}
-                  <span className="inline-flex items-center justify-end gap-1 text-[10px] text-[#667781] dark:text-[#8696a0] select-none float-right ml-4 mt-1 leading-none">
+                  <span className={`inline-flex items-center justify-end gap-1 text-[11px] select-none float-right ml-4 mt-1.5 leading-none ${
+                    isUser
+                      ? 'text-[#111b21]/75 dark:text-[#e9edef]/85 font-semibold'
+                      : 'text-[#54656f] dark:text-[#a0aab3] font-semibold'
+                  }`}>
                     <span className="font-sans">{formattedTime}</span>
 
                     {isUser && (
@@ -902,8 +906,8 @@ export default function LeadWhatsAppChat({
                           msg.status === 'failed'
                             ? 'text-red-500 font-bold cursor-help'
                             : msg.status === 'read' 
-                              ? 'text-[#53bdeb]' 
-                              : 'text-[#8696a0]'
+                              ? 'text-[#53bdeb] dark:text-[#53bdeb] font-black' 
+                              : 'text-[#8696a0] dark:text-emerald-200/70'
                         }`} 
                         title={
                           msg.status === 'failed'
@@ -1166,9 +1170,9 @@ export default function LeadWhatsAppChat({
                          textareaRef.current.focus();
                        }
                      }}
-                     className="flex-1 py-2 bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] font-bold rounded-lg text-xs border border-[#e9edef] dark:border-slate-800 transition-all cursor-pointer text-center uppercase tracking-wider h-[34px]"
+                     className="py-2 px-4 bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] font-bold rounded-lg text-xs border border-[#e9edef] dark:border-slate-800 transition-all cursor-pointer text-center uppercase tracking-wider h-[34px]"
                    >
-                     Insert to Chat
+                     Insert
                    </button>
                    <button
                      type="button"
@@ -1194,7 +1198,7 @@ export default function LeadWhatsAppChat({
                          setSending(false);
                        }
                      }}
-                     className="py-2 px-4 bg-[#00a884] hover:bg-[#008f72] text-white font-bold rounded-lg text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-3xs uppercase tracking-wider h-[34px]"
+                     className="flex-1 py-2 bg-[#00a884] hover:bg-[#008f72] text-white font-bold rounded-lg text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-3xs uppercase tracking-wider h-[34px]"
                    >
                     {sending ? (
                       <RefreshCw className="h-4 w-4 animate-spin text-white" />
@@ -1281,18 +1285,18 @@ export default function LeadWhatsAppChat({
                         <div className="flex items-center gap-1.5 pt-1.5 border-t border-[#000000]/05 dark:border-white/5">
                           <button
                             type="button"
-                            onClick={() => handleSelectTemplate(tpl, false)}
-                            className="flex-1 py-1 bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] font-bold rounded-lg text-[11px] border border-[#e9edef] dark:border-slate-800 transition-all cursor-pointer text-center"
-                          >
-                            Insert
-                          </button>
-                          <button
-                            type="button"
                             onClick={() => handleSelectTemplate(tpl, true)}
-                            className="py-1 px-3 bg-[#00a884] hover:bg-[#008f72] text-white font-bold rounded-lg text-[11px] transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
+                            className="flex-1 py-1 bg-[#00a884] hover:bg-[#008f72] text-white font-bold rounded-lg text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1 shadow-3xs"
                           >
                             <Send className="h-3 w-3" />
                             Send
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectTemplate(tpl, false)}
+                            className="py-1 px-3 bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] font-bold rounded-lg text-[11px] border border-[#e9edef] dark:border-slate-800 transition-all cursor-pointer text-center"
+                          >
+                            Insert
                           </button>
                         </div>
                       </div>
@@ -1440,16 +1444,6 @@ export default function LeadWhatsAppChat({
                         <button
                           type="button"
                           onClick={() => {
-                            setInputText(preview);
-                            setShowQuickReplies(false);
-                          }}
-                          className="flex-1 py-1 bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] font-bold rounded-lg text-[11px] border border-[#e9edef] dark:border-slate-800 transition-all cursor-pointer text-center"
-                        >
-                          Insert
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
                             const fakeTemplate: WhatsAppTemplate = {
                               ...tpl,
                               text: preview
@@ -1457,10 +1451,20 @@ export default function LeadWhatsAppChat({
                             handleSelectTemplate(fakeTemplate, true);
                             setShowQuickReplies(false);
                           }}
-                          className="py-1 px-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-[11px] transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
+                          className="flex-1 py-1 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1 shadow-3xs"
                         >
                           <Send className="h-3 w-3" />
                           Send
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInputText(preview);
+                            setShowQuickReplies(false);
+                          }}
+                          className="py-1 px-3 bg-white dark:bg-[#2a3942] hover:bg-[#f0f2f5] dark:hover:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] font-bold rounded-lg text-[11px] border border-[#e9edef] dark:border-slate-800 transition-all cursor-pointer text-center"
+                        >
+                          Insert
                         </button>
                       </div>
                     </div>

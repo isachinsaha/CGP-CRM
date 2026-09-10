@@ -264,6 +264,20 @@ export const getCountryFlagUrl = (countryName: string): string => {
  */
 export const formatCandidateName = (name: string): string => {
   if (!name) return '';
+
+  // If it's a phone number (starts with + or digits, and has mostly digits)
+  const cleanPhone = name.replace(/[\s+-]+/g, '');
+  if (/^\d{10,13}$/.test(cleanPhone)) {
+    let digits = cleanPhone;
+    if (digits.length === 10) {
+      return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+    } else if (digits.length === 12 && digits.startsWith('91')) {
+      return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+    } else if (digits.length === 11 && digits.startsWith('0')) {
+      return `0${digits.slice(1, 6)} ${digits.slice(6)}`;
+    }
+  }
+
   // Convert camelCase like "ImNameren" -> "Im Nameren"
   let formatted = name.replace(/([a-z])([A-Z])/g, '$1 $2');
   // Convert snake_case or dashes like "IM_NAMEREN" or "IM-NAMEREN" -> "IM NAMEREN"

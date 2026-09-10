@@ -668,7 +668,7 @@ export default function LeadBoard({
         {/* Name, Stars & Message Count Section */}
         <div className="flex items-start justify-between gap-1.5 mb-1.5">
           <div className="min-w-0 flex-1">
-            <h4 className="font-bold text-slate-100 text-[17.5px] leading-tight tracking-wide uppercase font-sans truncate" title={lead.name}>
+            <h4 className="font-extrabold text-slate-100 text-[15px] sm:text-[16px] leading-tight tracking-wide uppercase font-poppins truncate" title={lead.name}>
               {formatCandidateName(String(lead.name || 'Candidate'))}
             </h4>
           </div>
@@ -678,13 +678,13 @@ export default function LeadBoard({
             <div className="flex items-center gap-0.5" title={`${lead.importance || 3} Stars`}>
               {Array.from({ length: 5 }).map((_, i) => (
                 <Star 
-                  key={i} 
-                  className={`h-3.5 w-3.5 ${
-                    i < (lead.importance || 3) 
-                      ? 'text-amber-400 fill-amber-400' 
-                      : 'text-slate-700'
-                  }`} 
-                  id={`lead-board-star-${lead.id}-${i}`}
+                   key={i} 
+                   className={`h-3.5 w-3.5 ${
+                     i < (lead.importance || 3) 
+                       ? 'text-amber-400 fill-amber-400' 
+                       : 'text-slate-700'
+                   }`} 
+                   id={`lead-board-star-${lead.id}-${i}`}
                 />
               ))}
             </div>
@@ -692,7 +692,7 @@ export default function LeadBoard({
         </div>
 
         {/* Sub-Header: Contact Info & Gender-Age inline */}
-        <div className="flex items-center justify-between text-[13.5px] text-slate-400 font-sans pb-2 border-b border-slate-800/60 mb-2">
+        <div className="flex items-center justify-between text-[11.5px] xs:text-[12.5px] xl:text-[13.5px] text-slate-400 font-sans pb-2 border-b border-slate-800/60 mb-2">
           <span className="font-mono tracking-wider font-bold text-slate-200">{lead.phone || 'No Phone'}</span>
           <span className="font-mono text-slate-400 text-[12px] font-bold">
             {(() => {
@@ -969,7 +969,6 @@ export default function LeadBoard({
             )}
           </div>
         </div>
-
         {/* View Layout Conditional Render */}
         {viewMode === 'hub' ? (
           <div className="space-y-6 animate-fade-in">
@@ -1187,7 +1186,7 @@ export default function LeadBoard({
                 </div>
 
                 {/* Grid layout of lead cards under the selected stage */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 py-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 py-1">
                   {filteredStageLeads.length > 0 ? (
                     filteredStageLeads.map((lead) => renderLeadCard(lead))
                   ) : (

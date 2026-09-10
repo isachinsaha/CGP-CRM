@@ -935,6 +935,30 @@ function mergeTimelineList(listA: any[], listB: any[]): any[] {
   return Array.from(map.values()).sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
 }
 
+// Helper function to perform field-level merging, preserving populated values from the older version if empty in the newer version
+function mergeLeadProfiles(olderLead: Lead, newerLead: Lead): Lead {
+  const merged = { ...newerLead };
+  
+  const fieldsToValidate: (keyof Lead)[] = [
+    'remarks1', 'remarks2', 'remarks3', 'adminRemarks',
+    'name', 'phone', 'alternateNo', 'email', 'campaign',
+    'assignedTo', 'stage', 'project', 'country', 'position', 'experience', 'qualification'
+  ];
+  
+  fieldsToValidate.forEach(field => {
+    const olderVal = olderLead[field];
+    const newerVal = newerLead[field];
+    
+    if (olderVal !== undefined && olderVal !== null && String(olderVal).trim() !== '') {
+      if (newerVal === undefined || newerVal === null || String(newerVal).trim() === '') {
+        (merged as any)[field] = olderVal;
+      }
+    }
+  });
+  
+  return merged;
+}
+
 // Helper function to perform bi-directional merge between local changes, last synced, and latest cloud data
 function syncAndMergeLeadsList(
   localLeads: Lead[], 
@@ -976,12 +1000,12 @@ function syncAndMergeLeadsList(
 
         let chosen: Lead;
         if (localTime > cloudTime) {
-          chosen = { ...local };
+          chosen = mergeLeadProfiles(cloud, local);
           chosen.messages = mergeMessagesList(cloud.messages || [], local.messages || []);
           chosen.timeline = mergeTimelineList(cloud.timeline || [], local.timeline || []);
           pendingUpload.push(chosen);
         } else {
-          chosen = { ...cloud };
+          chosen = mergeLeadProfiles(local, cloud);
           chosen.messages = mergeMessagesList(local.messages || [], cloud.messages || []);
           chosen.timeline = mergeTimelineList(local.timeline || [], cloud.timeline || []);
         }
@@ -1369,44 +1393,49 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
       if (leadsToSave.length > 0) {
         const validatedLeadsToSave: Lead[] = [];
 
-        for (const l of leadsToSave) {
+        // Fetch latest Firestore documents in parallel to optimize save speed and bypass sequential lag
+        const fetchPromises = leadsToSave.map(async (l) => {
           try {
             const docRef = doc(db, 'leads', l.id);
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-              const cloudLead = docSnap.data() as Lead;
-              const cloudTime = new Date(cloudLead.updatedAt || cloudLead.createdAt || 0).getTime();
-              const localTime = new Date(l.updatedAt || l.createdAt || 0).getTime();
+            const docSnap = await runWithTimeout(getDoc(docRef), 10000);
+            return { lead: l, docSnap };
+          } catch (fetchErr) {
+            console.error(`[Sync Safeguard] Failed to fetch latest Firestore doc for ${l.id}, defaulting to writing local copy:`, fetchErr);
+            return { lead: l, docSnap: null };
+          }
+        });
 
-              if (cloudTime > localTime) {
-                console.warn(`[Sync Safeguard] Firestore has a newer version of lead ${l.id} (${cloudLead.updatedAt}) than our local save attempt (${l.updatedAt}). Merging structural updates to prevent stale overwrite!`);
+        const fetchResults = await Promise.all(fetchPromises);
 
-                const mergedMessages = mergeMessagesList(cloudLead.messages || [], l.messages || []);
-                const mergedTimeline = mergeTimelineList(cloudLead.timeline || [], l.timeline || []);
+        for (const { lead: l, docSnap } of fetchResults) {
+          if (docSnap && docSnap.exists()) {
+            const cloudLead = docSnap.data() as Lead;
+            const cloudTime = new Date(cloudLead.updatedAt || cloudLead.createdAt || 0).getTime();
+            const localTime = new Date(l.updatedAt || l.createdAt || 0).getTime();
 
-                const mergedLead: Lead = {
-                  ...cloudLead, // Authoritative profile, stage, and remarks
-                  messages: mergedMessages,
-                  timeline: mergedTimeline,
-                  autoReplySent: cloudLead.autoReplySent || l.autoReplySent,
-                  isDeleted: cloudLead.isDeleted || l.isDeleted,
-                };
+            if (cloudTime > localTime) {
+              console.warn(`[Sync Safeguard] Firestore has a newer version of lead ${l.id} (${cloudLead.updatedAt}) than our local save attempt (${l.updatedAt}). Merging structural updates to prevent stale overwrite!`);
 
-                // Update the memory array so the local disk file will also persist the correct merged data
-                const idx = normalizedLeads.findIndex(item => item.id === l.id);
-                if (idx !== -1) {
-                  normalizedLeads[idx] = mergedLead;
-                }
+              const mergedMessages = mergeMessagesList(cloudLead.messages || [], l.messages || []);
+              const mergedTimeline = mergeTimelineList(cloudLead.timeline || [], l.timeline || []);
 
-                validatedLeadsToSave.push(mergedLead);
-              } else {
-                validatedLeadsToSave.push(l);
+              const mergedLead: Lead = mergeLeadProfiles(l, cloudLead);
+              mergedLead.messages = mergedMessages;
+              mergedLead.timeline = mergedTimeline;
+              mergedLead.autoReplySent = cloudLead.autoReplySent || l.autoReplySent;
+              mergedLead.isDeleted = cloudLead.isDeleted || l.isDeleted;
+
+              // Update the memory array so the local disk file will also persist the correct merged data
+              const idx = normalizedLeads.findIndex(item => item.id === l.id);
+              if (idx !== -1) {
+                normalizedLeads[idx] = mergedLead;
               }
+
+              validatedLeadsToSave.push(mergedLead);
             } else {
               validatedLeadsToSave.push(l);
             }
-          } catch (fetchErr) {
-            console.error(`[Sync Safeguard] Failed to fetch latest Firestore doc for ${l.id}, defaulting to writing local copy:`, fetchErr);
+          } else {
             validatedLeadsToSave.push(l);
           }
         }
