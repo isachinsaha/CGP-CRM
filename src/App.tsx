@@ -923,6 +923,7 @@ export default function App() {
                   coordinators={coordinatorsList}
                   countries={countries}
                   positions={positions}
+                  onUpdatePositions={handleUpdatePositions}
                   projects={projects}
                   onRefreshData={() => pullCrmData(true, true)}
                   onLeadUpdated={async () => { await pullCrmData(true); }}

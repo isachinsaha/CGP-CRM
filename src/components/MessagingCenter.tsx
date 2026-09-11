@@ -1392,13 +1392,16 @@ export default function MessagingCenter({
                               </button>
                             </div>
                           ) : (
-                            <input
-                              type="text"
+                            <select
                               value={leadFormData.position}
                               onChange={(e) => setLeadFormData({ ...leadFormData, position: e.target.value })}
                               className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
-                              placeholder="e.g. Nurse, Welder, Cook, Waiter..."
-                            />
+                            >
+                              <option value="">Select Position (Leave Blank)</option>
+                              {positions.map(p => (
+                                <option key={p} value={p}>{p}</option>
+                              ))}
+                            </select>
                           )}
                         </div>
                       </div>

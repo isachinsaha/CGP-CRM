@@ -487,7 +487,19 @@ export default function CampaignAnalytics({
         }
 
         // Count remarks logged today
-        if (e.type === 'remark' || e.type === 'message' || e.text.toLowerCase().includes('remark') || e.text.toLowerCase().includes('call status') || e.text.toLowerCase().includes('whatsapp')) {
+        const isWhatsAppMessage = e.type === 'message' || 
+          e.text.toLowerCase().includes('whatsapp') || 
+          e.text.toLowerCase().includes('read message') || 
+          e.text.toLowerCase().includes('inbound meta whatsapp') ||
+          e.text.toLowerCase().includes('template:') ||
+          e.text.toLowerCase().includes('sent template');
+
+        const isActualRemark = (e.type === 'remark' || 
+          e.text.toLowerCase().includes('remark') || 
+          e.text.toLowerCase().includes('call status') ||
+          e.text.toLowerCase().includes('lodged')) && !isWhatsAppMessage;
+
+        if (isActualRemark) {
           remarksList.push({
             id: l.id,
             lead: l,
@@ -659,7 +671,19 @@ export default function CampaignAnalytics({
           touchedLeadsSet.add(l.id);
         }
 
-        if (e.type === 'remark' || e.type === 'message' || e.text.toLowerCase().includes('remark') || e.text.toLowerCase().includes('call status') || e.text.toLowerCase().includes('whatsapp')) {
+        const isWhatsAppMessage = e.type === 'message' || 
+          e.text.toLowerCase().includes('whatsapp') || 
+          e.text.toLowerCase().includes('read message') || 
+          e.text.toLowerCase().includes('inbound meta whatsapp') ||
+          e.text.toLowerCase().includes('template:') ||
+          e.text.toLowerCase().includes('sent template');
+
+        const isActualRemark = (e.type === 'remark' || 
+          e.text.toLowerCase().includes('remark') || 
+          e.text.toLowerCase().includes('call status') ||
+          e.text.toLowerCase().includes('lodged')) && !isWhatsAppMessage;
+
+        if (isActualRemark) {
           remarksCount++;
           remarksList.push({
             id: l.id,

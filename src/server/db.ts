@@ -1336,6 +1336,164 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
   return normalizedFinalLeads;
 }
 
+// Non-blocking background sync queue state
+let isSyncingToCloud = false;
+let hasPendingCloudSync = false;
+
+async function triggerBackgroundCloudSync(): Promise<void> {
+  if (isSyncingToCloud) {
+    hasPendingCloudSync = true;
+    return;
+  }
+
+  isSyncingToCloud = true;
+  hasPendingCloudSync = false;
+
+  try {
+    await runCloudSyncInternal();
+  } catch (err) {
+    console.error('[Cloud Sync Queue] Background cloud sync execution failed:', err);
+  } finally {
+    isSyncingToCloud = false;
+    if (hasPendingCloudSync) {
+      setTimeout(() => {
+        triggerBackgroundCloudSync().catch(console.error);
+      }, 500); // 500ms cool-down to batch successive quick updates
+    }
+  }
+}
+
+async function runCloudSyncInternal(): Promise<void> {
+  await initializeDatabase();
+
+  const normalizedLeads = safeReadJsonSync<Lead[]>(DATA_FILE, []);
+  if (normalizedLeads.length === 0) return;
+
+  const lastSyncedLeads: Lead[] = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, []);
+
+  const syncedMap = new Map<string, Lead>();
+  lastSyncedLeads.forEach(l => { if (l && l.id) syncedMap.set(l.id, l); });
+
+  const leadsToSave: Lead[] = [];
+  normalizedLeads.forEach(l => {
+    if (!l || !l.id) return;
+    const syncedL = syncedMap.get(l.id);
+    if (!syncedL) {
+      leadsToSave.push(l);
+    } else {
+      if (l.updatedAt !== syncedL.updatedAt || JSON.stringify(l) !== JSON.stringify(syncedL)) {
+        leadsToSave.push(l);
+      }
+    }
+  });
+
+  const currentIds = new Set(normalizedLeads.map(l => l.id).filter(Boolean));
+  const leadsToDelete: string[] = [];
+  lastSyncedLeads.forEach(syncedL => {
+    if (syncedL && syncedL.id && !currentIds.has(syncedL.id)) {
+      leadsToDelete.push(syncedL.id);
+    }
+  });
+
+  if (leadsToDelete.length > 50 && normalizedLeads.length < lastSyncedLeads.length * 0.7) {
+    console.warn(`[Firestore Client Background] SAFETY INTERVENTION: Detected abrupt drop in lead count (${lastSyncedLeads.length} -> ${normalizedLeads.length}). Suppressing ${leadsToDelete.length} automatic cloud deletions to protect database integrity.`);
+    leadsToDelete.length = 0;
+  }
+
+  if (leadsToSave.length === 0 && leadsToDelete.length === 0) {
+    return;
+  }
+
+  console.log(`[Firestore Client Background] Syncing diff: ${leadsToSave.length} leads to save, ${leadsToDelete.length} leads to delete (total: ${normalizedLeads.length})`);
+
+  if (leadsToSave.length > 0) {
+    const validatedLeadsToSave: Lead[] = [];
+
+    const fetchPromises = leadsToSave.map(async (l) => {
+      try {
+        const docRef = doc(db, 'leads', l.id);
+        const docSnap = await runWithTimeout(getDoc(docRef), 10000);
+        return { lead: l, docSnap };
+      } catch (fetchErr) {
+        console.error(`[Sync Safeguard] Failed to fetch latest Firestore doc for ${l.id}, defaulting to writing local copy:`, fetchErr);
+        return { lead: l, docSnap: null };
+      }
+    });
+
+    const fetchResults = await Promise.all(fetchPromises);
+
+    for (const { lead: l, docSnap } of fetchResults) {
+      if (docSnap && docSnap.exists()) {
+        const cloudLead = docSnap.data() as Lead;
+        const cloudTime = new Date(cloudLead.updatedAt || cloudLead.createdAt || 0).getTime();
+        const localTime = new Date(l.updatedAt || l.createdAt || 0).getTime();
+
+        if (cloudTime > localTime) {
+          console.warn(`[Sync Safeguard] Firestore has a newer version of lead ${l.id} (${cloudLead.updatedAt}) than our local save attempt (${l.updatedAt}). Merging structural updates to prevent stale overwrite!`);
+
+          const mergedMessages = mergeMessagesList(cloudLead.messages || [], l.messages || []);
+          const mergedTimeline = mergeTimelineList(cloudLead.timeline || [], l.timeline || []);
+
+          const mergedLead: Lead = mergeLeadProfiles(l, cloudLead);
+          mergedLead.messages = mergedMessages;
+          mergedLead.timeline = mergedTimeline;
+          mergedLead.autoReplySent = cloudLead.autoReplySent || l.autoReplySent;
+          mergedLead.isDeleted = cloudLead.isDeleted || l.isDeleted;
+
+          const idx = normalizedLeads.findIndex(item => item.id === l.id);
+          if (idx !== -1) {
+            normalizedLeads[idx] = mergedLead;
+          }
+
+          validatedLeadsToSave.push(mergedLead);
+        } else {
+          validatedLeadsToSave.push(l);
+        }
+      } else {
+        validatedLeadsToSave.push(l);
+      }
+    }
+
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < validatedLeadsToSave.length; i += CHUNK_SIZE) {
+      const chunk = validatedLeadsToSave.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach(l => {
+        const docRef = doc(db, 'leads', l.id);
+        batch.set(docRef, cleanForFirestore(l));
+      });
+      await runWithTimeout(batch.commit(), 15000);
+    }
+
+    safeWriteJsonSync(DATA_FILE, normalizedLeads);
+  }
+
+  if (leadsToDelete.length > 0) {
+    console.log(`[Firestore Client Background] Converting ${leadsToDelete.length} removed leads to soft-deleted on Cloud...`);
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < leadsToDelete.length; i += CHUNK_SIZE) {
+      const chunk = leadsToDelete.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach(id => {
+        const docRef = doc(db, 'leads', id);
+        batch.set(docRef, { 
+          isDeleted: true, 
+          deletedAt: new Date().toISOString(), 
+          updatedAt: new Date().toISOString() 
+        }, { merge: true });
+      });
+      await runWithTimeout(batch.commit(), 15000);
+    }
+  }
+
+  safeWriteJsonSync(DATA_FILE_SYNCED, normalizedLeads);
+
+  const newTimestamp = await markDatabaseUpdated('leads');
+  if (newTimestamp) {
+    lastReadLeadsTimestamp = newTimestamp;
+  }
+}
+
 // Save all leads using smart delta-saving for Firestore
 async function saveLeadsInternal(leads: Lead[]): Promise<void> {
   await initializeDatabase();
@@ -1349,148 +1507,9 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
   safeWriteJsonSync(DATA_FILE, normalizedLeads);
 
   if (checkCloudStatus()) {
-    try {
-      // Compare local leads with our last synced file to identify what needs to be saved/deleted in Firestore
-      const lastSyncedLeads: Lead[] = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, []);
-
-      const syncedMap = new Map<string, Lead>();
-      lastSyncedLeads.forEach(l => { if (l && l.id) syncedMap.set(l.id, l); });
-
-      const leadsToSave: Lead[] = [];
-      normalizedLeads.forEach(l => {
-        if (!l || !l.id) return;
-        const syncedL = syncedMap.get(l.id);
-        if (!syncedL) {
-          // This is a new lead (unsynced)
-          leadsToSave.push(l);
-        } else {
-          // Compare updatedAt or structural JSON to find edits
-          if (l.updatedAt !== syncedL.updatedAt || JSON.stringify(l) !== JSON.stringify(syncedL)) {
-            leadsToSave.push(l);
-          }
-        }
-      });
-
-      const currentIds = new Set(normalizedLeads.map(l => l.id).filter(Boolean));
-      const leadsToDelete: string[] = [];
-      lastSyncedLeads.forEach(syncedL => {
-        if (syncedL && syncedL.id && !currentIds.has(syncedL.id)) {
-          leadsToDelete.push(syncedL.id);
-        }
-      });
-
-      // Safety guardrail: Prevent cascading cloud deletion if local array shrunk unexpectedly by >30%
-      if (leadsToDelete.length > 50 && normalizedLeads.length < lastSyncedLeads.length * 0.7) {
-        console.warn(`[Firestore Client] SAFETY INTERVENTION: Detected abrupt drop in lead count (${lastSyncedLeads.length} -> ${normalizedLeads.length}). Suppressing ${leadsToDelete.length} automatic cloud deletions to protect database integrity.`);
-        leadsToDelete.length = 0;
-      }
-
-      if (leadsToSave.length > 0 || leadsToDelete.length > 0) {
-        console.log(`[Firestore Client] Syncing saveLeads diff: ${leadsToSave.length} leads to set, ${leadsToDelete.length} leads to delete (total: ${normalizedLeads.length})`);
-      }
-
-      // Write changes in batches of 100 with validation checks to prevent stale overwrites
-      if (leadsToSave.length > 0) {
-        const validatedLeadsToSave: Lead[] = [];
-
-        // Fetch latest Firestore documents in parallel to optimize save speed and bypass sequential lag
-        const fetchPromises = leadsToSave.map(async (l) => {
-          try {
-            const docRef = doc(db, 'leads', l.id);
-            const docSnap = await runWithTimeout(getDoc(docRef), 10000);
-            return { lead: l, docSnap };
-          } catch (fetchErr) {
-            console.error(`[Sync Safeguard] Failed to fetch latest Firestore doc for ${l.id}, defaulting to writing local copy:`, fetchErr);
-            return { lead: l, docSnap: null };
-          }
-        });
-
-        const fetchResults = await Promise.all(fetchPromises);
-
-        for (const { lead: l, docSnap } of fetchResults) {
-          if (docSnap && docSnap.exists()) {
-            const cloudLead = docSnap.data() as Lead;
-            const cloudTime = new Date(cloudLead.updatedAt || cloudLead.createdAt || 0).getTime();
-            const localTime = new Date(l.updatedAt || l.createdAt || 0).getTime();
-
-            if (cloudTime > localTime) {
-              console.warn(`[Sync Safeguard] Firestore has a newer version of lead ${l.id} (${cloudLead.updatedAt}) than our local save attempt (${l.updatedAt}). Merging structural updates to prevent stale overwrite!`);
-
-              const mergedMessages = mergeMessagesList(cloudLead.messages || [], l.messages || []);
-              const mergedTimeline = mergeTimelineList(cloudLead.timeline || [], l.timeline || []);
-
-              const mergedLead: Lead = mergeLeadProfiles(l, cloudLead);
-              mergedLead.messages = mergedMessages;
-              mergedLead.timeline = mergedTimeline;
-              mergedLead.autoReplySent = cloudLead.autoReplySent || l.autoReplySent;
-              mergedLead.isDeleted = cloudLead.isDeleted || l.isDeleted;
-
-              // Update the memory array so the local disk file will also persist the correct merged data
-              const idx = normalizedLeads.findIndex(item => item.id === l.id);
-              if (idx !== -1) {
-                normalizedLeads[idx] = mergedLead;
-              }
-
-              validatedLeadsToSave.push(mergedLead);
-            } else {
-              validatedLeadsToSave.push(l);
-            }
-          } else {
-            validatedLeadsToSave.push(l);
-          }
-        }
-
-        // Write the validated and potentially merged list to Firestore
-        const CHUNK_SIZE = 100;
-        for (let i = 0; i < validatedLeadsToSave.length; i += CHUNK_SIZE) {
-          const chunk = validatedLeadsToSave.slice(i, i + CHUNK_SIZE);
-          const batch = writeBatch(db);
-          chunk.forEach(l => {
-            const docRef = doc(db, 'leads', l.id);
-            batch.set(docRef, cleanForFirestore(l));
-          });
-          await runWithTimeout(batch.commit(), 15000);
-        }
-
-        // Update local memory file array to make sure any structural merges are persisted to disk
-        safeWriteJsonSync(DATA_FILE, normalizedLeads);
-      }
-
-      // Safety guardrail: Convert removed documents to soft-deleted on Cloud to prevent physical data loss
-      if (leadsToDelete.length > 0) {
-        console.log(`[Firestore Client] Converting ${leadsToDelete.length} removed leads to soft-deleted on Cloud...`);
-        const CHUNK_SIZE = 100;
-        for (let i = 0; i < leadsToDelete.length; i += CHUNK_SIZE) {
-          const chunk = leadsToDelete.slice(i, i + CHUNK_SIZE);
-          const batch = writeBatch(db);
-          chunk.forEach(id => {
-            const docRef = doc(db, 'leads', id);
-            batch.set(docRef, { 
-              isDeleted: true, 
-              deletedAt: new Date().toISOString(), 
-              updatedAt: new Date().toISOString() 
-            }, { merge: true });
-          });
-          await runWithTimeout(batch.commit(), 15000);
-        }
-      }
-
-      // Since all Firestore operations succeeded, we can safely update the local DATA_FILE_SYNCED cache
-      safeWriteJsonSync(DATA_FILE_SYNCED, normalizedLeads);
-
-      // Update remote metadata sync document and local tracking timestamp
-      const newTimestamp = await markDatabaseUpdated('leads');
-      if (newTimestamp) {
-        lastReadLeadsTimestamp = newTimestamp;
-      }
-
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save leads delta to cloud:', err);
-      handleCloudError(err);
-      // We do NOT update DATA_FILE_SYNCED because the writes failed to reach the cloud.
-      // This leaves them as "unsynced" in our metadata so that they will be retried and merged on the next read!
-      throw err;
-    }
+    triggerBackgroundCloudSync().catch(err => {
+      console.error('[Cloud Sync Queue] Failed to trigger background cloud sync:', err);
+    });
   }
 }
 
