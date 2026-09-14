@@ -19,7 +19,7 @@ import {
   writeBatch,
   setLogLevel
 } from 'firebase/firestore';
-import { Lead, Message, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings } from '../types.ts';
+import { Lead, Message, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem } from '../types.ts';
 import { getEffectiveIntake } from '../utils.ts';
 
 // Configure Firebase SDK to only log errors, suppressing gRPC connection warnings
@@ -39,6 +39,7 @@ const WALLETS_FILE = path.join(DATA_DIR, 'wallets.json');
 const INCENTIVE_RULES_FILE = path.join(DATA_DIR, 'incentive_rules.json');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'whatsapp_templates.json');
 const AUTOREPLY_FILE = path.join(DATA_DIR, 'whatsapp_autoreply.json');
+const MEDIA_FILE = path.join(DATA_DIR, 'media_library.json');
 
 // --- SAFE ATOMIC JSON READ / WRITE / RECOVERY HELPERS ---
 
@@ -440,6 +441,7 @@ const dbCache = {
   incentive_rules: null as CacheEntry<IncentiveRule[]> | null,
   templates: null as CacheEntry<WhatsAppTemplate[]> | null,
   auto_reply: null as CacheEntry<WhatsAppAutoReplySettings> | null,
+  media: null as CacheEntry<MediaItem[]> | null,
 };
 
 let lastFullLeadsSyncTime = 0;
@@ -3201,22 +3203,53 @@ export async function backupFileToFirestore(safeName: string, filePath: string):
     const base64Data = fileBuffer.toString('base64');
     const fileType = path.extname(safeName);
 
-    // Chunk size: 500KB (approx 512,000 characters) to remain safely within Firestore's 1MB document size limit
-    const chunkSize = 500 * 1024;
-    const chunks: string[] = [];
-    for (let i = 0; i < base64Data.length; i += chunkSize) {
-      chunks.push(base64Data.substring(i, i + chunkSize));
-    }
+    // Limit chunk size to stay safely within Firestore's 1MB limit.
+    // Base64 encoding causes 4 characters for every 3 bytes (33% overhead).
+    // An 800KB base64 string is perfectly safe and won't exceed 1MB document size.
+    const maxSingleDocLength = 750 * 1024; // 750KB limit
 
     if (db) {
       const docRef = doc(db, 'file_backups', safeName);
-      await setDoc(docRef, {
-        fileName: safeName,
-        fileType,
-        chunks,
-        uploadedAt: new Date().toISOString()
-      });
-      console.log(`[FileBackup System] 🛡️ Permanent cloud backup created in Firestore: ${safeName} (${chunks.length} chunks saved).`);
+      
+      if (base64Data.length <= maxSingleDocLength) {
+        // Save in a single document for simplicity and performance
+        await setDoc(docRef, {
+          fileName: safeName,
+          fileType,
+          chunks: [base64Data],
+          isMultipart: false,
+          uploadedAt: new Date().toISOString()
+        });
+        console.log(`[FileBackup System] 🛡️ Permanent cloud backup created in Firestore: ${safeName} (Single document).`);
+      } else {
+        // Multipart chunking for files larger than 750KB
+        const chunkSize = 500 * 1024; // 500KB chunks
+        const chunks: string[] = [];
+        for (let i = 0; i < base64Data.length; i += chunkSize) {
+          chunks.push(base64Data.substring(i, i + chunkSize));
+        }
+
+        console.log(`[FileBackup System] 📦 File "${safeName}" is large (${base64Data.length} chars base64). Chunking into ${chunks.length} parts to bypass Firestore 1MB limits...`);
+
+        // Write master document first
+        await setDoc(docRef, {
+          fileName: safeName,
+          fileType,
+          isMultipart: true,
+          chunkCount: chunks.length,
+          uploadedAt: new Date().toISOString()
+        });
+
+        // Write chunk documents to a subcollection
+        for (let i = 0; i < chunks.length; i++) {
+          const chunkDocRef = doc(db, 'file_backups', safeName, 'file_chunks', `chunk_${i}`);
+          await setDoc(chunkDocRef, {
+            index: i,
+            chunk: chunks[i]
+          });
+        }
+        console.log(`[FileBackup System] 🛡️ Multipart permanent cloud backup created in Firestore: ${safeName} (${chunks.length} chunks saved in subcollection).`);
+      }
     }
   } catch (err) {
     console.error(`[FileBackup System] Failed to create cloud backup for ${safeName}:`, err);
@@ -3257,14 +3290,41 @@ export async function syncAndRestoreMissingUploadsFromFirestore(): Promise<void>
       const localPath = path.join(uploadsDir, fileName);
       if (!fs.existsSync(localPath) || fs.statSync(localPath).size === 0) {
         console.log(`[FileBackup System] 🚨 File "${fileName}" is missing from local disk. Recovering from cloud...`);
-        const chunks = data.chunks || [];
-        if (chunks.length > 0) {
-          const base64Combined = chunks.join('');
-          const fileBuffer = Buffer.from(base64Combined, 'base64');
+        
+        let fileBuffer: Buffer | null = null;
+        
+        if (data.isMultipart) {
+          console.log(`[FileBackup System] Multipart file recovery for "${fileName}" (${data.chunkCount} chunks expected)...`);
+          try {
+            const chunksSnap = await runWithTimeout(getDocs(collection(db, 'file_backups', fileName, 'file_chunks')), 15000);
+            const chunkDocs: { index: number, chunk: string }[] = [];
+            chunksSnap.forEach(cSnap => {
+              chunkDocs.push(cSnap.data() as any);
+            });
+            
+            // Sort chunks by index ascending
+            chunkDocs.sort((a, b) => a.index - b.index);
+            
+            const base64Combined = chunkDocs.map(c => c.chunk).join('');
+            if (base64Combined.length > 0) {
+              fileBuffer = Buffer.from(base64Combined, 'base64');
+            }
+          } catch (chunkErr) {
+            console.error(`[FileBackup System] Failed to fetch chunks for multipart file "${fileName}":`, chunkErr);
+          }
+        } else {
+          const chunks = data.chunks || [];
+          if (chunks.length > 0) {
+            const base64Combined = chunks.join('');
+            fileBuffer = Buffer.from(base64Combined, 'base64');
+          }
+        }
+
+        if (fileBuffer) {
           fs.writeFileSync(localPath, fileBuffer);
           console.log(`[FileBackup System] ✅ File "${fileName}" successfully restored physically to local uploads (${fileBuffer.length} bytes).`);
         } else {
-          console.warn(`[FileBackup System] Backup file "${fileName}" has no chunks inside Firestore.`);
+          console.warn(`[FileBackup System] Backup file "${fileName}" could not be restored (empty data).`);
         }
       }
     }
@@ -3282,8 +3342,12 @@ export async function syncAndRestoreMissingUploadsFromFirestore(): Promise<void>
       
       if (!cloudFilesMap.has(file)) {
         console.log(`[FileBackup System] 🛡️ File "${file}" exists locally but not in cloud backup. Backing up to Firestore...`);
-        await backupFileToFirestore(file, localPath);
-        autoBackupCount++;
+        try {
+          await backupFileToFirestore(file, localPath);
+          autoBackupCount++;
+        } catch (backupSingleErr) {
+          console.error(`[FileBackup System] Failed background auto-backup for file "${file}":`, backupSingleErr);
+        }
       }
     }
 
@@ -3295,6 +3359,85 @@ export async function syncAndRestoreMissingUploadsFromFirestore(): Promise<void>
 
   } catch (err) {
     console.error('[FileBackup System] Error executing storage synchronization:', err);
+  }
+}
+
+// --- MEDIA LIBRARY STORAGE METHODS ---
+
+// Get all media library items
+export async function getMediaItems(): Promise<MediaItem[]> {
+  // Check in-memory cache first
+  if (dbCache.media && (Date.now() - dbCache.media.timestamp < CACHE_TTL_MS)) {
+    return dbCache.media.data;
+  }
+
+  if (checkCloudStatus()) {
+    try {
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'media_library')), 8000);
+      const items: MediaItem[] = [];
+      snapshot.forEach(docSnap => {
+        items.push(docSnap.data() as MediaItem);
+      });
+
+      // Sort by uploadedAt descending (newest first)
+      items.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+
+      // Update in-memory cache
+      dbCache.media = { data: items, timestamp: Date.now() };
+
+      // Sync and warm the local cache file
+      safeWriteJsonSync(MEDIA_FILE, items);
+
+      return items;
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to fetch media items from cloud, falling back to local files:', err);
+      handleCloudError(err);
+    }
+  }
+
+  const items = safeReadJsonSync<MediaItem[]>(MEDIA_FILE, []);
+  items.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+  dbCache.media = { data: items, timestamp: Date.now() };
+  return items;
+}
+
+// Save all media library items or update them
+export async function saveMediaItems(items: MediaItem[]): Promise<void> {
+  // Sort descending by default
+  items.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+
+  // Update cache
+  dbCache.media = { data: items, timestamp: Date.now() };
+
+  // Save to local file
+  safeWriteJsonSync(MEDIA_FILE, items);
+
+  if (checkCloudStatus()) {
+    try {
+      const batch = writeBatch(db);
+      items.forEach(item => {
+        const docRef = doc(db, 'media_library', item.id);
+        batch.set(docRef, cleanForFirestore(item));
+      });
+      await runWithTimeout(batch.commit(), 8000);
+
+      // Delete any removed media documents from cloud
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'media_library')), 8000);
+      const deleteBatch = writeBatch(db);
+      let hasDeletes = false;
+      snapshot.forEach(docSnap => {
+        if (!items.some(item => item.id === docSnap.id)) {
+          deleteBatch.delete(docSnap.ref);
+          hasDeletes = true;
+        }
+      });
+      if (hasDeletes) {
+        await runWithTimeout(deleteBatch.commit(), 8000);
+      }
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to sync media library to cloud:', err);
+      handleCloudError(err);
+    }
   }
 }
 

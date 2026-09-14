@@ -947,209 +947,281 @@ export default function LeadList({
     <div className="space-y-4" id="cgp-spreadsheet-explorer">
       
       {/* Search, Buckets, and Filters Control Panel */}
-      <div className="flex flex-col xl:flex-row gap-4 items-stretch xl:items-center justify-between bg-slate-850 p-5 rounded-2xl border border-slate-750 shadow-lg">
+      <div className="bg-slate-850 p-5 rounded-2xl border border-slate-750 shadow-lg space-y-4">
         
-        {/* Left section: Search & bucket switcher */}
-        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center w-full xl:w-auto">
-          {/* Search Box */}
-          <div className="relative w-full sm:w-72 text-left">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Search Name, Phone, Origin, Position..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-1.5 text-xs rounded-lg border border-slate-400 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-purple bg-white dark:bg-slate-950 text-emerald-800 dark:text-emerald-300 placeholder-slate-400 dark:placeholder-slate-500 font-bold"
-            />
+        {/* Row 1: Search & Action Buttons Header */}
+        <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between">
+          
+          {/* Left: Search Box & Private seat indicator */}
+          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center flex-1">
+            <div className="relative w-full sm:w-80 text-left">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Search Name, Phone, Origin, Position..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-1.5 text-xs rounded-lg border border-slate-400 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-purple bg-white dark:bg-slate-950 text-emerald-800 dark:text-emerald-300 placeholder-slate-400 dark:placeholder-slate-500 font-bold"
+              />
+            </div>
+
+            {userRole === 'agent' && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-800 rounded-xl text-[10px] font-black tracking-wider uppercase select-none shadow-sm shrink-0">
+                <span>🔒 CO-ORDINATOR PRIVATE SEAT ({filteredLeads.length} Contacts)</span>
+              </div>
+            )}
           </div>
 
-          {/* Sub Agent Bucket Selector Toggle */}
-          {userRole === 'agent' && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-800 rounded-xl text-[10px] font-black tracking-wider uppercase select-none shadow-sm">
-              <span>🔒 CO-ORDINATOR PRIVATE SEAT ({filteredLeads.length} Contacts)</span>
-            </div>
-          )}
+          {/* Right: Quick Action Buttons flex row */}
+          <div className="flex flex-wrap items-center gap-2 justify-start lg:justify-end shrink-0">
+            {/* Interactive G-Sheet Mode Toggle! */}
+            <button
+              type="button"
+              onClick={() => setIsInlineEdit(!isInlineEdit)}
+              className={`text-xs font-black px-3.5 py-1.5 rounded-lg transition-all border flex items-center gap-1.5 cursor-pointer shadow-3xs ${
+                isInlineEdit 
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' 
+                  : 'bg-slate-850 text-slate-300 border-slate-750 hover:bg-slate-800/80'
+              }`}
+              title="Enable fast double-click spreadsheet typing directly in cells"
+            >
+              <span>⚡ Grid Quick-Edit</span>
+              <span className={`h-2 w-2 rounded-full ${isInlineEdit ? 'bg-white animate-pulse' : 'bg-emerald-500'}`} />
+            </button>
+
+            {/* AI Cohort Analysis Report Trigger */}
+            <button
+              type="button"
+              onClick={handleGenerateAIReport}
+              disabled={isAnalyzing || filteredLeads.length === 0}
+              className="text-xs font-black px-3.5 py-1.5 bg-purple-950/20 hover:bg-purple-950/40 text-accent-purple border border-purple-900/35 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-3xs"
+              title="Run Gemini AI Strategic Analysis on current cohort"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-accent-purple animate-pulse" />
+              <span>💡 AI Co-pilot Report</span>
+            </button>
+
+            {/* Export CSV Button */}
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              disabled={filteredLeads.length === 0 || isExporting}
+              className="text-xs font-black px-3.5 py-1.5 bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-3xs"
+              title="Export filtered directory to .CSV"
+            >
+              <Download className="h-3.5 w-3.5 text-slate-400" />
+              <span>📄 Export CSV</span>
+            </button>
+
+            {/* Export Filtered XLSX Button */}
+            <button
+              type="button"
+              onClick={handleExportXLSX}
+              disabled={filteredLeads.length === 0 || isExporting}
+              className="text-xs font-black px-3.5 py-1.5 bg-emerald-950/20 hover:bg-emerald-950/40 text-emerald-400 border border-emerald-900/30 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-3xs"
+              title="Export filtered directory (all pages) to Microsoft Excel .XLSX"
+            >
+              <Download className="h-3.5 w-3.5 text-emerald-500" />
+              <span>{isExporting ? '⏳ Exporting...' : '📊 Export XLSX'}</span>
+            </button>
+
+            {/* Whole Database Backup XLSX Button - 100% Complete Multi-Sheet Excel */}
+            <button
+              type="button"
+              onClick={handleDownloadWholeBackupXLSX}
+              className="text-xs font-black px-3.5 py-1.5 bg-gradient-to-r from-blue-900/40 to-indigo-900/40 hover:from-blue-900/60 hover:to-indigo-900/60 text-cyan-300 border border-cyan-500/40 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-md hover:shadow-cyan-900/30"
+              title="Download Complete Whole CRM Database in multi-sheet XLSX (All candidates, chats, tasks, timeline, jobs, coordinators)"
+            >
+              <Download className="h-3.5 w-3.5 text-cyan-400 animate-bounce" />
+              <span className="font-extrabold tracking-wide">📦 Whole Backup (.XLSX)</span>
+            </button>
+
+            {/* Bulk Enrollment Button - Admin only */}
+            {userRole === 'admin' && (
+              <button
+                type="button"
+                onClick={() => setIsImportOpen(!isImportOpen)}
+                className={`text-xs font-black px-3.5 py-1.5 border rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-3xs ${
+                  isImportOpen 
+                    ? 'bg-accent-purple text-white border-purple-600 shadow-md font-extrabold' 
+                    : 'bg-slate-850 text-purple-400 border-slate-750 hover:bg-slate-800 font-extrabold'
+                }`}
+                title="Bulk import candidates from XLSX or CSV"
+              >
+                <UploadCloud className="h-3.5 w-3.5 text-accent-purple" />
+                <span>📥 Bulk Enrollment</span>
+              </button>
+            )}
+          </div>
+
         </div>
 
-        {/* Right Section: Filters & Grid Quick-Edit mode toggle */}
-        <div className="flex flex-wrap gap-2.5 items-center w-full xl:w-auto justify-start xl:justify-end">
-          <div className="flex items-center gap-1 text-[10px] font-black text-black dark:text-slate-100 uppercase tracking-widest leading-none mr-1 select-none">
-            <Filter className="h-3.5 w-3.5 text-black dark:text-slate-100" /> DIRECTORY FILTERS:
+        {/* Divider line between Search & Actions Row and Filters Row */}
+        <div className="border-t border-slate-700/60 dark:border-slate-800/80 my-1" />
+
+        {/* Row 2: Directory Filters Grid section */}
+        <div className="space-y-3 text-left">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-[10px] font-black text-black dark:text-slate-100 uppercase tracking-widest leading-none select-none">
+              <Filter className="h-3.5 w-3.5 text-black dark:text-slate-100" /> DIRECTORY FILTERS ({filteredLeads.length} Matches):
+            </div>
+            
+            {/* Reset All Filters button if any are active */}
+            {(countryFilter !== 'All' || coordinatorFilter !== 'All' || projectFilter !== 'All' || positionFilter !== 'All' || tagFilter !== 'All' || fitScoreFilter !== 'All' || genderFilter !== 'All' || remarksFilter !== 'All' || dateFilter !== 'All') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCountryFilter('All');
+                  setCoordinatorFilter('All');
+                  setProjectFilter('All');
+                  setPositionFilter('All');
+                  setTagFilter('All');
+                  setFitScoreFilter('All');
+                  setGenderFilter('All');
+                  setRemarksFilter('All');
+                  setDateFilter('All');
+                  setCustomStartDate('');
+                  setCustomEndDate('');
+                }}
+                className="text-[10px] font-black text-red-500 dark:text-red-400 hover:text-red-600 uppercase tracking-widest flex items-center gap-1.5 bg-red-100/10 dark:bg-red-950/20 px-3 py-1.5 rounded-xl cursor-pointer transition-all border border-red-500/25 active:scale-95"
+              >
+                ✕ Clear All Filters
+              </button>
+            )}
           </div>
 
-          {/* Country filter */}
-          <SearchableSelect
-            value={countryFilter}
-            onChange={setCountryFilter}
-            options={countryOptions}
-            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
-          />
+          {/* Filters Responsive Grid - 9 Filters total */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2.5 w-full">
+            
+            {/* Country filter */}
+            <div className="w-full">
+              <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Country</label>
+              <SearchableSelect
+                value={countryFilter}
+                onChange={setCountryFilter}
+                options={countryOptions}
+                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+              />
+            </div>
 
-          {/* Coordinator Filter - only in Admin View */}
-          {userRole === 'admin' && (
-            <SearchableSelect
-              value={coordinatorFilter}
-              onChange={setCoordinatorFilter}
-              options={coordinatorOptions}
-              className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/80 hover:bg-emerald-100/80 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/60 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
-            />
-          )}
+            {/* Coordinator Filter - only in Admin View */}
+            <div className="w-full">
+              <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Coordinator</label>
+              {userRole === 'admin' ? (
+                <SearchableSelect
+                  value={coordinatorFilter}
+                  onChange={setCoordinatorFilter}
+                  options={coordinatorOptions}
+                  className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/80 hover:bg-emerald-100/80 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/60 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+                />
+              ) : (
+                <div className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-dashed border-slate-700 bg-slate-900/10 text-slate-600 font-extrabold select-none truncate">
+                  MY ASSIGNED
+                </div>
+              )}
+            </div>
 
-          {/* Hiring Project filter */}
-          <SearchableSelect
-            value={projectFilter}
-            onChange={setProjectFilter}
-            options={projectOptions}
-            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
-          />
+            {/* Hiring Project filter */}
+            <div className="w-full">
+              <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Project</label>
+              <SearchableSelect
+                value={projectFilter}
+                onChange={setProjectFilter}
+                options={projectOptions}
+                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+              />
+            </div>
 
-          {/* Target Job Position Filter */}
-          <SearchableSelect
-            value={positionFilter}
-            onChange={setPositionFilter}
-            options={positionOptions}
-            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
-          />
+            {/* Target Job Position Filter */}
+            <div className="w-full">
+              <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Position</label>
+              <SearchableSelect
+                value={positionFilter}
+                onChange={setPositionFilter}
+                options={positionOptions}
+                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs animate-fade-in"
+              />
+            </div>
 
-          {/* Tags Filter Dropdown */}
-          <SearchableSelect
-            value={tagFilter}
-            onChange={setTagFilter}
-            options={tagOptions}
-            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
-          />
+            {/* Tags Filter Dropdown */}
+            <div className="w-full">
+              <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Tag</label>
+              <SearchableSelect
+                value={tagFilter}
+                onChange={setTagFilter}
+                options={tagOptions}
+                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
+              />
+            </div>
 
-          {/* Fit score filter */}
-          <SearchableSelect
-            value={fitScoreFilter}
-            onChange={setFitScoreFilter}
-            options={fitScoreOptions}
-            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
-          />
+            {/* Fit score filter */}
+            <div className="w-full">
+              <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Fit Score</label>
+              <SearchableSelect
+                value={fitScoreFilter}
+                onChange={setFitScoreFilter}
+                options={fitScoreOptions}
+                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
+              />
+            </div>
 
-          {/* Gender Filter */}
-          <SearchableSelect
-            value={genderFilter}
-            onChange={setGenderFilter}
-            options={genderOptions}
-            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
-          />
+            {/* Gender Filter */}
+            <div className="w-full">
+              <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Gender</label>
+              <SearchableSelect
+                value={genderFilter}
+                onChange={setGenderFilter}
+                options={genderOptions}
+                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+              />
+            </div>
 
-          {/* Remarks wise Filter */}
-          <SearchableSelect
-            value={remarksFilter}
-            onChange={setRemarksFilter}
-            options={remarksOptions}
-            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
-          />
+            {/* Remarks wise Filter */}
+            <div className="w-full">
+              <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Remarks Status</label>
+              <SearchableSelect
+                value={remarksFilter}
+                onChange={setRemarksFilter}
+                options={remarksOptions}
+                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
+              />
+            </div>
 
-          {/* Date Wise Filter */}
-          <SearchableSelect
-            value={dateFilter}
-            onChange={setDateFilter}
-            options={dateOptions}
-            className="text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
-          />
+            {/* Date Wise Filter */}
+            <div className="w-full">
+              <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Date Period</label>
+              <SearchableSelect
+                value={dateFilter}
+                onChange={setDateFilter}
+                options={dateOptions}
+                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+              />
+            </div>
 
+          </div>
+
+          {/* Date Picker Custom inputs rendered beautifully underneath filter grid */}
           {dateFilter === 'Custom' && (
-            <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-750 p-1 px-2 rounded-lg animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 p-2.5 max-w-md rounded-2xl animate-in fade-in zoom-in-95 mt-2 shadow-inner">
+              <span className="text-[10px] text-slate-400 font-black tracking-wide">FROM:</span>
               <input
                 type="date"
                 value={customStartDate}
                 onChange={(e) => setCustomStartDate(e.target.value)}
-                className="text-[10px] font-bold text-slate-300 bg-transparent border-none focus:outline-none cursor-pointer [color-scheme:dark]"
+                className="text-xs font-extrabold text-emerald-800 dark:text-emerald-300 bg-transparent border-none focus:outline-none cursor-pointer [color-scheme:dark]"
                 style={{ colorScheme: 'dark' }}
                 title="Start Date"
               />
-              <span className="text-[10px] text-slate-500 font-black">TO</span>
+              <span className="text-[10px] text-slate-500 font-black font-mono">TO</span>
               <input
                 type="date"
                 value={customEndDate}
                 onChange={(e) => setCustomEndDate(e.target.value)}
-                className="text-[10px] font-bold text-slate-300 bg-transparent border-none focus:outline-none cursor-pointer [color-scheme:dark]"
+                className="text-xs font-extrabold text-emerald-800 dark:text-emerald-300 bg-transparent border-none focus:outline-none cursor-pointer [color-scheme:dark]"
                 style={{ colorScheme: 'dark' }}
                 title="End Date"
               />
             </div>
-          )}
-
-          {/* Interactive G-Sheet Mode Toggle! */}
-          <button
-            type="button"
-            onClick={() => setIsInlineEdit(!isInlineEdit)}
-            className={`text-xs font-black px-3.5 py-1.5 rounded-lg transition-all border flex items-center gap-1.5 cursor-pointer shadow-3xs ${
-              isInlineEdit 
-                ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' 
-                : 'bg-slate-850 text-slate-300 border-slate-750 hover:bg-slate-800/80'
-            }`}
-            title="Enable fast double-click spreadsheet typing directly in cells"
-          >
-            <span>⚡ Grid Quick-Edit</span>
-            <span className={`h-2 w-2 rounded-full ${isInlineEdit ? 'bg-white animate-pulse' : 'bg-emerald-500'}`} />
-          </button>
-
-          {/* AI Cohort Analysis Report Trigger */}
-          <button
-            type="button"
-            onClick={handleGenerateAIReport}
-            disabled={isAnalyzing || filteredLeads.length === 0}
-            className="text-xs font-black px-3.5 py-1.5 bg-purple-950/20 hover:bg-purple-950/40 text-accent-purple border border-purple-900/35 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-3xs"
-            title="Run Gemini AI Strategic Analysis on current cohort"
-          >
-            <Sparkles className="h-3.5 w-3.5 text-accent-purple animate-pulse" />
-            <span>💡 AI Co-pilot Report</span>
-          </button>
-
-          {/* Export CSV Button */}
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            disabled={filteredLeads.length === 0 || isExporting}
-            className="text-xs font-black px-3.5 py-1.5 bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-3xs"
-            title="Export filtered directory to .CSV"
-          >
-            <Download className="h-3.5 w-3.5 text-slate-400" />
-            <span>📄 Export CSV</span>
-          </button>
-
-          {/* Export Filtered XLSX Button */}
-          <button
-            type="button"
-            onClick={handleExportXLSX}
-            disabled={filteredLeads.length === 0 || isExporting}
-            className="text-xs font-black px-3.5 py-1.5 bg-emerald-950/20 hover:bg-emerald-950/40 text-emerald-400 border border-emerald-900/30 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-3xs"
-            title="Export filtered directory (all pages) to Microsoft Excel .XLSX"
-          >
-            <Download className="h-3.5 w-3.5 text-emerald-500" />
-            <span>{isExporting ? '⏳ Exporting...' : '📊 Export XLSX'}</span>
-          </button>
-
-          {/* Whole Database Backup XLSX Button - 100% Complete Multi-Sheet Excel */}
-          <button
-            type="button"
-            onClick={handleDownloadWholeBackupXLSX}
-            className="text-xs font-black px-3.5 py-1.5 bg-gradient-to-r from-blue-900/40 to-indigo-900/40 hover:from-blue-900/60 hover:to-indigo-900/60 text-cyan-300 border border-cyan-500/40 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-md hover:shadow-cyan-900/30"
-            title="Download Complete Whole CRM Database in multi-sheet XLSX (All candidates, chats, tasks, timeline, jobs, coordinators)"
-          >
-            <Download className="h-3.5 w-3.5 text-cyan-400 animate-bounce" />
-            <span className="font-extrabold tracking-wide">📦 Whole Backup (.XLSX)</span>
-          </button>
-
-          {/* Bulk Enrollment Button - Admin only */}
-          {userRole === 'admin' && (
-            <button
-              type="button"
-              onClick={() => setIsImportOpen(!isImportOpen)}
-              className={`text-xs font-black px-3.5 py-1.5 border rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-3xs ${
-                isImportOpen 
-                  ? 'bg-accent-purple text-white border-purple-600 shadow-md font-extrabold' 
-                  : 'bg-slate-850 text-purple-400 border-slate-750 hover:bg-slate-800 font-extrabold'
-              }`}
-              title="Bulk import candidates from XLSX or CSV"
-            >
-              <UploadCloud className="h-3.5 w-3.5 text-accent-purple" />
-              <span>📥 Bulk Enrollment</span>
-            </button>
           )}
         </div>
       </div>

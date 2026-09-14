@@ -96,6 +96,7 @@ export interface Lead {
   docResume?: boolean;
   resumeUrl?: string;
   resumeName?: string;
+  cvTextContent?: string;
   deletedDocuments?: DeletedDocument[];
   docOfficeVisited?: boolean;
   docOthers?: boolean;
@@ -203,6 +204,16 @@ export interface WhatsAppAutoReplySettings {
   enabled: boolean;
   text: string;
   delay: number; // in seconds
+}
+
+export interface MediaItem {
+  id: string;
+  name: string;
+  url: string;
+  type: 'image' | 'audio' | 'video' | 'file';
+  size: number;
+  uploadedBy: string;
+  uploadedAt: string;
 }
 
 

@@ -557,6 +557,22 @@ Other details: ${selected.otherTerms || 'None'}`;
                             {match.experience || 'Not specified'}
                           </span>
                         </div>
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="text-slate-500 font-bold">CV Analytics Status:</span>
+                          {match.cvTextContent ? (
+                            <span className="text-accent-emerald font-extrabold flex items-center gap-0.5 font-mono text-[9px] bg-emerald-950/40 border border-emerald-900/30 px-1.5 py-0.5 rounded">
+                              <CheckCircle className="h-2.5 w-2.5 text-accent-emerald" /> AI PARSED ✓
+                            </span>
+                          ) : match.resumeUrl ? (
+                            <span className="text-accent-purple font-extrabold flex items-center gap-0.5 font-mono text-[9px] bg-purple-950/40 border border-purple-900/30 px-1.5 py-0.5 rounded">
+                              <RefreshCw className="h-2.5 w-2.5 animate-spin text-accent-purple" /> QUEUED / SCANNING
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 font-bold text-[9px] bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded font-mono">
+                              NO CV ATTACHED
+                            </span>
+                          )}
+                        </div>
                         {(isAssigned || match.project) && (
                           <div className="flex justify-between items-center text-[10px]">
                             <span className="text-slate-500 font-bold">Current project:</span>

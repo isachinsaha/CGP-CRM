@@ -8,7 +8,7 @@ import { Lead, LeadStage, StatSummary, Coordinator, WhatsAppTemplate } from './t
 import { 
   LayoutGrid, Table, BarChart3, Briefcase, ShieldAlert, Sparkles, 
   RefreshCw, MessageSquare, Plus, HelpCircle, Layers, Lock, User, Check, X, Shield,
-  LogOut, Users, UserCheck, Sun, Moon, PiggyBank, Menu, ChevronRight, Settings, ChevronDown, Download, Trash2
+  LogOut, Users, UserCheck, Sun, Moon, PiggyBank, Menu, ChevronRight, Settings, ChevronDown, Download, Trash2, Image
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -31,11 +31,12 @@ import ImportantUpdatesBar from './components/ImportantUpdatesBar.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
 import { BackupManagerModal } from './components/BackupManagerModal.tsx';
 import RecycleBinModal from './components/RecycleBinModal.tsx';
+import MediaLibrary from './components/MediaLibrary.tsx';
 
 // Import local assets
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'board' | 'list' | 'messages' | 'analytics' | 'jobs' | 'ai-matcher' | 'wallet'>('board');
+  const [activeTab, setActiveTab] = useState<'board' | 'list' | 'messages' | 'analytics' | 'jobs' | 'ai-matcher' | 'wallet' | 'media'>('board');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const selectedLeadRef = useRef<Lead | null>(null);
@@ -629,6 +630,7 @@ export default function App() {
           { id: 'ai-matcher', label: 'AI Matcher', icon: Sparkles },
           { id: 'jobs', label: 'Active Jobs', icon: Briefcase },
           { id: 'wallet', label: 'Incentive Wallet', icon: PiggyBank },
+          { id: 'media', label: 'Media Library', icon: Image },
         ];
 
         return (
@@ -980,6 +982,12 @@ export default function App() {
                   onUpdateLead={async () => { await pullCrmData(true); }}
                   userRole={userRole}
                 />
+              </div>
+            )}
+
+            {activeTab === 'media' && (
+              <div key="media-tab" className="flex-1 flex flex-col min-h-0">
+                <MediaLibrary currentUser={currentUser} />
               </div>
             )}
           </ErrorBoundary>

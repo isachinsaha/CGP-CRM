@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Lead, Message, WhatsAppTemplate } from '../types.ts';
 import { 
   Send, MessageSquare, ExternalLink, Sparkles, Check, CheckCheck, 
   Clock, RefreshCw, FileText, Calendar, Phone, PhoneCall, Copy, 
   ChevronDown, ChevronUp, Bot, UserCheck, AlertCircle, Info, Plus, Paperclip, Zap,
-  CornerUpLeft, Smile, X
+  CornerUpLeft, Smile, X, Image, Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatPhoneForWhatsApp, replaceTemplatePlaceholders, resolveTemplateVariable } from '../server/whatsapp.ts';
+import MediaLibrary from './MediaLibrary.tsx';
 
 interface LeadWhatsAppChatProps {
   lead: Lead;
@@ -80,6 +81,16 @@ export default function LeadWhatsAppChat({
   });
 
   const [activeSuggestionField, setActiveSuggestionField] = useState<{ type: 'config' | 'history', key: string } | null>(null);
+
+  const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false);
+  const currentUser = useMemo(() => {
+    try {
+      const saved = localStorage.getItem('cgp_crm_session');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   const saveParamToCache = (paramKey: string, val: string) => {
     if (!val || !val.trim()) return;
@@ -880,7 +891,7 @@ export default function LeadWhatsAppChat({
                         className="p-1.5 rounded-full bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 text-[#54656f] dark:text-[#8696a0] transition-colors cursor-pointer shrink-0"
                         title="Download File"
                       >
-                        <ChevronDown className="h-4 w-4 rotate-180" />
+                        <Download className="h-4 w-4" />
                       </a>
                     </div>
                   )}
@@ -1828,6 +1839,16 @@ export default function LeadWhatsAppChat({
                     <Paperclip className="h-5.5 w-5.5 rotate-45" />
                   )}
                 </button>
+
+                {/* Creative Media Library */}
+                <button
+                  type="button"
+                  onClick={() => setIsMediaLibraryOpen(true)}
+                  className="p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#8696a0]"
+                  title="Creative Media Library"
+                >
+                  <Image className="h-5.5 w-5.5" />
+                </button>
               </div>
 
               {/* Textarea Input Field */}
@@ -1869,6 +1890,40 @@ export default function LeadWhatsAppChat({
           </>
         )}
       </div>
+
+      {/* AiSensy-Style Creative Media Library Modal */}
+      {isMediaLibraryOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-[100] p-4 text-left">
+          <div className="bg-white dark:bg-[#111b21] rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="px-6 py-4.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-[#111b21]">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5.5 w-5.5 text-[#00a884]" />
+                <h3 className="text-lg font-black tracking-tight text-slate-900 dark:text-white">Media Library</h3>
+              </div>
+              <button 
+                onClick={() => setIsMediaLibraryOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white font-black text-xl p-1 px-2.5 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            
+            {/* Modal Content */}
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+              <MediaLibrary 
+                currentUser={currentUser} 
+                isModal={true} 
+                onSelect={(url) => {
+                  const fullUrl = url.startsWith('http') ? url : `${window.location.origin}${url}`;
+                  setInputText(prev => prev ? `${prev}\n${fullUrl}` : fullUrl);
+                  setIsMediaLibraryOpen(false);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -1037,6 +1037,15 @@ export default function LeadBoard({
                   if (isSelected) iconColor = 'text-rose-600 dark:text-rose-400';
                 }
 
+                let themeColorHex = '#64748b'; // default slate
+                if (col.id === 'new') themeColorHex = '#38bdf8'; // sky-400 (sky blue)
+                else if (col.id === 'in_discussion' || col.id === 'negotiating') themeColorHex = '#eab308'; // yellow/amber
+                else if (col.id === 'strong_opportunity') themeColorHex = '#c084fc'; // purple/amethyst
+                else if (col.id === 'office_visited' || col.id === 'proposal') themeColorHex = '#818cf8'; // indigo/violet
+                else if (col.id === 'won') themeColorHex = '#10b981'; // emerald green
+                else if (col.id === 'cold_leads' || col.id === 'rotations') themeColorHex = '#3b82f6'; // royal blue
+                else if (col.id === 'lost') themeColorHex = '#f43f5e'; // rose/red
+
                 return (
                   <button
                     key={col.id}
@@ -1098,6 +1107,28 @@ export default function LeadBoard({
                         {isSelected ? '● Selected' : 'Click to view'}
                       </p>
                     </div>
+
+                    {/* Elegant background sparkline graph matching the bucket theme */}
+                    <svg className="absolute bottom-0 left-0 w-full h-8 pointer-events-none opacity-25 dark:opacity-45 group-hover:opacity-40 dark:group-hover:opacity-85 transition-opacity z-0" viewBox="0 0 200 40" preserveAspectRatio="none">
+                      <defs>
+                        <linearGradient id={`grad-${col.id}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={themeColorHex} stopOpacity="0.4" />
+                          <stop offset="100%" stopColor={themeColorHex} stopOpacity="0.0" />
+                        </linearGradient>
+                      </defs>
+                      <path 
+                        d="M 0,38 L 70,38 Q 100,38 120,28 T 150,24 T 180,14 T 200,12 L 200,40 L 0,40 Z" 
+                        fill={`url(#grad-${col.id})`}
+                      />
+                      <path 
+                        d="M 0,38 L 70,38 Q 100,38 120,28 T 150,24 T 180,14 T 200,12" 
+                        fill="none" 
+                        stroke={themeColorHex} 
+                        strokeWidth="1.5" 
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
                   </button>
                 );
               })}
@@ -1107,9 +1138,9 @@ export default function LeadBoard({
             {selectedStage && (
               <div className="bg-slate-950/40 border border-emerald-600/35 dark:border-emerald-500/20 rounded-3xl p-6 shadow-3xs text-left space-y-6">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-slate-700 pb-4 gap-4">
-                  {/* Left Title, Stats AND Filters grouped beautifully with an increased generous gap */}
-                  <div className="flex flex-col md:flex-row md:items-center gap-14 md:gap-28 min-w-0 flex-1">
-                    <div>
+                  {/* Left Title, Stats AND Filters grouped beautifully with fully responsive layout */}
+                  <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 min-w-0 flex-1">
+                    <div className="shrink-0">
                       <h3 className="text-sm sm:text-base font-black text-slate-100 uppercase tracking-wide flex items-center gap-2">
                         📂 {COLUMNS.find(c => c.id === selectedStage || (selectedStage === 'negotiating' && c.id === 'in_discussion') || (selectedStage === 'proposal' && c.id === 'office_visited') || (selectedStage === 'rotations' && c.id === 'cold_leads'))?.title} Candidates
                       </h3>
@@ -1118,43 +1149,51 @@ export default function LeadBoard({
                       </p>
                     </div>
 
-                    {/* Inline Premium Filters next to title with a nice gap */}
-                    <div className="flex flex-wrap items-center gap-2.5">
+                    {/* Inline Premium Filters next to title in a responsive grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 xl:flex xl:flex-row gap-2.5 w-full xl:w-auto items-center">
                       {/* Country Filter */}
-                      <SearchableSelect
-                        value={boardCountryFilter}
-                        onChange={setBoardCountryFilter}
-                        options={searchableCountryOptions}
-                        className="text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs shrink-0"
-                        dropdownClassName="dark:bg-slate-950 border-slate-700 w-60"
-                      />
+                      <div className="w-full xl:w-auto">
+                        <SearchableSelect
+                          value={boardCountryFilter}
+                          onChange={setBoardCountryFilter}
+                          options={searchableCountryOptions}
+                          className="w-full text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs"
+                          dropdownClassName="dark:bg-slate-950 border-slate-700 w-60"
+                        />
+                      </div>
  
                       {/* Position Filter */}
-                      <SearchableSelect
-                        value={boardPositionFilter}
-                        onChange={setBoardPositionFilter}
-                        options={searchablePositionOptions}
-                        className="text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs shrink-0 max-w-[180px] truncate"
-                        dropdownClassName="dark:bg-slate-950 border-slate-700 w-64"
-                      />
+                      <div className="w-full xl:w-auto">
+                        <SearchableSelect
+                          value={boardPositionFilter}
+                          onChange={setBoardPositionFilter}
+                          options={searchablePositionOptions}
+                          className="w-full text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs truncate"
+                          dropdownClassName="dark:bg-slate-950 border-slate-700 w-64"
+                        />
+                      </div>
  
                       {/* Gender Filter */}
-                      <SearchableSelect
-                        value={boardGenderFilter}
-                        onChange={setBoardGenderFilter}
-                        options={searchableGenderOptions}
-                        className="text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs shrink-0"
-                        dropdownClassName="dark:bg-slate-950 border-slate-700 w-48"
-                      />
+                      <div className="w-full xl:w-auto">
+                        <SearchableSelect
+                          value={boardGenderFilter}
+                          onChange={setBoardGenderFilter}
+                          options={searchableGenderOptions}
+                          className="w-full text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs"
+                          dropdownClassName="dark:bg-slate-950 border-slate-700 w-48"
+                        />
+                      </div>
 
                       {/* Tags Filter */}
-                      <SearchableSelect
-                        value={boardTagFilter}
-                        onChange={setBoardTagFilter}
-                        options={searchableTagOptions}
-                        className="text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs shrink-0 max-w-[160px]"
-                        dropdownClassName="dark:bg-slate-950 border-slate-700 w-52"
-                      />
+                      <div className="w-full xl:w-auto">
+                        <SearchableSelect
+                          value={boardTagFilter}
+                          onChange={setBoardTagFilter}
+                          options={searchableTagOptions}
+                          className="w-full text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs"
+                          dropdownClassName="dark:bg-slate-950 border-slate-700 w-52"
+                        />
+                      </div>
 
                       {/* Reset Filters button if any are active */}
                       {(boardCountryFilter !== 'All' || boardPositionFilter !== 'All' || boardGenderFilter !== 'All' || boardTagFilter !== 'All') && (
@@ -1165,7 +1204,7 @@ export default function LeadBoard({
                             setBoardGenderFilter('All');
                             setBoardTagFilter('All');
                           }}
-                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-black rounded-xl transition cursor-pointer border border-slate-700"
+                          className="col-span-2 sm:col-span-4 xl:col-span-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-black rounded-xl transition cursor-pointer border border-slate-700 w-full xl:w-auto"
                         >
                           Reset
                         </button>
