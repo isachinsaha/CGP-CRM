@@ -559,22 +559,22 @@ export default function LeadList({
     const list = metaTags && metaTags.length > 0
       ? metaTags
       : [];
-    if (list.length === 0) {
-      const set = new Set<string>();
+    
+    const rawTags = [...list];
+    if (rawTags.length === 0) {
       leads.forEach(l => {
         if (l.tags && Array.isArray(l.tags)) {
           l.tags.forEach(t => {
-            if (t && t.trim()) set.add(t.trim());
+            if (t && t.trim()) rawTags.push(t.trim());
           });
         }
       });
-      return ['All', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
     }
     
     // Case-insensitive deduplicate
     const seen = new Set<string>();
     const deduplicated: string[] = [];
-    list.forEach(t => {
+    rawTags.forEach(t => {
       const lower = t.trim().toLowerCase();
       if (!seen.has(lower)) {
         seen.add(lower);

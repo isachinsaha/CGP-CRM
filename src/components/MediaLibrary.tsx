@@ -19,7 +19,7 @@ import { MediaItem } from '../types';
 
 interface MediaLibraryProps {
   currentUser?: { username: string; displayName?: string } | null;
-  onSelect?: (url: string) => void;
+  onSelect?: (url: string, item?: MediaItem) => void;
   isModal?: boolean;
 }
 
@@ -398,7 +398,7 @@ export default function MediaLibrary({ currentUser, onSelect, isModal = false }:
               return (
                 <div 
                   key={item.id}
-                  onClick={() => onSelect ? onSelect(item.url) : setPreviewItem(item)}
+                  onClick={() => onSelect ? onSelect(item.url, item) : setPreviewItem(item)}
                   className={`group relative flex flex-col bg-white dark:bg-[#111b21] rounded-xl overflow-hidden border border-slate-200/60 dark:border-slate-800/80 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md cursor-pointer ${
                     onSelect ? 'hover:ring-2 hover:ring-[#00a884]' : ''
                   }`}
@@ -595,7 +595,7 @@ export default function MediaLibrary({ currentUser, onSelect, isModal = false }:
                 {onSelect ? (
                   <button 
                     onClick={() => {
-                      onSelect(previewItem.url);
+                      onSelect(previewItem.url, previewItem);
                       setPreviewItem(null);
                     }}
                     className="flex items-center gap-2 bg-[#00a884] hover:bg-[#008f72] text-white font-bold px-4 py-2.5 rounded-xl text-sm"

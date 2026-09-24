@@ -208,7 +208,7 @@ let dbVerifying = false;
 
 // Helper to enforce timeouts on async Firestore promises so they never hang the server
 function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 30000): Promise<T> {
-  const actualTimeout = Math.max(30000, timeoutMs);
+  const actualTimeout = timeoutMs; // Allow short timeouts for rapid health-checks and responsive fallbacks
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`Firestore operation timed out after ${actualTimeout}ms`));
@@ -268,7 +268,7 @@ async function verifyDatabaseAccess(): Promise<boolean> {
     )) {
       console.warn(`[Firestore Client] Custom database "${currentDbId}" unavailable. Falling back to "(default)".`);
       try {
-        db = initializeFirestore(firebaseApp, {}, '(default)');
+        db = initializeFirestore(firebaseApp, { experimentalForceLongPolling: true }, '(default)');
         currentDbId = '(default)';
         const testRef = doc(db, 'metadata', 'test_connection');
         await runWithTimeout(getDoc(testRef), 10000);
@@ -405,7 +405,7 @@ function initFirestore() {
       };
       const app = initializeApp(firebaseConfig);
       firebaseApp = app;
-      db = initializeFirestore(app, {}, config.firestoreDatabaseId || '(default)');
+      db = initializeFirestore(app, { experimentalForceLongPolling: true }, config.firestoreDatabaseId || '(default)');
       currentDbId = config.firestoreDatabaseId || '(default)';
       console.log(`[Firestore Client] Initialized Firestore client for project "${config.projectId}" (Database ID: "${currentDbId}")`);
     } else {

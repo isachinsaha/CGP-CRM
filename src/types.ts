@@ -108,6 +108,9 @@ export interface Lead {
   isDeleted?: boolean;
   deletedAt?: string | null;
   assignedFrom?: string;
+  reactivationStatus?: 'sent' | 'replied' | 'qualified' | 'unqualified' | string;
+  lastContactedMonths?: number;
+  inactivityText?: string;
   tasks?: {
     id: string;
     title: string;

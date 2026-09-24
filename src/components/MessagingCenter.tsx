@@ -471,15 +471,33 @@ export default function MessagingCenter({
   const handleAddTag = (tagToAdd: string) => {
     const trimmed = tagToAdd.trim();
     if (!trimmed) return;
-    if (!leadFormData.tags.includes(trimmed)) {
-      const nextTags = [...leadFormData.tags, trimmed];
-      setLeadFormData(prev => ({ ...prev, tags: nextTags }));
-      if (onUpdateTagsList && tagsList && !tagsList.includes(trimmed)) {
-        onUpdateTagsList([...tagsList, trimmed]);
-      }
-      setTagAddedToast(`Tag added successfully !`);
+
+    const lowerVal = trimmed.toLowerCase();
+
+    // 1. Check if already exists on candidate case-insensitively
+    const hasTagOnCandidate = (leadFormData.tags || []).some(t => t.toLowerCase() === lowerVal);
+    if (hasTagOnCandidate) {
+      setTagAddedToast(`⚠️ Tag already exists on this candidate.`);
       setTimeout(() => setTagAddedToast(null), 3000);
+      setTagInput('');
+      setIsTagDropdownOpen(false);
+      return;
     }
+
+    // 2. Casing reconciliation: Match case-insensitively with global tagsList or existing tags
+    const activeTagsList = tagsList || DEFAULT_AISENSY_TAGS;
+    const existingGlobalMatch = activeTagsList.find(t => t.toLowerCase() === lowerVal);
+    const finalTag = existingGlobalMatch || trimmed;
+
+    const nextTags = [...(leadFormData.tags || []), finalTag];
+    setLeadFormData(prev => ({ ...prev, tags: nextTags }));
+
+    if (onUpdateTagsList && !activeTagsList.some(t => t.toLowerCase() === lowerVal)) {
+      onUpdateTagsList([...activeTagsList, finalTag]);
+    }
+
+    setTagAddedToast(`Tag added successfully !`);
+    setTimeout(() => setTagAddedToast(null), 3000);
     setTagInput('');
     setIsTagDropdownOpen(false);
   };
@@ -1624,13 +1642,13 @@ export default function MessagingCenter({
                                 }
                               }}
                               defaultValue=""
-                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-750 dark:border-slate-700 rounded-lg text-xs text-slate-100 dark:text-slate-300 font-medium focus:outline-hidden focus:border-emerald-500 cursor-pointer"
+                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-slate-300 font-medium focus:outline-hidden focus:border-emerald-500 cursor-pointer"
                             >
                               <option value="" disabled className="text-slate-400">Select & add tag...</option>
                               {tagsList
                                 .filter(t => !leadFormData.tags.includes(t))
                                 .map(t => (
-                                  <option key={t} value={t} className="bg-white dark:bg-slate-900 text-slate-100 dark:text-slate-100">{t}</option>
+                                  <option key={t} value={t} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200">{t}</option>
                                 ))}
                             </select>
                           </div>
@@ -1645,7 +1663,7 @@ export default function MessagingCenter({
                                   key={tag}
                                   type="button"
                                   onClick={() => handleAddTag(tag)}
-                                  className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 border border-slate-750 dark:border-slate-700 text-slate-100 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-300 font-bold transition-all cursor-pointer"
+                                  className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-300 font-bold transition-all cursor-pointer"
                                 >
                                   + {tag}
                                 </button>

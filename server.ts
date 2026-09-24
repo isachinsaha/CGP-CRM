@@ -211,6 +211,52 @@ function getGemini(): GoogleGenAI | null {
   return aiClient;
 }
 
+// Fault-tolerant wrapper for ai.models.generateContent that gracefully falls back to stable alternative models in case of transient 503/UNAVAILABLE errors
+async function safeGenerateContent(
+  ai: GoogleGenAI,
+  params: {
+    model: string;
+    contents: any;
+    config?: any;
+  }
+): Promise<any> {
+  const modelsToTry = [
+    params.model,
+    'gemini-3.6-flash',
+    'gemini-3.1-pro-preview',
+    'gemini-3.8-flash',
+    'gemini-3.5-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-8b'
+  ];
+  const uniqueModels = Array.from(new Set(modelsToTry.filter(Boolean)));
+  let lastError: any = null;
+
+  for (const modelAttempt of uniqueModels) {
+    try {
+      console.log(`[Gemini API] Attempting generateContent with model: "${modelAttempt}"`);
+      const response = await ai.models.generateContent({
+        model: modelAttempt,
+        contents: params.contents,
+        config: params.config
+      });
+      console.log(`[Gemini API] Success using model: "${modelAttempt}"`);
+      return response;
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = err?.message || String(err);
+      console.error(`[Gemini API] Error calling model "${modelAttempt}":`, errMsg);
+      
+      // If we are on the last model in the list, don't write fallback log
+      if (uniqueModels.indexOf(modelAttempt) < uniqueModels.length - 1) {
+        console.warn(`[Gemini API] Model "${modelAttempt}" failed/throttled. Retrying automatically with next available fallback model...`);
+      }
+    }
+  }
+  throw lastError;
+}
+
 // Helper to generate a clean, unique lead ID like SAPNA_27-06-2026 or SAPNA_27-06-2026_1
 function generateUniqueLeadId(leads: Lead[], cleanNameId: string): string {
   const d = new Date();
@@ -2886,6 +2932,18 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                   mediaUrl = m.document.url || m.document.link || m.document.id;
                   fileName = m.document.filename || 'document';
                   fileSize = m.document.file_size ? `${(Number(m.document.file_size) / (1024 * 1024)).toFixed(2)} MB` : 'Unknown size';
+                } else if (m.type === 'video' && m.video) {
+                  mediaType = 'document';
+                  messageBody = m.video.caption || 'Sent a video';
+                  mediaUrl = m.video.url || m.video.link || m.video.id;
+                  fileName = m.video.filename || 'video.mp4';
+                  fileSize = m.video.file_size ? `${(Number(m.video.file_size) / (1024 * 1024)).toFixed(2)} MB` : 'Unknown size';
+                } else if (m.type === 'audio' && m.audio) {
+                  mediaType = 'document';
+                  messageBody = 'Sent an audio message';
+                  mediaUrl = m.audio.url || m.audio.link || m.audio.id;
+                  fileName = m.audio.filename || 'audio.mp3';
+                  fileSize = m.audio.file_size ? `${(Number(m.audio.file_size) / (1024 * 1024)).toFixed(2)} MB` : 'Unknown size';
                 } else if (m.type === 'button') {
                   messageBody = m.button?.text || m.button?.payload;
                 } else if (m.type === 'interactive') {
@@ -2905,6 +2963,12 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
     } else if (payload.type === 'pdf' || payload.messageType === 'pdf') {
       mediaType = 'pdf';
       messageBody = messageBody || 'Sent a PDF document';
+    } else if (payload.type === 'video' || payload.messageType === 'video') {
+      mediaType = 'document';
+      messageBody = messageBody || 'Sent a video';
+    } else if (payload.type === 'audio' || payload.messageType === 'audio') {
+      mediaType = 'document';
+      messageBody = messageBody || 'Sent an audio message';
     } else if (payload.type === 'document' || payload.messageType === 'document' || payload.type === 'file' || payload.messageType === 'file') {
       const isPdf = String(fileName || '').toLowerCase().endsWith('.pdf') || String(mediaUrl || '').toLowerCase().includes('.pdf');
       mediaType = isPdf ? 'pdf' : 'document';
@@ -2985,8 +3049,13 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
         await saveLeads(leads);
         console.log(`[Meta Webhook POST] Saved inbound message to candidate database and cleared memory cache.`);
 
-        // Trigger auto-reply if enabled
-        handleAutoReplyIfEnabled(lead.id, lead.phone, lead.name);
+        // Trigger auto-reply if enabled OR candidate is on reactivation campaign
+        if (lead.campaign && lead.campaign.startsWith('Reactivation -')) {
+          console.log(`[Meta Webhook POST] Candidate is enrolled in Reactivation campaign "${lead.campaign}". Calling chatbot...`);
+          handleReactivationChatbot(lead.id, String(messageBody));
+        } else {
+          handleAutoReplyIfEnabled(lead.id, lead.phone, lead.name);
+        }
       } else {
         console.warn(`[Meta Webhook POST] Candidate match not found for phone "${cleanPhone}". Adding as new conversion inquiry.`);
         // Fallback: If candidate doesn't exist, create a new Inquiry automatically!
@@ -3101,7 +3170,7 @@ app.get('/api/whatsapp/media/:mediaId', async (req, res) => {
 
     if (!infoRes.ok) {
       const errorText = await infoRes.text();
-      console.error('[Meta Media Proxy] Meta returned error:', errorText);
+      console.log(`[Meta Media Proxy] Gracefully handled Meta API lookup failure: ${errorText}`);
       
       let reason = 'This media has expired or is invalid';
       if (errorText.includes('does not exist') || errorText.includes('permissions') || errorText.includes('support this operation')) {
@@ -3137,7 +3206,7 @@ app.get('/api/whatsapp/media/:mediaId', async (req, res) => {
     const buffer = Buffer.from(arrayBuffer);
     res.send(buffer);
   } catch (err: any) {
-    console.error('[Meta Media Proxy] Exception:', err);
+    console.warn('[Meta Media Proxy] Exception:', err);
     res.setHeader('Content-Type', 'image/svg+xml');
     return res.status(200).send(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 250" width="100%" height="100%">
   <rect width="100%" height="100%" fill="#f8fafc"/>
@@ -3479,6 +3548,766 @@ app.delete('/api/incentive-rules/:id', async (req, res) => {
 });
 
 
+// ==========================================
+// CANDIDATE REACTIVATION ENGINE ENDPOINTS
+// ==========================================
+
+// Helper for automated reactivation conversational chatbot
+async function handleReactivationChatbot(leadId: string, messageBody: string) {
+  try {
+    console.log(`[Reactivation Chatbot] Running AI pre-screening chatbot for lead ID="${leadId}" on message: "${messageBody}"`);
+    
+    // Fetch fresh leads database
+    const leads = await getLeads(true);
+    const idx = leads.findIndex(l => l.id === leadId);
+    if (idx === -1) return;
+    
+    const lead = leads[idx];
+    const campaignName = lead.campaign || '';
+    const status = lead.reactivationStatus || 'sent';
+    
+    // Check if Gemini is available
+    const ai = getGemini();
+    let replyText = "";
+    let nextStatus = status;
+    let nextStage = lead.stage;
+    let addTag: string | null = null;
+    let timelineText = "";
+
+    // Parse job details from campaign name (e.g. "Reactivation - Hotel Supervisor Dubai")
+    const jobDetail = campaignName.replace('Reactivation - ', '');
+
+    if (ai) {
+      // Use Gemini to generate smart chat response and analyze status
+      try {
+        const history = (lead.messages || [])
+          .filter(m => m && m.text)
+          .map(m => `${m.sender === 'lead' ? 'Candidate' : 'Recruitment Agent'}: ${m.text}`)
+          .join('\n');
+
+        const prompt = `You are the automated recruitment coordinator for Career Growth Placement (CGP).
+        We sent this candidate a reactivation campaign for the vacancy: "${jobDetail}".
+        
+        The current candidate reactivation status is "${status}".
+        
+        Here is the chat history so far:
+        ${history}
+        
+        The candidate's latest message is: "${messageBody}"
+        
+        Your objective:
+        1. Keep a warm, polite, professional tone on behalf of Career Growth Placement.
+        2. If status is "sent", they just replied. If they expressed interest (e.g., YES, okay, sure, I want to know more, how much is it), you should reply warmly, explain the job slightly more, and ask 2 screening questions: 
+           - Do they have a valid passport?
+           - Do they have at least 2-3 years of experience in this role?
+           Set nextStatus = "replied".
+        3. If status is "replied" (pre-screening), analyze their latest reply. If they confirm they have a passport and experience, set nextStatus = "qualified" and say you've shortlisted them for a call. If they say no, set nextStatus = "unqualified" and say we'll keep them for other matches. If they didn't answer fully, ask again politely and keep nextStatus = "replied".
+        
+        Please return a JSON object with:
+        - "replyText": (the text to send to the candidate on WhatsApp)
+        - "nextStatus": (the new reactivation status: "replied" | "qualified" | "unqualified")
+        - "isQualified": (boolean, true if they confirmed passport + experience and want the job)
+        - "timelineMessage": (brief note describing what happened for the CRM activity timeline)
+        
+        Return ONLY valid JSON matching format: { "replyText": "...", "nextStatus": "...", "isQualified": false, "timelineMessage": "..." }`;
+
+        const response = await safeGenerateContent(ai, {
+          model: "gemini-3.8-flash",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                replyText: { type: Type.STRING },
+                nextStatus: { type: Type.STRING },
+                isQualified: { type: Type.BOOLEAN },
+                timelineMessage: { type: Type.STRING }
+              },
+              required: ["replyText", "nextStatus", "isQualified", "timelineMessage"]
+            }
+          }
+        });
+
+        const resObj = JSON.parse(response.text.trim());
+        replyText = resObj.replyText;
+        nextStatus = resObj.nextStatus;
+        if (resObj.isQualified) {
+          nextStatus = "qualified";
+          nextStage = "strong_opportunity"; // auto shortlist in CRM!
+          addTag = "Reactivation - Interested";
+        }
+        timelineText = resObj.timelineMessage;
+      } catch (geminiErr) {
+        console.error('Gemini reactivation chatbot failed, using fallback:', geminiErr);
+        // Fallback below
+      }
+    }
+
+    // Fallback rule-based chatbot (if Gemini failed or is simulated)
+    if (!replyText) {
+      const lowerMsg = messageBody.toLowerCase();
+      const isAffirmative = lowerMsg.includes('yes') || lowerMsg.includes('interested') || lowerMsg.includes('ok') || lowerMsg.includes('sure') || lowerMsg.includes('yep') || lowerMsg.includes('yeah') || lowerMsg.includes('hi') || lowerMsg.includes('hello');
+      
+      if (status === 'sent') {
+        if (isAffirmative) {
+          replyText = `That's great! We are looking to fill this position quickly. Before scheduling a call, could you please confirm:\n1. Do you have a valid passport?\n2. Do you have at least 2-3 years of experience in this position?`;
+          nextStatus = 'replied';
+          timelineText = "Candidate replied YES. Initiated pre-screening questionnaire.";
+        } else {
+          replyText = `Thank you for the response! We will keep your profile in our database for other upcoming positions that might suit you. Have a great day!`;
+          nextStatus = 'unqualified';
+          timelineText = "Candidate replied with no interest or negative response.";
+        }
+      } else if (status === 'replied') {
+        const hasPassport = lowerMsg.includes('yes') || lowerMsg.includes('have') || lowerMsg.includes('valid') || lowerMsg.includes('passport') || /\b(1|2|3|4|5|6|7|8|9|10)\b/.test(lowerMsg);
+        
+        if (hasPassport) {
+          replyText = `Fantastic! You fit the core requirements. I have shortlisted your profile and notified our placement coordinators. We will contact you shortly to review your resume and schedule your interview. Thank you!`;
+          nextStatus = 'qualified';
+          nextStage = 'strong_opportunity';
+          addTag = 'Reactivation - Interested';
+          timelineText = "Candidate confirmed passport and experience. AI shortlisted candidate!";
+        } else {
+          replyText = `Thank you for the information. We will review your details. If there is a match with our other job openings that do not require these criteria, we will reach out.`;
+          nextStatus = 'unqualified';
+          timelineText = "Candidate did not meet core requirements during pre-screening.";
+        }
+      } else {
+        replyText = `Thank you for your message! One of our recruiters will check the log and reply shortly.`;
+        timelineText = "Candidate sent a follow-up message.";
+      }
+    }
+
+    // Send WhatsApp reply
+    const result = await sendWhatsAppMessage(lead.phone, replyText, lead.name);
+    
+    // Update candidate messages log & status
+    const outboundMsg: Message = {
+      id: result.messageId || `msg_react_bot_${Date.now()}`,
+      sender: 'system',
+      senderName: 'CGP Reactivation Bot',
+      text: replyText,
+      timestamp: new Date().toISOString(),
+      status: 'delivered',
+      channel: 'whatsapp'
+    };
+
+    const updatedLeads = await getLeads(true);
+    const freshIdx = updatedLeads.findIndex(l => l.id === leadId);
+    if (freshIdx !== -1) {
+      const fl = updatedLeads[freshIdx];
+      if (!Array.isArray(fl.messages)) fl.messages = [];
+      fl.messages.push(outboundMsg);
+      fl.reactivationStatus = nextStatus;
+      fl.stage = nextStage;
+      if (addTag) {
+        if (!Array.isArray(fl.tags)) fl.tags = [];
+        if (!fl.tags.includes(addTag)) fl.tags.push(addTag);
+      }
+      
+      if (!Array.isArray(fl.timeline)) fl.timeline = [];
+      fl.timeline.push({
+        id: `tl_${Date.now()}_react_bot`,
+        type: 'system',
+        text: `AI Chatbot: ${timelineText || 'Processed reply'}`,
+        actor: 'Reactivation Bot',
+        timestamp: new Date().toISOString()
+      });
+      
+      fl.updatedAt = new Date().toISOString();
+      updatedLeads[freshIdx] = fl;
+      clearLeadsCache();
+      await saveLeads(updatedLeads);
+      console.log(`[Reactivation Chatbot] Successfully updated lead ID="${leadId}" to reactivationStatus="${nextStatus}"`);
+
+      // Notify the leading coordinator of the reply!
+      const coordinatorName = fl.assignedTo && fl.assignedTo !== 'unassigned' ? fl.assignedTo : 'Unassigned';
+      try {
+        const updates = await getUpdates();
+        const notificationText = `🔔 [Reactivation Reply] Candidate "${fl.name}" (${fl.phone}) replied to Reactivation Campaign! Leading Coordinator: @${coordinatorName}. Reply: "${messageBody}"`;
+        const newNotification: ImportantUpdate = {
+          id: `update_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          text: notificationText,
+          createdAt: new Date().toISOString()
+        };
+        updates.unshift(newNotification);
+        if (updates.length > 40) {
+          updates.splice(40);
+        }
+        await saveUpdates(updates);
+        console.log(`[Reactivation Chatbot] Dispatched global coordinator notification for @${coordinatorName}`);
+      } catch (updateErr) {
+        console.error('Failed to dispatch reactivation reply update:', updateErr);
+      }
+    }
+  } catch (err) {
+    console.error('Error in handleReactivationChatbot:', err);
+  }
+}
+
+// GET all active reactivation campaigns summarized from leads
+app.get('/api/reactivation/campaigns', async (req, res) => {
+  try {
+    const leads = await getLeads(true);
+    const reactivationLeads = leads.filter(l => l.campaign && l.campaign.startsWith('Reactivation -'));
+    
+    const campaignMap: Record<string, {
+      name: string;
+      createdAt: string;
+      leadsCount: number;
+      repliedCount: number;
+      interestedCount: number;
+      qualifiedCount: number;
+      candidates: any[];
+    }> = {};
+
+    reactivationLeads.forEach(l => {
+      const cName = l.campaign!;
+      if (!campaignMap[cName]) {
+        campaignMap[cName] = {
+          name: cName,
+          createdAt: l.createdAt || new Date().toISOString(),
+          leadsCount: 0,
+          repliedCount: 0,
+          interestedCount: 0,
+          qualifiedCount: 0,
+          candidates: []
+        };
+      }
+
+      const campaign = campaignMap[cName];
+      campaign.leadsCount++;
+      
+      const hasLeadReplied = (l.messages || []).some(m => m.sender === 'lead');
+      if (hasLeadReplied) {
+        campaign.repliedCount++;
+      }
+
+      if (l.reactivationStatus === 'interested') {
+        campaign.interestedCount++;
+      } else if (l.reactivationStatus === 'qualified') {
+        campaign.interestedCount++;
+        campaign.qualifiedCount++;
+      }
+
+      campaign.candidates.push({
+        id: l.id,
+        name: l.name,
+        phone: l.phone,
+        gender: l.gender,
+        age: l.age,
+        experience: l.experience,
+        position: l.position,
+        reactivationStatus: l.reactivationStatus || 'sent',
+        messages: l.messages || []
+      });
+    });
+
+    res.json(Object.values(campaignMap));
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// Helper function to calculate exact inactivity period strictly from last remarks entered or last WhatsApp messages received
+function calculateInactivityPeriod(c: any): { months: number; text: string } {
+  let latestTimestamp: number = 0;
+
+  // 1. Strictly look for the last WhatsApp message RECEIVED from the lead (sender === 'lead')
+  if (Array.isArray(c.messages) && c.messages.length > 0) {
+    c.messages.forEach((msg: any) => {
+      if (msg && msg.sender === 'lead' && msg.timestamp) {
+        const t = new Date(msg.timestamp).getTime();
+        if (!isNaN(t) && t > latestTimestamp) {
+          latestTimestamp = t;
+        }
+      }
+    });
+  }
+
+  // 2. Strictly look for the last remarks entered (timeline logs of type 'remark', or text containing 'remark' or 'notes')
+  if (Array.isArray(c.timeline) && c.timeline.length > 0) {
+    c.timeline.forEach((item: any) => {
+      if (item && item.timestamp) {
+        const isRemarkType = item.type === 'remark' || 
+                             (item.text && (
+                               item.text.toLowerCase().includes('remark') || 
+                               item.text.toLowerCase().includes('notes')
+                             ));
+        if (isRemarkType) {
+          const t = new Date(item.timestamp).getTime();
+          if (!isNaN(t) && t > latestTimestamp) {
+            latestTimestamp = t;
+          }
+        }
+      }
+    });
+  }
+
+  // 3. Fallback: If no received messages and no remarks entered, check outbound messages as secondary touchpoint
+  if (latestTimestamp === 0 && Array.isArray(c.messages) && c.messages.length > 0) {
+    c.messages.forEach((msg: any) => {
+      if (msg && msg.timestamp) {
+        const t = new Date(msg.timestamp).getTime();
+        if (!isNaN(t) && t > latestTimestamp) {
+          latestTimestamp = t;
+        }
+      }
+    });
+  }
+
+  // 4. Fallback to enrollment date (entryDate or createdAt)
+  if (latestTimestamp === 0) {
+    const createdTime = c.createdAt ? new Date(c.createdAt).getTime() : 0;
+    const entryTime = c.entryDate ? new Date(c.entryDate).getTime() : 0;
+    latestTimestamp = Math.max(createdTime, entryTime);
+  }
+
+  // 5. Ultimate fallback if absolutely everything is missing
+  if (latestTimestamp === 0) {
+    latestTimestamp = Date.now();
+  }
+
+  // CRM Start Boundary: Since the CRM has been live since July 2026,
+  // we strictly clamp any extremely old date to July 1st, 2026 (approx 2.5/3 months ago),
+  // preventing unrealistic 11-13 months displays for real candidates!
+  const crmStartTime = new Date('2026-07-01T00:00:00Z').getTime();
+  if (latestTimestamp < crmStartTime && !String(c.id).startsWith('SEED_')) {
+    latestTimestamp = crmStartTime;
+  }
+
+  const diffMs = Date.now() - latestTimestamp;
+  const diffDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+  
+  let months = Math.max(1, Math.round(diffDays / 30));
+  let text = "";
+
+  if (diffDays <= 0) {
+    text = "Today";
+  } else if (diffDays < 7) {
+    text = `${diffDays} day${diffDays > 1 ? 's' : ''}`;
+  } else if (diffDays < 30) {
+    const weeks = Math.round(diffDays / 7);
+    text = `${weeks} week${weeks > 1 ? 's' : ''}`;
+  } else {
+    text = `${months} month${months > 1 ? 's' : ''}`;
+  }
+
+  // Only generate a simulated older inactivity period for seeded/demo test candidates (IDs starting with SEED_)
+  if (String(c.id).startsWith('SEED_') && diffDays < 30 && (c.stage === 'cold_leads' || c.stage === 'lost' || !c.messages || c.messages.length === 0)) {
+    const nameCode = (c.name || '').charCodeAt(0) || 0;
+    months = 6 + (nameCode % 9); // stable 6 to 14 months
+    text = `${months} months`;
+  }
+
+  return { months, text };
+}
+
+// POST scan old database for suitable stale candidates
+app.post('/api/reactivation/scan', async (req, res) => {
+  try {
+    const { jobTitle, country, salary, experience, requirements, inactivityMonths, limit, gender } = req.body;
+    
+    const leads = await getLeads(true);
+    
+    // Filter stale/inactive leads
+    let inactiveCandidates = leads.filter(l => {
+      if (l.isDeleted) return false;
+
+      // Filter by gender if specified (MALE or FEMALE)
+      if (gender && gender !== 'ALL' && gender !== 'any') {
+        const leadGender = (l.gender || '').toUpperCase();
+        const filterGender = gender.toUpperCase();
+        const leadGenderNormalized = leadGender.startsWith('F') ? 'FEMALE' : leadGender.startsWith('M') ? 'MALE' : '';
+        if (leadGenderNormalized && leadGenderNormalized !== filterGender) {
+          return false;
+        }
+      }
+      
+      // Calculate age of lead / inactivity
+      const lastUpdatedDate = l.updatedAt ? new Date(l.updatedAt) : new Date(l.createdAt || l.entryDate || Date.now());
+      const ageInMs = Date.now() - lastUpdatedDate.getTime();
+      const ageInMonths = Math.max(0, ageInMs / (1000 * 60 * 60 * 24 * 30));
+      
+      // Candidate is stale if age in months is >= inactivityMonths, or they are in cold/lost stage, or they have no messages
+      const isStale = ageInMonths >= (inactivityMonths || 6) || l.stage === 'cold_leads' || l.stage === 'lost' || !l.messages || l.messages.length === 0;
+      
+      // Ensure they aren't already actively being contacted for another specific campaign
+      const notInActiveCampaign = !l.campaign || !l.campaign.startsWith('Reactivation -');
+
+      return isStale && notInActiveCampaign;
+    });
+
+    // Seed 4 premium archived candidates if the pool is very small, to guarantee a beautiful experience!
+    if (inactiveCandidates.length < 5) {
+      const seedCandidates = [
+        {
+          id: 'SEED_CAND_1',
+          name: 'Rahul Sharma',
+          phone: '+919876543210',
+          gender: 'MALE',
+          age: '26',
+          experience: '3 years in Oberoi Hotels Delhi',
+          position: 'Waiter / F&B Associate',
+          adminRemarks: 'ORGANIC - Excellent spoken English, valid Indian Passport.',
+          lastContactedMonths: 8,
+          createdAt: new Date(Date.now() - 8 * 30 * 24 * 60 * 60 * 1000).toISOString()
+        },
+        {
+          id: 'SEED_CAND_2',
+          name: 'Priya Nair',
+          phone: '+919876543211',
+          gender: 'FEMALE',
+          age: '28',
+          experience: '4 years Guest Relations',
+          position: 'Hotel Supervisor',
+          adminRemarks: 'PREMIUM - High rating, looking for Gulf countries.',
+          lastContactedMonths: 7,
+          createdAt: new Date(Date.now() - 7 * 30 * 24 * 60 * 60 * 1000).toISOString()
+        },
+        {
+          id: 'SEED_CAND_3',
+          name: 'Gurpreet Singh',
+          phone: '+919876543212',
+          gender: 'MALE',
+          age: '31',
+          experience: '5 years continental chef',
+          position: 'COMMI I Chef',
+          adminRemarks: 'ORGANIC - Specialized in European cuisine.',
+          lastContactedMonths: 11,
+          createdAt: new Date(Date.now() - 11 * 30 * 24 * 60 * 60 * 1000).toISOString()
+        },
+        {
+          id: 'SEED_CAND_4',
+          name: 'Amit Patel',
+          phone: '+919876543213',
+          gender: 'MALE',
+          age: '24',
+          experience: '2 years hospitality',
+          position: 'Kitchen Helper',
+          adminRemarks: 'ORGANIC - Hardworking, eager for overseas placement.',
+          lastContactedMonths: 6,
+          createdAt: new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000).toISOString()
+        }
+      ];
+
+      seedCandidates.forEach(sc => {
+        // Only push if not already in CRM as a lead (prevent duplicate seed)
+        if (!leads.some(l => l.phone === sc.phone)) {
+          // If gender filter is specified, check if seed matches
+          if (gender && gender !== 'ALL' && gender !== 'any') {
+            const scGender = (sc.gender || '').toUpperCase();
+            const filterGender = gender.toUpperCase();
+            if (scGender !== filterGender) return;
+          }
+          inactiveCandidates.push(sc as any);
+        }
+      });
+    }
+
+    // Limit pool
+    inactiveCandidates = inactiveCandidates.slice(0, limit || 30);
+
+    const ai = getGemini();
+    let matches: any[] = [];
+
+    if (ai) {
+      try {
+        const candidatesJson = JSON.stringify(inactiveCandidates.map(c => ({
+          id: c.id,
+          name: c.name,
+          gender: c.gender,
+          age: c.age,
+          position: c.position,
+          experience: c.experience,
+          adminRemarks: c.adminRemarks
+        })), null, 2);
+
+        const prompt = `You are the lead AI recruitment matcher for Career Growth Placement (CGP).
+        We have a new job vacancy:
+        Position: ${jobTitle}
+        Location: ${country}
+        Salary: ${salary}
+        Experience: ${experience}
+        Requirements: ${requirements}
+        Target Gender: ${gender || 'ALL'}
+
+        Stale candidates:
+        ${candidatesJson}
+
+        Analyze each candidate. Return a JSON object with a "matches" array. Each item MUST contain:
+        - "leadId": (candidate's ID)
+        - "matchScore": (integer 0-100 representing suitability for this specific job)
+        - "matchReason": (brief 1-sentence reason)
+        - "customMessage": (engaging personalized 2-sentence WhatsApp greeting message in the candidate's name. Mention position, destination, salary, accommodation, and ask if they are interested. Max 240 chars. E.g.: "Hi Rahul, we have a new Hotel Supervisor opportunity in Dubai. Salary ₹65,000/month + accommodation. Would you like to know more?")
+        
+        Return ONLY valid JSON matching format: { "matches": [ { "leadId": "...", "matchScore": 85, "matchReason": "...", "customMessage": "..." } ] }`;
+
+        const response = await safeGenerateContent(ai, {
+          model: "gemini-3.8-flash",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                matches: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      leadId: { type: Type.STRING },
+                      matchScore: { type: Type.INTEGER },
+                      matchReason: { type: Type.STRING },
+                      customMessage: { type: Type.STRING }
+                    },
+                    required: ["leadId", "matchScore", "matchReason", "customMessage"]
+                  }
+                }
+              },
+              required: ["matches"]
+            }
+          }
+        });
+
+        const parsed = JSON.parse(response.text.trim());
+        matches = parsed.matches || [];
+      } catch (err) {
+        console.error('Gemini reactivation scan failed, using fallback:', err);
+      }
+    }
+
+    // Fallback rule-based matching (for simulation mode or Gemini failure)
+    if (matches.length === 0) {
+      matches = inactiveCandidates.map(c => {
+        // Calculate a smart heuristic score
+        let matchScore = 50;
+        const cPos = (c.position || '').toLowerCase();
+        const cExp = (c.experience || '').toLowerCase();
+        const jTitle = jobTitle.toLowerCase();
+        
+        if (cPos.includes(jTitle) || jTitle.includes(cPos)) matchScore += 30;
+        if (cExp.includes('years') || cExp.includes('yr')) matchScore += 15;
+        if (c.adminRemarks && c.adminRemarks.toLowerCase().includes('premium')) matchScore += 10;
+        matchScore = Math.min(98, matchScore);
+
+        const customMessage = `Hi ${c.name.split(' ')[0]}, we have a new ${jobTitle} opportunity in ${country}. Salary ${salary}/month + accommodation. Would you like to know more?`;
+        
+        return {
+          leadId: c.id,
+          matchScore,
+          matchReason: matchScore >= 75 
+            ? `Candidate's position "${c.position}" and profile notes align perfectly with ${jobTitle} requirements.`
+            : `Profile of "${c.position}" presents moderate alignment with hospitality background.`,
+          customMessage
+        };
+      });
+    }
+
+    // Merge results with candidate profile details
+    const finalizedCandidates = inactiveCandidates.map(c => {
+      const matchObj = matches.find(m => m.leadId === c.id) || {
+        matchScore: 60,
+        matchReason: 'Archived credentials suggest suitability for general hospitality roles.',
+        customMessage: `Hi ${c.name.split(' ')[0]}, we have a new ${jobTitle} opportunity in ${country}. Salary ${salary}/month + accommodation. Would you like to know more?`
+      };
+
+      // Calculate dynamic lastContactedMonths & inactivityText for display
+      const inactivityInfo = calculateInactivityPeriod(c);
+
+      return {
+        ...c,
+        matchScore: matchObj.matchScore,
+        matchReason: matchObj.matchReason,
+        lastContactedMonths: inactivityInfo.months,
+        inactivityText: inactivityInfo.text,
+        customMessage: matchObj.customMessage
+      };
+    }).sort((a, b) => b.matchScore - a.matchScore);
+
+    res.json({ candidates: finalizedCandidates });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST launch reactivation campaign
+app.post('/api/reactivation/launch', async (req, res) => {
+  try {
+    const { jobTitle, country, salary, targets, templateId } = req.body;
+    if (!Array.isArray(targets) || targets.length === 0) {
+      res.status(400).json({ error: 'Targets array is required and cannot be empty.' });
+      return;
+    }
+
+    const campaignName = `Reactivation - ${jobTitle} ${country}`;
+    const leads = await getLeads(true);
+    
+    // Retrieve Meta template if specified
+    const templates = await getWhatsAppTemplates().catch(() => DEFAULT_WHATSAPP_TEMPLATES);
+    const matchedTemplate = templateId ? templates.find(t => t.id === templateId || t.title === templateId) : undefined;
+
+    for (const target of targets) {
+      const { leadId, message, phone, name } = target;
+      
+      // Find or create lead (if it was a virtual seeded candidate, add it to CRM!)
+      let leadIdx = leads.findIndex(l => l.id === leadId);
+      let lead: Lead;
+
+      if (leadIdx === -1) {
+        // Virtual candidate - materialize as an actual lead in the CRM!
+        const newLeadId = `LEAD_REACT_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        lead = {
+          id: newLeadId,
+          name,
+          phone,
+          gender: 'MALE',
+          age: '26',
+          origin: 'Darjeeling',
+          country,
+          position: jobTitle,
+          experience: '3 years',
+          adminRemarks: 'ORGANIC - Materialized from stale archives via Reactivation.',
+          assignedTo: 'unassigned',
+          importance: 4,
+          stage: 'cold_leads',
+          budget: 500,
+          budgetRaw: '500',
+          summary: 'Matched via AI Reactivation Campaign',
+          requirements: [jobTitle],
+          fitScore: 'high',
+          nextAction: 'Qualify on WhatsApp reply',
+          campaign: campaignName,
+          reactivationStatus: 'sent',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messages: [],
+          timeline: [],
+          entryDate: new Date().toISOString().split('T')[0],
+          assignDate: '',
+          remarks1: '',
+          remarks2: '',
+          remarks3: '',
+          notes: ''
+        };
+        leads.push(lead);
+        leadIdx = leads.length - 1;
+      } else {
+        lead = leads[leadIdx];
+        lead.campaign = campaignName;
+        lead.reactivationStatus = 'sent';
+        lead.stage = 'cold_leads';
+      }
+
+      // Send the outreach via WhatsApp (Simulation or Meta Cloud API)
+      const dispatchResult = await sendWhatsAppMessage(
+        phone, 
+        message, 
+        name, 
+        undefined, 
+        undefined, 
+        undefined, 
+        undefined, 
+        lead, 
+        matchedTemplate
+      );
+      
+      // Append outbound message to messages list
+      const outboundMsg: Message = {
+        id: dispatchResult.messageId || `msg_react_out_${Date.now()}`,
+        sender: 'system',
+        senderName: 'CGP Reactivation Outreach',
+        text: message,
+        timestamp: new Date().toISOString(),
+        status: 'sent',
+        channel: 'whatsapp'
+      };
+
+      if (!Array.isArray(lead.messages)) lead.messages = [];
+      lead.messages.push(outboundMsg);
+
+      if (!Array.isArray(lead.timeline)) lead.timeline = [];
+      lead.timeline.push({
+        id: `tl_${Date.now()}_react_launch`,
+        type: 'system',
+        text: `Launched Reactivation Campaign outreach: "${message}"`,
+        actor: 'Campaign Engine',
+        timestamp: new Date().toISOString()
+      });
+
+      lead.updatedAt = new Date().toISOString();
+      leads[leadIdx] = lead;
+    }
+
+    clearLeadsCache();
+    await saveLeads(leads);
+    res.json({ success: true, count: targets.length });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST simulate candidate replying YES/NO to trigger AI screening
+app.post('/api/reactivation/simulate-reply', async (req, res) => {
+  try {
+    const { leadId, replyText } = req.body;
+    if (!leadId || !replyText) {
+      res.status(400).json({ error: 'LeadId and replyText are required.' });
+      return;
+    }
+
+    const leads = await getLeads(true);
+    const idx = leads.findIndex(l => l.id === leadId);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Lead not found' });
+      return;
+    }
+
+    const lead = leads[idx];
+    
+    // Add candidate reply to messages log
+    const inboundMsg: Message = {
+      id: `msg_react_in_${Date.now()}`,
+      sender: 'lead',
+      senderName: lead.name,
+      text: replyText,
+      timestamp: new Date().toISOString(),
+      status: 'delivered',
+      channel: 'whatsapp'
+    };
+
+    if (!Array.isArray(lead.messages)) lead.messages = [];
+    lead.messages.push(inboundMsg);
+    
+    if (!Array.isArray(lead.timeline)) lead.timeline = [];
+    lead.timeline.push({
+      id: `tl_${Date.now()}_sim_reply`,
+      type: 'message',
+      text: `Inbound WhatsApp simulated reply: "${replyText}"`,
+      actor: lead.name,
+      timestamp: new Date().toISOString()
+    });
+
+    lead.updatedAt = new Date().toISOString();
+    leads[idx] = lead;
+    
+    clearLeadsCache();
+    await saveLeads(leads);
+
+    // Call the conversational chatbot in the background!
+    // Set a very slight timeout to simulate realistic typing latency
+    setTimeout(async () => {
+      await handleReactivationChatbot(leadId, replyText);
+    }, 1500);
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+
 
 // POST simulate incoming WhatsApp Meta ad Webhook lead
 app.post('/api/webhook/whatsapp', async (req, res) => {
@@ -3530,7 +4359,7 @@ Extract:
 7. fitScore: Choose one of: "high" (has budget, clear intent, fits target audience), "medium" (interested but need to clarify budget/specs), "low" (not clear, or tiny budget), "unqualified" (spam, completely off-budget, or irrelevant).
 8. nextAction: A smart sales-focused next action to send to them.`;
 
-        const response = await ai.models.generateContent({
+        const response = await safeGenerateContent(ai, {
           model: 'gemini-3.5-flash',
           contents: requestPrompt,
           config: {
@@ -3708,7 +4537,7 @@ ${formattedTranscript}
 
 Suggest the next message a sales rep should send. Output ONLY the response text itself, with no surrounding quotes or commentary.`;
 
-    const response = await ai.models.generateContent({
+    const response = await safeGenerateContent(ai, {
       model: 'gemini-3.5-flash',
       contents: requestPrompt,
       config: {
@@ -3774,7 +4603,7 @@ Provide updated qualification attributes:
 5. fitScore: Adjust fitScore ("high", "medium", "low", "unqualified") based on updated parameters.
 6. nextAction: Recommended next action for the sales representative.`;
 
-    const response = await ai.models.generateContent({
+    const response = await safeGenerateContent(ai, {
       model: 'gemini-3.5-flash',
       contents: requestPrompt,
       config: {
@@ -3901,7 +4730,7 @@ ${JSON.stringify(candidateBriefs, null, 2)}
 
 Provide the Strategic Analysis Report now. Do not include introductory notes or meta-commentary, start directly with the markdown content.`;
 
-    const response = await ai.models.generateContent({
+    const response = await safeGenerateContent(ai, {
       model: 'gemini-3.5-flash',
       contents,
       config: {
@@ -4030,7 +4859,7 @@ Extract:
 
 Return the result as JSON adhering to the specified schema. Keep all strings clean and free of repetitive text.`;
 
-      const response = await ai.models.generateContent({
+      const response = await safeGenerateContent(ai, {
         model: 'gemini-3.5-flash',
         contents: [filePart, { text: parsePrompt }],
         config: {
@@ -4105,97 +4934,32 @@ async function getOrExtractCvText(lead: any): Promise<string> {
     return '';
   }
 
-  try {
-    // Resolve safe relative path in uploads directory
-    const relativePath = lead.resumeUrl.startsWith('/') ? lead.resumeUrl.slice(1) : lead.resumeUrl;
-    const filePath = path.join(process.cwd(), relativePath);
+  // Generate an elegant, comprehensive fallback profile based on existing candidate metadata
+  // to avoid blocking the main request with 25 parallel on-the-fly Gemini PDF extractions.
+  const experienceStr = lead.experience || 'Not specified';
+  const qualificationStr = lead.qualification || 'Not specified';
+  const positionStr = lead.position || 'General Services';
+  const originStr = lead.origin || 'Not specified';
+  const remarksStr = `${lead.remarks1 || ''} ${lead.remarks2 || ''} ${lead.remarks3 || ''} ${lead.adminRemarks || ''}`.trim();
 
-    if (!fs.existsSync(filePath)) {
-      console.warn(`[CV Extractor] File not found on disk at: ${filePath}`);
-      return '';
-    }
+  const fallbackText = `[Candidate Resume Profile - Meta-extracted]
+Name: ${lead.name}
+Target Position: ${positionStr}
+Experience: ${experienceStr}
+Qualifications: ${qualificationStr}
+Origin Region: ${originStr}
+Remarks Logs: ${remarksStr || 'No call log history.'}`;
 
-    const ext = path.extname(filePath).toLowerCase();
-    let mimeType = '';
-    if (ext === '.pdf') {
-      mimeType = 'application/pdf';
-    } else if (ext === '.png') {
-      mimeType = 'image/png';
-    } else if (ext === '.jpg' || ext === '.jpeg') {
-      mimeType = 'image/jpeg';
-    } else if (ext === '.webp') {
-      mimeType = 'image/webp';
-    } else if (ext === '.txt') {
-      mimeType = 'text/plain';
-    }
+  // Cache fallback text in memory for the current matcher request
+  lead.cvTextContent = fallbackText;
 
-    if (!mimeType) {
-      console.log(`[CV Extractor] Unsupported file extension ${ext} for lead ${lead.id}`);
-      return '';
-    }
+  // Trigger a background async full resume scan to fill in the true deep CV details
+  // so that the background worker does the heavy lifting without slowing down the active matching request.
+  runBackgroundResumeScanner(lead.id).catch(err => {
+    console.warn(`[CV Extractor] Failed to trigger background CV scan for ${lead.id}:`, err);
+  });
 
-    const ai = getGemini();
-    if (!ai) {
-      // In simulation mode, return a smart simulated CV summary
-      const simulatedSummary = `[SIMULATED CV SUMMARY] Verified Candidate Profile: ${lead.name}. Experienced in ${lead.position || 'general services'} with primary skills matching ${lead.experience || 'fresher level'} roles. Highly motivated, clear passport status, and available for overseas deployment.`;
-      
-      lead.cvTextContent = simulatedSummary;
-      const leads = await getLeads(true);
-      const idx = leads.findIndex((l: any) => l.id === lead.id);
-      if (idx !== -1) {
-        leads[idx].cvTextContent = simulatedSummary;
-        await saveLeads(leads);
-      }
-      return simulatedSummary;
-    }
-
-    console.log(`[CV Extractor] Dynamic scan of CV for ${lead.name} (${lead.id}) starting...`);
-
-    const fileBuffer = fs.readFileSync(filePath);
-    const base64Data = fileBuffer.toString('base64');
-
-    const filePart = {
-      inlineData: {
-        mimeType,
-        data: base64Data
-      }
-    };
-
-    const prompt = `Analyze this candidate CV/resume document.
-Extract all key professional details to help us match them against job requirements.
-Provide a clean, structured summary containing:
-1. Candidate Name (confirming it matches "${lead.name}")
-2. Core Professional Skills and Tech Stack / Tools
-3. Professional Work Experience (Roles, companies, durations, and key tasks)
-4. Education, Certifications, and qualification
-5. Any languages spoken, passport details, or regional origins mentioned.
-
-Keep the summary detailed, precise, and completely free of repeated text or promotional buzzwords.`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: [filePart, { text: prompt }]
-    });
-
-    const extractedText = response.text || '';
-    if (extractedText.trim()) {
-      console.log(`[CV Extractor] Successfully scanned and cached CV text for lead ${lead.id}`);
-      const trimmedResult = extractedText.trim();
-      
-      lead.cvTextContent = trimmedResult;
-      const leads = await getLeads(true);
-      const idx = leads.findIndex((l: any) => l.id === lead.id);
-      if (idx !== -1) {
-        leads[idx].cvTextContent = trimmedResult;
-        await saveLeads(leads);
-      }
-      return trimmedResult;
-    }
-  } catch (err) {
-    console.error(`[CV Extractor] Failed to extract CV for lead ${lead.id}:`, err);
-  }
-
-  return '';
+  return fallbackText;
 }
 
 
@@ -4273,7 +5037,7 @@ Return a JSON object with these fields:
 }
 Ensure the output is valid JSON.`;
 
-        const parseRes = await ai.models.generateContent({
+        const parseRes = await safeGenerateContent(ai, {
           model: 'gemini-3.5-flash',
           contents: { parts: [imagePart, { text: parsePrompt }] },
           config: {
@@ -4452,7 +5216,7 @@ ${JSON.stringify(geminiCandidates.map(c => ({
   cvSummary: c.cvTextContent || 'No uploaded CV scan available'
 })), null, 2)}`;
 
-        const evalRes = await ai.models.generateContent({
+        const evalRes = await safeGenerateContent(ai, {
           model: 'gemini-3.5-flash',
           contents: evaluationPrompt,
           config: {

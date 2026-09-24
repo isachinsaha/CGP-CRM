@@ -17,6 +17,14 @@ interface LeadWhatsAppChatProps {
   currentAgentId: string;
 }
 
+const getDisplayUrl = (url: string | undefined) => {
+  if (!url) return '';
+  if (url.includes('/uploads/')) {
+    return `/uploads/${url.split('/uploads/')[1]}`;
+  }
+  return url;
+};
+
 export default function LeadWhatsAppChat({
   lead,
   onLeadUpdated,
@@ -861,11 +869,11 @@ export default function LeadWhatsAppChat({
                   {msg.type === 'image' && msg.mediaUrl && (
                     <div className="mb-1.5 rounded-md overflow-hidden border border-[#000000]/05 bg-[#f0f2f5] dark:bg-[#111b21] max-w-full">
                       <img
-                        src={msg.mediaUrl}
+                        src={getDisplayUrl(msg.mediaUrl)}
                         alt={msg.fileName || 'WhatsApp Attachment'}
                         referrerPolicy="no-referrer"
                         className="max-h-64 w-full object-cover hover:scale-[1.01] transition-transform duration-200 cursor-zoom-in"
-                        onClick={() => window.open(msg.mediaUrl, '_blank')}
+                        onClick={() => window.open(getDisplayUrl(msg.mediaUrl), '_blank')}
                       />
                     </div>
                   )}
@@ -884,7 +892,7 @@ export default function LeadWhatsAppChat({
                         </p>
                       </div>
                       <a
-                        href={msg.mediaUrl}
+                        href={getDisplayUrl(msg.mediaUrl)}
                         download={msg.fileName || 'document'}
                         target="_blank"
                         rel="noreferrer"
@@ -897,7 +905,14 @@ export default function LeadWhatsAppChat({
                   )}
 
                   {/* Body Text */}
-                  {msg.text && msg.text !== 'Sent an image' && msg.text !== 'Sent a PDF document' && msg.text !== 'Sent a document' && (
+                  {msg.text && 
+                   msg.text !== 'Sent an image' && 
+                   msg.text !== 'Sent a PDF document' && 
+                   msg.text !== 'Sent a document' && 
+                   !msg.text.startsWith('Sent an image:') && 
+                   !msg.text.startsWith('Sent a PDF:') && 
+                   !msg.text.startsWith('Sent a document:') && 
+                   !msg.text.startsWith('Sent a PDF document:') && (
                     <span className="whitespace-pre-wrap leading-normal font-sans font-normal text-[14px] select-text break-words tracking-normal">
                       {msg.text}
                     </span>
@@ -1914,9 +1929,26 @@ export default function LeadWhatsAppChat({
               <MediaLibrary 
                 currentUser={currentUser} 
                 isModal={true} 
-                onSelect={(url) => {
+                onSelect={async (url, item) => {
                   const fullUrl = url.startsWith('http') ? url : `${window.location.origin}${url}`;
-                  setInputText(prev => prev ? `${prev}\n${fullUrl}` : fullUrl);
+                  if (item) {
+                    const isPdf = item.name.toLowerCase().endsWith('.pdf');
+                    const computedType = item.type === 'image' ? 'image' : (isPdf ? 'pdf' : 'document');
+                    const sizeStr = item.size ? `${(item.size / (1024 * 1024)).toFixed(2)} MB` : 'Unknown size';
+                    
+                    await handleSendMessage(
+                      inputText || `Sent ${computedType === 'image' ? 'an image' : computedType === 'pdf' ? 'a PDF' : 'a document'}: ${item.name}`,
+                      undefined,
+                      {
+                        type: computedType,
+                        mediaUrl: fullUrl,
+                        fileName: item.name,
+                        fileSize: sizeStr
+                      }
+                    );
+                  } else {
+                    setInputText(prev => prev ? `${prev}\n${fullUrl}` : fullUrl);
+                  }
                   setIsMediaLibraryOpen(false);
                 }}
               />

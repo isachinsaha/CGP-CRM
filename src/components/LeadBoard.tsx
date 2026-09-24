@@ -496,17 +496,25 @@ export default function LeadBoard({
   }, [boardGenderCounts, stageLeads.length]);
 
   const searchableTagOptions = React.useMemo(() => {
-    const set = new Set<string>();
+    const seen = new Set<string>();
+    const deduplicated: string[] = [];
     stageLeads.forEach(l => {
       if (l.tags && Array.isArray(l.tags)) {
         l.tags.forEach(t => {
-          if (t && t.trim()) set.add(t.trim());
+          if (t && t.trim()) {
+            const trimmed = t.trim();
+            const lower = trimmed.toLowerCase();
+            if (!seen.has(lower)) {
+              seen.add(lower);
+              deduplicated.push(trimmed);
+            }
+          }
         });
       }
     });
     
     // Sort and map tags
-    const sortedTags = Array.from(set).sort((a, b) => a.localeCompare(b));
+    const sortedTags = deduplicated.sort((a, b) => a.localeCompare(b));
     
     // Create Tag Count map for current stageLeads
     const tagCounts: { [tag: string]: number } = {};
@@ -842,18 +850,18 @@ export default function LeadBoard({
 
       {/* Pipeline Border Card Container */}
       <div className="bg-slate-950/40 rounded-3xl border border-emerald-600/35 dark:border-emerald-500/20 p-6 shadow-xl text-left">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-5 border-b border-slate-700 pb-4 gap-4">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between mb-5 border-b border-slate-700 pb-4 gap-3.5">
           {/* Left Side: Controls in One Straight Line in exact requested order */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2.5 xl:gap-3.5 overflow-x-auto no-scrollbar w-full xl:w-auto pb-1.5 xl:pb-0">
             {/* 1. Search option */}
-            <div className="relative w-full sm:w-60 text-left shrink-0">
-              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-500" />
+            <div className="relative w-40 xl:w-56 text-left shrink-0">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" />
               <input
                 type="text"
                 placeholder="Search candidate..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-1.5 text-xs rounded-xl border border-slate-750 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-900 text-slate-100 placeholder-slate-500 font-medium"
+                className="w-full pl-8 pr-3 py-1.5 text-[11px] xl:text-xs rounded-xl border border-slate-750 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-900 text-slate-100 placeholder-slate-500 font-semibold"
               />
             </div>
 
@@ -863,7 +871,7 @@ export default function LeadBoard({
                 value={coordinatorFilter}
                 onChange={setCoordinatorFilter}
                 options={coordinatorOptions}
-                className="text-xs px-3 py-1.5 rounded-xl border border-emerald-700 dark:border-emerald-600 bg-emerald-800 dark:bg-emerald-950 hover:bg-emerald-900 dark:hover:bg-emerald-900 text-white dark:text-emerald-100 font-black focus:outline-none focus:ring-1 focus:ring-emerald-400 cursor-pointer uppercase shadow-xs shrink-0"
+                className="text-[11px] xl:text-xs px-2.5 xl:px-3.5 py-1.5 rounded-xl border border-emerald-700 dark:border-emerald-600 bg-emerald-800 dark:bg-emerald-950 hover:bg-emerald-900 dark:hover:bg-emerald-900 text-white dark:text-emerald-100 font-black focus:outline-none focus:ring-1 focus:ring-emerald-400 cursor-pointer uppercase shadow-xs shrink-0"
               />
             )}
 
@@ -872,11 +880,11 @@ export default function LeadBoard({
               value={remarksFilter}
               onChange={setRemarksFilter}
               options={remarksOptions}
-              className="text-xs px-3 py-1.5 rounded-xl border border-emerald-700 dark:border-emerald-600 bg-emerald-800 dark:bg-emerald-950 hover:bg-emerald-900 dark:hover:bg-emerald-900 text-white dark:text-emerald-100 font-black focus:outline-none focus:ring-1 focus:ring-emerald-400 cursor-pointer uppercase shadow-xs shrink-0"
+              className="text-[11px] xl:text-xs px-2.5 xl:px-3.5 py-1.5 rounded-xl border border-emerald-700 dark:border-emerald-600 bg-emerald-800 dark:bg-emerald-950 hover:bg-emerald-900 dark:hover:bg-emerald-900 text-white dark:text-emerald-100 font-black focus:outline-none focus:ring-1 focus:ring-emerald-400 cursor-pointer uppercase shadow-xs shrink-0"
             />
 
             {/* 3. Time filters: All, Today, Yesterday, Date */}
-            <div className="flex items-center gap-1 bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
+            <div className="flex items-center gap-0.5 xl:gap-1 bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
               {[
                 { id: 'all', label: 'All' },
                 { id: 'today', label: 'Today' },
@@ -895,7 +903,7 @@ export default function LeadBoard({
                         setPipelineDateFilter(filter.id as any);
                       }
                     }}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    className={`px-2 xl:px-3 py-1 rounded-lg text-[9.5px] xl:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
                       isActive
                         ? 'bg-emerald-800 text-white border border-emerald-600/60 shadow-sm'
                         : 'text-slate-400 hover:text-slate-200'
@@ -908,7 +916,7 @@ export default function LeadBoard({
             </div>
 
             {pipelineDateFilter === 'date-wise' && (
-              <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-xl text-left animate-fade-in shrink-0">
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 px-3 py-1 rounded-xl text-left animate-fade-in shrink-0">
                 <input
                   type="date"
                   value={filterStartDate}
@@ -928,11 +936,11 @@ export default function LeadBoard({
             )}
 
             {/* 4. View Switcher segment button styled beautifully (Pipeline & Classic) */}
-            <div className="flex items-center bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
+            <div className="flex items-center gap-0.5 xl:gap-1 bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
               <button
                 type="button"
                 onClick={() => setViewMode('hub')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                className={`flex items-center gap-1 xl:gap-1.5 px-2 xl:px-3 py-1 rounded-lg text-[9.5px] xl:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
                   viewMode === 'hub'
                     ? 'bg-emerald-800 text-white border border-emerald-600/60 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -944,7 +952,7 @@ export default function LeadBoard({
               <button
                 type="button"
                 onClick={() => setViewMode('board')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                className={`flex items-center gap-1 xl:gap-1.5 px-2 xl:px-3 py-1 rounded-lg text-[9.5px] xl:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
                   viewMode === 'board'
                     ? 'bg-emerald-800 text-white border border-emerald-600/60 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'

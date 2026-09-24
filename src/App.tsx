@@ -18,6 +18,7 @@ import LeadList from './components/LeadList.tsx';
 import CampaignAnalytics from './components/CampaignAnalytics.tsx';
 import ActiveJobs from './components/ActiveJobs.tsx';
 import AiProfileMatcher from './components/AiProfileMatcher.tsx';
+import CandidateReactivation from './components/CandidateReactivation.tsx';
 import LeadModal from './components/LeadModal.tsx';
 import LoginScreen from './components/LoginScreen.tsx';
 import CoordinatorsManager from './components/CoordinatorsManager.tsx';
@@ -36,7 +37,7 @@ import MediaLibrary from './components/MediaLibrary.tsx';
 // Import local assets
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'board' | 'list' | 'messages' | 'analytics' | 'jobs' | 'ai-matcher' | 'wallet' | 'media'>('board');
+  const [activeTab, setActiveTab] = useState<'board' | 'list' | 'messages' | 'analytics' | 'jobs' | 'ai-matcher' | 'reactivation' | 'wallet' | 'media'>('board');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const selectedLeadRef = useRef<Lead | null>(null);
@@ -275,6 +276,29 @@ export default function App() {
   // Tags configuration while enrolling
   const [enrollTags, setEnrollTags] = useState<string[]>([]);
   const [newEnrollTagInput, setNewEnrollTagInput] = useState('');
+  const [enrollTagError, setEnrollTagError] = useState<string | null>(null);
+
+  const handleEnrollAddTag = (rawVal: string) => {
+    setEnrollTagError(null);
+    const val = rawVal.trim();
+    if (!val) return;
+
+    const lowerVal = val.toLowerCase();
+
+    // Check if tag is already assigned to enrolling candidate
+    if (enrollTags.some(t => t.toLowerCase() === lowerVal)) {
+      setEnrollTagError(`Tag "${val}" already exists.`);
+      setTimeout(() => setEnrollTagError(null), 4000);
+      return;
+    }
+
+    // Match case-insensitively with global tagsList
+    const existingMatch = tagsList.find(t => t.toLowerCase() === lowerVal);
+    const finalTag = existingMatch || val; // Reuse existing casing if matched, otherwise keep as typed
+
+    setEnrollTags([...enrollTags, finalTag]);
+    setNewEnrollTagInput('');
+  };
 
   // Handle filters update safely without recreating object references
   const handleFiltersChange = useCallback((newFilters: any) => {
@@ -313,7 +337,16 @@ export default function App() {
         if (metaData.countries) setCountries(metaData.countries);
         if (metaData.positions) setPositions(metaData.positions);
         if (metaData.projects) setProjects(metaData.projects);
-        if (metaData.tagsList) setTagsList(metaData.tagsList);
+        if (metaData.tagsList) {
+          const uniqueMap = new Map<string, string>();
+          metaData.tagsList.forEach((t: string) => {
+            const trimmed = t.trim();
+            if (trimmed) {
+              uniqueMap.set(trimmed.toLowerCase(), trimmed);
+            }
+          });
+          setTagsList(Array.from(uniqueMap.values()).sort((a, b) => a.localeCompare(b)));
+        }
       }
     } catch (err) {
       console.warn('Failed to load static app metadata:', err);
@@ -628,6 +661,7 @@ export default function App() {
           { id: 'list', label: 'Spreadsheet', icon: Table },
           { id: 'analytics', label: 'Reports', icon: BarChart3 },
           { id: 'ai-matcher', label: 'AI Matcher', icon: Sparkles },
+          { id: 'reactivation', label: 'Talent Re-Engage', icon: RefreshCw },
           { id: 'jobs', label: 'Active Jobs', icon: Briefcase },
           { id: 'wallet', label: 'Incentive Wallet', icon: PiggyBank },
           { id: 'media', label: 'Media Library', icon: Image },
@@ -804,10 +838,10 @@ export default function App() {
 
             {/* ROW 2: SEPARATE DEDICATED NAVIGATION MENU BAR WITH BREATHING SPACE AND INCREASED HEIGHT */}
             <div className="px-3 sm:px-5 pt-2 pb-2.5 bg-slate-950/60 border-b border-slate-200 dark:border-slate-800">
-              <nav className="bg-slate-950 text-slate-100 rounded-2xl px-3.5 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3 overflow-x-auto no-scrollbar shadow-md border border-slate-800/80">
+              <nav className="bg-slate-950 text-slate-100 rounded-2xl px-2.5 sm:px-4 py-1.5 sm:py-2.5 flex items-center justify-between gap-2 overflow-x-auto no-scrollbar shadow-md border border-slate-800/80 w-full">
                 
                 {/* Left Navigation Buttons */}
-                <div className="flex items-center gap-3 sm:gap-4.5 shrink-0">
+                <div className="flex items-center gap-1.5 xl:gap-3 shrink-0">
                   {navItems.map((tab) => {
                     const Icon = tab.icon;
                     const isSelected = activeTab === tab.id;
@@ -815,23 +849,23 @@ export default function App() {
                       <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id as any)}
-                        className={`group px-3.5 sm:px-4.5 py-2.5 rounded-xl text-[13px] md:text-[14px] font-extrabold md:font-black flex items-center gap-2.5 transition-all cursor-pointer shrink-0 ${
+                        className={`group px-2 md:px-2.5 xl:px-4.5 py-1.5 md:py-2 rounded-xl text-[11px] xl:text-[13px] font-extrabold flex items-center gap-1.5 xl:gap-2 transition-all cursor-pointer shrink-0 ${
                           isSelected
                             ? 'bg-indigo-600 text-white shadow-sm font-black'
                             : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
                         }`}
                       >
-                        <Icon className={`h-4 w-4 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`} />
+                        <Icon className={`h-3.5 w-3.5 xl:h-4 xl:w-4 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`} />
                         <span className="whitespace-nowrap">{tab.label}</span>
                         {tab.requestingBadge !== undefined && tab.requestingBadge > 0 && (
-                          <span className={`text-[9.5px] font-mono font-black px-1.5 py-0.2 rounded-full ${
+                          <span className={`text-[9px] xl:text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full ${
                             isSelected ? 'bg-amber-400 text-slate-950' : 'bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse'
                           }`} title={`${tab.requestingBadge} requesting chats`}>
                             {tab.requestingBadge}
                           </span>
                         )}
                         {tab.badge !== undefined && tab.badge > 0 && (
-                          <span className={`text-[9.5px] font-mono font-black px-1.5 py-0.2 rounded-full ${
+                          <span className={`text-[9px] xl:text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full ${
                             isSelected ? 'bg-white text-indigo-700' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                           }`}>
                             {tab.badge}
@@ -843,9 +877,9 @@ export default function App() {
                 </div>
 
                 {/* Right Status & Enrol Candidate CTA Button (Only for Admin) */}
-                <div className="flex items-center gap-3 shrink-0 ml-auto pl-3 border-l border-slate-800">
+                <div className="flex items-center gap-2 xl:gap-3 shrink-0 ml-auto pl-2 xl:pl-3 border-l border-slate-800">
                   {/* Synced Info */}
-                  <div className="text-xs font-mono text-emerald-400 font-semibold hidden sm:flex items-center gap-1.5 whitespace-nowrap">
+                  <div className="text-[10px] xl:text-xs font-mono text-emerald-400 font-semibold hidden lg:flex items-center gap-1 xl:gap-1.5 whitespace-nowrap">
                     <span>Synced: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
                     <span>•</span>
                     <strong className="text-emerald-300 font-black">{totalLeadsCount || leads.length} candidates</strong>
@@ -855,10 +889,10 @@ export default function App() {
                   {userRole === 'admin' && (
                     <button
                       onClick={() => setIsCreateModalOpen(true)}
-                      className="bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-black py-2 px-3.5 rounded-xl shadow-xs flex items-center gap-1.5 uppercase cursor-pointer transition-all tracking-wider whitespace-nowrap"
+                      className="bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-[11px] xl:text-xs font-black py-1.5 xl:py-2 px-2.5 xl:px-3.5 rounded-xl shadow-xs flex items-center gap-1.5 uppercase cursor-pointer transition-all tracking-wider whitespace-nowrap"
                     >
-                      <Plus className="h-4 w-4 stroke-[3]" />
-                      <span>ENROL CANDIDATE</span>
+                      <Plus className="h-3.5 w-3.5 xl:h-4 xl:w-4 stroke-[3]" />
+                      <span className="hidden sm:inline">ENROL CANDIDATE</span>
                     </button>
                   )}
                 </div>
@@ -980,6 +1014,24 @@ export default function App() {
                 <AiProfileMatcher
                   onSelectLead={setSelectedLead}
                   onUpdateLead={async () => { await pullCrmData(true); }}
+                  userRole={userRole}
+                />
+              </div>
+            )}
+
+            {activeTab === 'reactivation' && (
+              <div key="reactivation-tab" className="flex-1 flex flex-col min-h-0 overflow-y-auto p-4 sm:p-6 bg-slate-950">
+                <CandidateReactivation
+                  onSelectLead={setSelectedLead}
+                  onUpdateLead={async (updatedLead) => {
+                    const idx = leads.findIndex(l => l.id === updatedLead.id);
+                    if (idx !== -1) {
+                      const updatedLeads = [...leads];
+                      updatedLeads[idx] = updatedLead;
+                      setLeads(updatedLeads);
+                    }
+                    await pullCrmData(true);
+                  }}
                   userRole={userRole}
                 />
               </div>
@@ -1317,37 +1369,32 @@ export default function App() {
                     type="text"
                     placeholder="Type tag (e.g. Passport Ready, ECG, GNM) and click Add"
                     value={newEnrollTagInput}
-                    onChange={(e) => setNewEnrollTagInput(e.target.value)}
+                    onChange={(e) => {
+                      setNewEnrollTagInput(e.target.value);
+                      setEnrollTagError(null);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        if (newEnrollTagInput.trim()) {
-                          const tag = newEnrollTagInput.trim();
-                          if (!enrollTags.includes(tag)) {
-                            setEnrollTags([...enrollTags, tag]);
-                          }
-                          setNewEnrollTagInput('');
-                        }
+                        handleEnrollAddTag(newEnrollTagInput);
                       }
                     }}
                     className="flex-1 text-xs px-3 py-1.5 rounded-lg border border-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-950 text-slate-100 placeholder-slate-500 font-semibold"
                   />
                   <button
                     type="button"
-                    onClick={() => {
-                      if (newEnrollTagInput.trim()) {
-                        const tag = newEnrollTagInput.trim();
-                        if (!enrollTags.includes(tag)) {
-                          setEnrollTags([...enrollTags, tag]);
-                        }
-                        setNewEnrollTagInput('');
-                      }
-                    }}
+                    onClick={() => handleEnrollAddTag(newEnrollTagInput)}
                     className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
                   >
                     + Add Tag
                   </button>
                 </div>
+
+                {enrollTagError && (
+                  <p className="text-[11px] text-rose-500 font-bold mt-1 flex items-center gap-1">
+                    <span>⚠️</span> {enrollTagError}
+                  </p>
+                )}
 
                 {/* Intelligent Clickable Tag Suggestions */}
                 <div className="mt-1.5 flex flex-wrap gap-1.5 items-center">
@@ -1356,24 +1403,19 @@ export default function App() {
                     ? tagsList.slice(0, 8)
                     : tagsList.filter(t => t.toLowerCase().includes(newEnrollTagInput.toLowerCase()))
                   )
-                    .filter(t => !enrollTags.includes(t))
+                    .filter(t => !enrollTags.some(et => et.toLowerCase() === t.toLowerCase()))
                     .slice(0, 8)
                     .map((tag, idx) => (
                       <button
                         key={idx}
                         type="button"
-                        onClick={() => {
-                          if (!enrollTags.includes(tag)) {
-                            setEnrollTags([...enrollTags, tag]);
-                          }
-                          setNewEnrollTagInput('');
-                        }}
+                        onClick={() => handleEnrollAddTag(tag)}
                         className="text-[10px] bg-slate-900 hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 font-extrabold px-2 py-0.5 rounded border border-slate-800 hover:border-emerald-900 transition-all cursor-pointer"
                       >
                         {tag}
                       </button>
                     ))}
-                  {newEnrollTagInput.trim() !== '' && tagsList.filter(t => t.toLowerCase().includes(newEnrollTagInput.toLowerCase())).filter(t => !enrollTags.includes(t)).length === 0 && (
+                  {newEnrollTagInput.trim() !== '' && tagsList.filter(t => t.toLowerCase().includes(newEnrollTagInput.toLowerCase())).filter(t => !enrollTags.some(et => et.toLowerCase() === t.toLowerCase())).length === 0 && (
                     <span className="text-[10px] text-slate-500 italic">No matching tags. Press Enter or click Add to create.</span>
                   )}
                 </div>

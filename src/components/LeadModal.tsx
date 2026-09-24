@@ -143,39 +143,71 @@ export default function LeadModal({
   const [isRequalifying, setIsRequalifying] = useState(false);
   const [tags, setTags] = useState<string[]>(initialLead.tags || []);
   const [tagInputVal, setTagInputVal] = useState('');
+  const [tagError, setTagError] = useState<string | null>(null);
 
-  // Collect all unique existing tags dynamically from all current leads + bootstrap defaults
+  // Collect all unique existing tags dynamically from all current leads + bootstrap defaults (case-insensitive deduplicated)
   const allExistingTags = useMemo(() => {
-    const tagsSet = new Set<string>();
+    const uniqueMap = new Map<string, string>(); // lowercase -> original case
     const defaults = tagsList && tagsList.length > 0 ? tagsList : [
       'Chef', 'Nurse', 'Waiter', 'Waitress', 'Driver', 'Accountant', 
       'Manager', 'Sales', 'Developer', 'Electrician', 'Plumber', 
       'Receptionist', 'Housekeeper', 'Security', 'Painter', 'Mechanic', 'Operator'
     ];
-    defaults.forEach(t => tagsSet.add(t));
+    defaults.forEach(t => {
+      const trimmed = t.trim();
+      if (trimmed) {
+        uniqueMap.set(trimmed.toLowerCase(), trimmed);
+      }
+    });
     
     if (Array.isArray(allLeads)) {
       allLeads.forEach(l => {
         if (l.tags && Array.isArray(l.tags)) {
           l.tags.forEach(t => {
             if (t && typeof t === 'string' && t.trim()) {
-              tagsSet.add(t.trim());
+              const trimmed = t.trim();
+              const lower = trimmed.toLowerCase();
+              if (!uniqueMap.has(lower)) {
+                uniqueMap.set(lower, trimmed);
+              }
             }
           });
         }
       });
     }
-    return Array.from(tagsSet);
-  }, [allLeads]);
+    return Array.from(uniqueMap.values()).sort((a, b) => a.localeCompare(b));
+  }, [allLeads, tagsList]);
 
   // Filter matched suggestions based on what the user is typing
   const suggestedTags = useMemo(() => {
     const val = tagInputVal.trim().toLowerCase();
     if (val.length < 1) return []; // Auto-suggest after typing 1 or more characters
     return allExistingTags.filter(
-      t => t.toLowerCase().startsWith(val) && !tags.some(existing => existing.toLowerCase() === t.toLowerCase())
-    ).slice(0, 6); // Limit to top 6 suggestions
+      t => t.toLowerCase().includes(val) && !tags.some(existing => existing.toLowerCase() === t.toLowerCase())
+    ).slice(0, 8); // Limit to top 8 suggestions matching anywhere in string
   }, [tagInputVal, allExistingTags, tags]);
+
+  const handleAddTag = (rawVal: string) => {
+    setTagError(null);
+    const val = rawVal.trim();
+    if (!val) return;
+
+    const lowerVal = val.toLowerCase();
+    
+    // Check if it is already assigned to this candidate
+    if (tags.some(t => t.toLowerCase() === lowerVal)) {
+      setTagError(`Tag "${val}" already exists on this candidate.`);
+      setTimeout(() => setTagError(null), 4000);
+      return;
+    }
+
+    // Match case-insensitively with allExistingTags
+    const existingMatch = allExistingTags.find(t => t.toLowerCase() === lowerVal);
+    const finalTag = existingMatch || val; // Reuse existing casing if matched, otherwise keep as typed
+
+    setTags([...tags, finalTag]);
+    setTagInputVal('');
+  };
 
   const [projects, setProjects] = useState<string[]>(() => {
     if (propProjects && propProjects.length > 0) return propProjects;
@@ -2073,38 +2105,33 @@ export default function LeadModal({
                           type="text"
                           id="new-tag-input"
                           value={tagInputVal}
-                          onChange={(e) => setTagInputVal(e.target.value)}
+                          onChange={(e) => {
+                            setTagInputVal(e.target.value);
+                            setTagError(null);
+                          }}
                           placeholder="Add tag (e.g. Chef, Nurse, Waiter)..."
                           className="flex-1 text-xs sm:text-[13px] px-3 py-2 rounded-xl bg-slate-800 border border-slate-750 text-slate-100 focus:ring-1 focus:ring-accent-purple focus:outline-none font-semibold transition-all"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
-                              const val = tagInputVal.trim();
-                              if (val) {
-                                if (!tags.some(t => t.toLowerCase() === val.toLowerCase())) {
-                                  setTags([...tags, val]);
-                                }
-                                setTagInputVal('');
-                              }
+                              handleAddTag(tagInputVal);
                             }
                           }}
                         />
                         <button
                           type="button"
-                          onClick={() => {
-                            const val = tagInputVal.trim();
-                            if (val) {
-                              if (!tags.some(t => t.toLowerCase() === val.toLowerCase())) {
-                                  setTags([...tags, val]);
-                              }
-                              setTagInputVal('');
-                            }
-                          }}
+                          onClick={() => handleAddTag(tagInputVal)}
                           className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-2xs"
                         >
                           Add Tag
                         </button>
                       </div>
+
+                      {tagError && (
+                        <p className="text-[11px] text-rose-500 font-bold mt-1 flex items-center gap-1">
+                          <span>⚠️</span> {tagError}
+                        </p>
+                      )}
 
                       {/* Auto-suggest dropdown matches */}
                       {suggestedTags.length > 0 && (
@@ -2117,11 +2144,8 @@ export default function LeadModal({
                               <button
                                 key={sIdx}
                                 type="button"
-                                onClick={() => {
-                                  setTags([...tags, sTag]);
-                                  setTagInputVal('');
-                                }}
-                                className="bg-white dark:bg-slate-900 hover:bg-indigo-600 text-slate-100 dark:text-slate-200 hover:text-white text-[10px] font-extrabold px-2 py-1 rounded-lg border border-slate-750 dark:border-slate-700 hover:border-indigo-600 transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
+                                onClick={() => handleAddTag(sTag)}
+                                className="bg-slate-100 dark:bg-slate-900 hover:bg-indigo-600 text-slate-800 dark:text-slate-200 hover:text-white text-[10px] font-extrabold px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:border-indigo-600 transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
                               >
                                 <Plus className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-400 hover:text-white" />
                                 <span>{sTag}</span>
