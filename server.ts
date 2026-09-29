@@ -55,7 +55,7 @@ import { isDefaultExperience, getEffectiveExperience, getEffectiveIntake } from 
 import { DEFAULT_WHATSAPP_TEMPLATES, sendWhatsAppMessage, replaceTemplatePlaceholders, formatPhoneForWhatsApp, fetchMetaWhatsAppTemplates } from './src/server/whatsapp.ts';
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -222,13 +222,9 @@ async function safeGenerateContent(
 ): Promise<any> {
   const modelsToTry = [
     params.model,
-    'gemini-3.6-flash',
-    'gemini-3.1-pro-preview',
-    'gemini-3.8-flash',
-    'gemini-3.5-flash',
-    'gemini-3.1-flash-lite',
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-8b'
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash'
   ];
   const uniqueModels = Array.from(new Set(modelsToTry.filter(Boolean)));
   let lastError: any = null;
@@ -245,12 +241,22 @@ async function safeGenerateContent(
       return response;
     } catch (err: any) {
       lastError = err;
-      const errMsg = err?.message || String(err);
-      console.error(`[Gemini API] Error calling model "${modelAttempt}":`, errMsg);
+      const errMsg = (err?.message || String(err)).toLowerCase();
+      console.error(`[Gemini API] Error calling model "${modelAttempt}":`, err?.message || String(err));
       
-      // If we are on the last model in the list, don't write fallback log
+      const isQuotaOrRateLimit = errMsg.includes('resource_exhausted') || 
+                                 errMsg.includes('quota') || 
+                                 errMsg.includes('rate limit') || 
+                                 errMsg.includes('exhausted') || 
+                                 err?.status === 429;
+      
+      if (isQuotaOrRateLimit) {
+        console.warn(`[Gemini API] Quota/Rate Limit reached. Aborting model fallback retries to prevent token/request waste.`);
+        break;
+      }
+
       if (uniqueModels.indexOf(modelAttempt) < uniqueModels.length - 1) {
-        console.warn(`[Gemini API] Model "${modelAttempt}" failed/throttled. Retrying automatically with next available fallback model...`);
+        console.warn(`[Gemini API] Model "${modelAttempt}" failed. Retrying automatically with next available fallback model...`);
       }
     }
   }
@@ -1845,7 +1851,7 @@ async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadN
         if (result.success) {
           const autoReplyMsg: Message = {
             id: result.messageId || `msg_auto_${Date.now()}`,
-            sender: 'system',
+            sender: 'user',
             senderName: 'CGP Auto-Reply',
             text: replyText,
             timestamp: new Date().toISOString(),
@@ -2570,7 +2576,8 @@ app.post('/api/leads/:id/messages', async (req, res) => {
       replyToId: replyToId || undefined,
       replyToText: replyToText || undefined,
       replyToSender: replyToSender || undefined,
-      errorDetails: isFailed ? (deliveryResult?.details?.error?.message || JSON.stringify(deliveryResult?.details)) : undefined
+      errorDetails: isFailed ? (deliveryResult?.details?.error?.message || JSON.stringify(deliveryResult?.details)) : undefined,
+      buttons: (deliveryResult as any)?.buttons || matchedTemplate?.buttons
     };
 
     if (!Array.isArray(lead.messages)) {
@@ -2808,6 +2815,13 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                 if (s.errorDetails) {
                   lead.messages[mIdx].errorDetails = s.errorDetails;
                 }
+                if (lead.campaign && lead.campaign.toLowerCase().startsWith('reactivation -')) {
+                  if (newStatus === 'failed') {
+                    lead.reactivationStatus = 'failed';
+                  } else if (lead.reactivationStatus === 'failed') {
+                    lead.reactivationStatus = 'sent';
+                  }
+                }
                 leadsUpdated = true;
                 console.log(`[Meta Webhook POST] Match exact ID: Updated message "${wamid}" status from "${oldStatus}" to "${newStatus}" for lead "${lead.name}"`);
                 
@@ -2857,6 +2871,13 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
                         m.status = newStatus as 'sent' | 'delivered' | 'read' | 'failed';
                         if (s.errorDetails) {
                           m.errorDetails = s.errorDetails;
+                        }
+                        if (lead.campaign && lead.campaign.toLowerCase().startsWith('reactivation -')) {
+                          if (newStatus === 'failed') {
+                            lead.reactivationStatus = 'failed';
+                          } else if (lead.reactivationStatus === 'failed') {
+                            lead.reactivationStatus = 'sent';
+                          }
                         }
                         updatedAny = true;
                         console.log(`[Meta Webhook POST] Match phone secondary: Updated message "${m.id}" status from "${oldStatus}" to "${newStatus}" for lead "${lead.name}"`);
@@ -3685,7 +3706,7 @@ async function handleReactivationChatbot(leadId: string, messageBody: string) {
     // Update candidate messages log & status
     const outboundMsg: Message = {
       id: result.messageId || `msg_react_bot_${Date.now()}`,
-      sender: 'system',
+      sender: 'user',
       senderName: 'CGP Reactivation Bot',
       text: replyText,
       timestamp: new Date().toISOString(),
@@ -3750,7 +3771,7 @@ async function handleReactivationChatbot(leadId: string, messageBody: string) {
 app.get('/api/reactivation/campaigns', async (req, res) => {
   try {
     const leads = await getLeads(true);
-    const reactivationLeads = leads.filter(l => l.campaign && l.campaign.startsWith('Reactivation -'));
+    const reactivationLeads = leads.filter(l => l.campaign && l.campaign.toLowerCase().startsWith('reactivation -'));
     
     const campaignMap: Record<string, {
       name: string;
@@ -3764,23 +3785,65 @@ app.get('/api/reactivation/campaigns', async (req, res) => {
 
     reactivationLeads.forEach(l => {
       const cName = l.campaign!;
+      
+      // Determine the timestamp of the actual outreach message sent for this reactivation campaign
+      let outreachTimestamp = 0;
+      if (Array.isArray(l.messages)) {
+        const outreachMsgs = l.messages.filter(m => 
+          (m.sender === 'system' || m.sender === 'user') && 
+          (
+            m.senderName === 'CGP Reactivation Outreach' || 
+            String(m.text).toLowerCase().includes('reactivation') || 
+            String(m.senderName).toLowerCase().includes('reactivation') ||
+            String(m.text).toLowerCase().includes('vacancy alert')
+          )
+        );
+        if (outreachMsgs.length > 0) {
+          outreachTimestamp = new Date(outreachMsgs[outreachMsgs.length - 1].timestamp).getTime();
+        }
+      }
+
+      // To capture the true campaign launch date/time, we want the most recent time this lead was updated
+      // or when the actual outreach was sent (instead of using ancient candidate registration/createdAt dates).
+      let leadCampaignTime = l.updatedAt || l.createdAt || new Date().toISOString();
+      if (outreachTimestamp > 0) {
+        leadCampaignTime = new Date(outreachTimestamp).toISOString();
+      }
+
       if (!campaignMap[cName]) {
         campaignMap[cName] = {
           name: cName,
-          createdAt: l.createdAt || new Date().toISOString(),
+          createdAt: leadCampaignTime,
           leadsCount: 0,
           repliedCount: 0,
           interestedCount: 0,
           qualifiedCount: 0,
           candidates: []
         };
+      } else {
+        // Keep the latest launch/activity timestamp for the campaign's overall createdAt date
+        const existingTime = new Date(campaignMap[cName].createdAt).getTime();
+        const incomingTime = new Date(leadCampaignTime).getTime();
+        if (incomingTime > existingTime) {
+          campaignMap[cName].createdAt = leadCampaignTime;
+        }
       }
 
       const campaign = campaignMap[cName];
-      campaign.leadsCount++;
       
-      const hasLeadReplied = (l.messages || []).some(m => m.sender === 'lead');
-      if (hasLeadReplied) {
+      // Only count genuine successful outreach sent
+      if (l.reactivationStatus !== 'failed') {
+        campaign.leadsCount++;
+      }
+
+      // Check if candidate genuinely replied AFTER the outreach message was sent
+      const hasLeadReplied = ['replied', 'interested', 'qualified', 'unqualified'].includes(l.reactivationStatus || '') || (outreachTimestamp > 0 && (l.messages || []).some(m => {
+        return m.sender === 'lead' && new Date(m.timestamp).getTime() > outreachTimestamp;
+      }));
+
+      // A genuine reply is only counted if the lead's status is replied/interested/qualified/unqualified,
+      // or if they genuinely replied after the outreach message was sent, and reactivationStatus is NOT 'failed'!
+      if (hasLeadReplied && l.reactivationStatus !== 'failed') {
         campaign.repliedCount++;
       }
 
@@ -3804,7 +3867,12 @@ app.get('/api/reactivation/campaigns', async (req, res) => {
       });
     });
 
-    res.json(Object.values(campaignMap));
+    // Sort campaigns descending by launch date so newly launched ones instantly bubble to the top of the list!
+    const sortedCampaigns = Object.values(campaignMap).sort((a, b) => {
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+    res.json(sortedCampaigns);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -3907,7 +3975,7 @@ function calculateInactivityPeriod(c: any): { months: number; text: string } {
 // POST scan old database for suitable stale candidates
 app.post('/api/reactivation/scan', async (req, res) => {
   try {
-    const { jobTitle, country, salary, experience, requirements, inactivityMonths, limit, gender } = req.body;
+    const { jobTitle, country, salary, experience, requirements, inactivityMonths, limit, gender, skipAI } = req.body;
     
     const leads = await getLeads(true);
     
@@ -3931,10 +3999,11 @@ app.post('/api/reactivation/scan', async (req, res) => {
       const ageInMonths = Math.max(0, ageInMs / (1000 * 60 * 60 * 24 * 30));
       
       // Candidate is stale if age in months is >= inactivityMonths, or they are in cold/lost stage, or they have no messages
-      const isStale = ageInMonths >= (inactivityMonths || 6) || l.stage === 'cold_leads' || l.stage === 'lost' || !l.messages || l.messages.length === 0;
+      // Bypassed if inactivityMonths is -1 (Show All Candidates)
+      const isStale = inactivityMonths === -1 || ageInMonths >= (inactivityMonths || 6) || l.stage === 'cold_leads' || l.stage === 'lost' || !l.messages || l.messages.length === 0;
       
       // Ensure they aren't already actively being contacted for another specific campaign
-      const notInActiveCampaign = !l.campaign || !l.campaign.startsWith('Reactivation -');
+      const notInActiveCampaign = inactivityMonths === -1 || !l.campaign || !l.campaign.toLowerCase().startsWith('reactivation -');
 
       return isStale && notInActiveCampaign;
     });
@@ -4006,15 +4075,49 @@ app.post('/api/reactivation/scan', async (req, res) => {
       });
     }
 
-    // Limit pool
-    inactiveCandidates = inactiveCandidates.slice(0, limit || 30);
+    // Rank candidates by relevance to jobTitle and other search params before slicing
+    if (jobTitle) {
+      const jobKeywords = jobTitle.toLowerCase().split(/[\s,/-]+/).filter(Boolean);
+      inactiveCandidates = inactiveCandidates.map(c => {
+        let relevance = 0;
+        const cPos = (c.position || '').toLowerCase();
+        const cExp = (c.experience || '').toLowerCase();
+        const cRemarks = ((c.adminRemarks || '') + ' ' + (c.remarks1 || '') + ' ' + (c.remarks2 || '') + ' ' + (c.remarks3 || '') + ' ' + (c.notes || '') + ' ' + (c.summary || '')).toLowerCase();
+        
+        jobKeywords.forEach(kw => {
+          if (cPos === kw) {
+            relevance += 200; // Exact match
+          } else if (cPos.includes(kw)) {
+            relevance += 100; // Substring match
+          }
+          if (cExp.includes(kw)) {
+            relevance += 30;
+          }
+          if (cRemarks.includes(kw)) {
+            relevance += 10;
+          }
+        });
+        
+        return { ...c, relevance };
+      });
+      
+      // Sort by relevance descending so matching profiles bubble up to the top of the pool
+      inactiveCandidates.sort((a: any, b: any) => (b.relevance || 0) - (a.relevance || 0));
+    }
 
-    const ai = getGemini();
+    // Limit pool (bypassed if limit is -1 for Whole CRM)
+    if (limit !== -1) {
+      inactiveCandidates = inactiveCandidates.slice(0, limit || 30);
+    }
+
+    const ai = skipAI ? null : getGemini();
     let matches: any[] = [];
 
     if (ai) {
       try {
-        const candidatesJson = JSON.stringify(inactiveCandidates.map(c => ({
+        // Safe-guard: Only pass top 35 most relevant candidates to Gemini to prevent Quota/Token exhaustion
+        const geminiPool = inactiveCandidates.slice(0, 35);
+        const candidatesJson = JSON.stringify(geminiPool.map(c => ({
           id: c.id,
           name: c.name,
           gender: c.gender,
@@ -4045,7 +4148,7 @@ app.post('/api/reactivation/scan', async (req, res) => {
         Return ONLY valid JSON matching format: { "matches": [ { "leadId": "...", "matchScore": 85, "matchReason": "...", "customMessage": "..." } ] }`;
 
         const response = await safeGenerateContent(ai, {
-          model: "gemini-3.8-flash",
+          model: "gemini-1.5-flash", // Use stable and quota-friendly 1.5-flash as default to prevent rate limits
           contents: prompt,
           config: {
             responseMimeType: "application/json",
@@ -4078,40 +4181,33 @@ app.post('/api/reactivation/scan', async (req, res) => {
       }
     }
 
-    // Fallback rule-based matching (for simulation mode or Gemini failure)
-    if (matches.length === 0) {
-      matches = inactiveCandidates.map(c => {
-        // Calculate a smart heuristic score
-        let matchScore = 50;
-        const cPos = (c.position || '').toLowerCase();
-        const cExp = (c.experience || '').toLowerCase();
-        const jTitle = jobTitle.toLowerCase();
-        
-        if (cPos.includes(jTitle) || jTitle.includes(cPos)) matchScore += 30;
-        if (cExp.includes('years') || cExp.includes('yr')) matchScore += 15;
-        if (c.adminRemarks && c.adminRemarks.toLowerCase().includes('premium')) matchScore += 10;
-        matchScore = Math.min(98, matchScore);
-
-        const customMessage = `Hi ${c.name.split(' ')[0]}, we have a new ${jobTitle} opportunity in ${country}. Salary ${salary}/month + accommodation. Would you like to know more?`;
-        
-        return {
-          leadId: c.id,
-          matchScore,
-          matchReason: matchScore >= 75 
-            ? `Candidate's position "${c.position}" and profile notes align perfectly with ${jobTitle} requirements.`
-            : `Profile of "${c.position}" presents moderate alignment with hospitality background.`,
-          customMessage
-        };
-      });
-    }
-
-    // Merge results with candidate profile details
+    // Merge results with candidate profile details using local rule-based match scores if Gemini analysis is unavailable
     const finalizedCandidates = inactiveCandidates.map(c => {
-      const matchObj = matches.find(m => m.leadId === c.id) || {
-        matchScore: 60,
-        matchReason: 'Archived credentials suggest suitability for general hospitality roles.',
-        customMessage: `Hi ${c.name.split(' ')[0]}, we have a new ${jobTitle} opportunity in ${country}. Salary ${salary}/month + accommodation. Would you like to know more?`
+      const geminiMatch = matches.find(m => m.leadId === c.id);
+      
+      // Calculate a highly accurate rule-based heuristic fallback
+      let matchScore = 50;
+      const cPos = (c.position || '').toLowerCase();
+      const cExp = (c.experience || '').toLowerCase();
+      const jTitle = (jobTitle || '').toLowerCase();
+      
+      if (cPos.includes(jTitle) || jTitle.includes(cPos)) matchScore += 30;
+      if (cExp.includes('years') || cExp.includes('yr')) matchScore += 15;
+      if (c.adminRemarks && c.adminRemarks.toLowerCase().includes('premium')) matchScore += 10;
+      matchScore = Math.min(98, matchScore);
+
+      const customMessage = `Hi ${c.name.split(' ')[0]}, we have a new ${jobTitle} opportunity in ${country}. Salary ${salary}/month + accommodation. Would you like to know more?`;
+      
+      const fallbackMatch = {
+        leadId: c.id,
+        matchScore,
+        matchReason: matchScore >= 75 
+          ? `Candidate's position "${c.position}" and profile notes align perfectly with ${jobTitle} requirements.`
+          : `Profile of "${c.position}" presents moderate alignment with hospitality background.`,
+        customMessage
       };
+
+      const matchObj = geminiMatch || fallbackMatch;
 
       // Calculate dynamic lastContactedMonths & inactivityText for display
       const inactivityInfo = calculateInactivityPeriod(c);
@@ -4168,6 +4264,7 @@ app.post('/api/reactivation/launch', async (req, res) => {
           country,
           position: jobTitle,
           experience: '3 years',
+          salaryRange: salary || '180 OMR',
           adminRemarks: 'ORGANIC - Materialized from stale archives via Reactivation.',
           assignedTo: 'unassigned',
           importance: 4,
@@ -4196,8 +4293,10 @@ app.post('/api/reactivation/launch', async (req, res) => {
       } else {
         lead = leads[leadIdx];
         lead.campaign = campaignName;
-        lead.reactivationStatus = 'sent';
         lead.stage = 'cold_leads';
+        lead.salaryRange = salary || lead.salaryRange || '180 OMR';
+        lead.position = jobTitle || lead.position;
+        lead.country = country || lead.country;
       }
 
       // Send the outreach via WhatsApp (Simulation or Meta Cloud API)
@@ -4212,16 +4311,22 @@ app.post('/api/reactivation/launch', async (req, res) => {
         lead, 
         matchedTemplate
       );
+
+      // Set reactivationStatus based on genuine delivery success!
+      lead.reactivationStatus = dispatchResult.status === 'failed' ? 'failed' : 'sent';
       
       // Append outbound message to messages list
       const outboundMsg: Message = {
         id: dispatchResult.messageId || `msg_react_out_${Date.now()}`,
-        sender: 'system',
+        sender: 'user',
         senderName: 'CGP Reactivation Outreach',
         text: message,
         timestamp: new Date().toISOString(),
-        status: 'sent',
-        channel: 'whatsapp'
+        status: dispatchResult.status === 'failed' ? 'failed' : 'sent',
+        channel: 'whatsapp',
+        templateName: matchedTemplate ? matchedTemplate.id : undefined,
+        templateType: matchedTemplate ? 'template' : undefined,
+        buttons: dispatchResult.buttons
       };
 
       if (!Array.isArray(lead.messages)) lead.messages = [];

@@ -17,7 +17,8 @@ We have received your application for {{position}} openings in {{country}}. To p
 
 Kindly reply to this message directly with your documents.
 Best regards,
-{{coordinator}} | Career Growth Placement`
+{{coordinator}} | Career Growth Placement`,
+    buttons: ['UPLOAD CV', 'I HAVE PASSPORT']
   },
   {
     id: 'tpl_interview_invite',
@@ -33,7 +34,8 @@ Your Client Selection Interview has been scheduled.
 🏢 Location: Career Growth Placement Office
 👤 Coordinator: {{coordinator}}
 
-Please confirm your availability by replying YES to this message so we can reserve your interview slot.`
+Please confirm your availability by replying YES to this message so we can reserve your interview slot.`,
+    buttons: ['YES (Interested)', 'NO (Not Interested)']
   },
   {
     id: 'tpl_office_visit',
@@ -49,7 +51,8 @@ We invite you to visit our office for document verification and direct job couns
 📍 Career Growth Placement Office
 👤 Contact Person: {{coordinator}}
 
-Please bring your original passport and certificates. See you soon!`
+Please bring your original passport and certificates. See you soon!`,
+    buttons: ['I WILL VISIT', 'SEND LOCATION']
   },
   {
     id: 'tpl_offer_visa_update',
@@ -60,7 +63,8 @@ Please bring your original passport and certificates. See you soon!`
 
 We are pleased to inform you that your selection and visa processing for {{position}} in {{country}} has successfully moved to the final stage.
 
-Please connect with your assigned coordinator {{coordinator}} today for offer letter signing, medical checkup details, and flight departure briefing.`
+Please connect with your assigned coordinator {{coordinator}} today for offer letter signing, medical checkup details, and flight departure briefing.`,
+    buttons: ['CONTACT NOW', 'OFFICE LOCATION']
   },
   {
     id: 'tpl_callback_reminder',
@@ -73,7 +77,8 @@ This is {{coordinator}} calling from Career Growth Placement regarding your rece
 
 We tried calling your number ({{phone}}) but were unable to connect. 
 
-Please reply to this WhatsApp message or call us back at your earliest convenience so we do not miss your application deadline.`
+Please reply to this WhatsApp message or call us back at your earliest convenience so we do not miss your application deadline.`,
+    buttons: ['CALL ME BACK', 'I AM BUSY']
   },
   {
     id: 'tpl_urgent_intake',
@@ -87,14 +92,16 @@ Career Growth Placement is urgently hiring for:
 🔹 Destination: {{country}}
 🔹 Benefits: Free Accommodation, Medical & Transportation
  
-Seats are limited! Reply "INTERESTED" or call {{coordinator}} now to register.`
+Seats are limited! Reply "INTERESTED" or call {{coordinator}} now to register.`,
+    buttons: ['INTERESTED', 'NOT INTERESTED']
   },
   {
     id: 'assign',
     title: '🤝 Coordinator Assignment (assign)',
     category: 'onboarding',
     description: 'Meta template: Ms. Edenla/coordinator will assist shortly, save phone 9832354098.',
-    text: `Ms. {{coordinator}} will assist you shortly. Please save 9832354098. If you miss her call, just call back on the same number. Regards, Career Growth Placement`
+    text: `Ms. {{coordinator}} will assist you shortly. Please save 9832354098. If you miss her call, just call back on the same number. Regards, Career Growth Placement`,
+    buttons: ['SAVE CONTACT', 'CALL COORDINATOR']
   }
 ];
 
@@ -109,51 +116,60 @@ export function resolveTemplateVariable(
 ): string {
   const v = varName.trim().toLowerCase();
   
-  const nameVal = lead?.name || candidateName || 'Candidate';
+  const nameVal = (lead?.name || candidateName || 'Candidate').split(' ')[0];
   const countryVal = lead?.country || 'Gulf / Overseas';
   const positionVal = lead?.position || 'Openings';
   const phoneVal = lead?.phone || phone || '';
   const serialNoVal = lead?.serialNo || 'N/A';
-  let coordinatorVal = coordinatorName || lead?.assignedTo || 'Career Growth Placement Team';
-  if (coordinatorVal === 'admin') {
-    coordinatorVal = 'Administrator';
+  
+  let coordinatorVal = coordinatorName || lead?.assignedTo || 'Edenla';
+  if (coordinatorVal === 'admin' || coordinatorVal === 'unassigned') {
+    coordinatorVal = 'Coordinator';
   } else if (coordinatorVal && coordinatorVal.length > 0) {
     coordinatorVal = coordinatorVal.charAt(0).toUpperCase() + coordinatorVal.slice(1);
   }
 
   // Support explicit named variables
-  if (v === 'name') return nameVal;
-  if (v === 'country') return countryVal;
-  if (v === 'position') return positionVal;
-  if (v === 'phone') return phoneVal;
-  if (v === 'serialno') return serialNoVal;
-  if (v === 'coordinator') return coordinatorVal;
+  if (v === 'name') return nameVal || 'Candidate';
+  if (v === 'country') return countryVal || 'abroad';
+  if (v === 'position') return positionVal || 'vacancies';
+  if (v === 'phone') return phoneVal || 'N/A';
+  if (v === 'serialno') return serialNoVal || 'N/A';
+  if (v === 'coordinator') return coordinatorVal || 'Coordinator';
 
   // Support Meta's numeric variables {{1}}, {{2}}, {{3}}...
   const lowerId = templateId.toLowerCase();
   const lowerText = templateText.toLowerCase();
 
   if (v === '1') {
-    // Special heuristic: if it's the assignment template, the first variable is coordinator
+    // Special heuristic: if it's the assignment template or save text, the first variable is coordinator
     if (lowerId.includes('assign') || lowerText.includes('assist') || lowerText.includes('save')) {
-      return coordinatorVal;
+      return coordinatorVal || 'Coordinator';
     }
-    return nameVal;
+    return nameVal || 'Candidate';
   }
   if (v === '2') {
     if (lowerId.includes('assign') || lowerText.includes('assist')) {
-      return phoneVal; // fallback e.g. for secondary phone
+      return phoneVal || '9832354098'; // Return fallback coordinator phone
     }
-    return positionVal;
+    return positionVal || 'vacancies';
   }
   if (v === '3') {
-    return countryVal;
+    return countryVal || 'abroad';
   }
   if (v === '4') {
-    return coordinatorVal;
+    if (lowerId.includes('assign') || lowerText.includes('assist')) {
+      return coordinatorVal || 'Coordinator';
+    }
+    const salaryVal = lead?.salaryRange || (lead as any)?.salary || '180 OMR';
+    return salaryVal || '180 OMR';
+  }
+  if (v === '5') {
+    const expVal = lead?.experience || 'hospitality';
+    return expVal || 'hospitality';
   }
 
-  return '';
+  return 'N/A';
 }
 
 export function replaceTemplatePlaceholders(
@@ -214,6 +230,7 @@ export interface SendWhatsAppResult {
   channel: 'meta_cloud_api' | 'simulation';
   status: 'sent' | 'delivered' | 'read' | 'failed';
   details?: any;
+  buttons?: string[];
 }
 
 export async function sendWhatsAppMessage(
@@ -243,7 +260,7 @@ export async function sendWhatsAppMessage(
       let type = 'text';
       let payload: any = {};
 
-      if (matchedTemplate && matchedTemplate.type !== 'quick_reply') {
+      if (matchedTemplate) {
         type = 'template';
         
         // Extract variables in order of appearance in original template text
@@ -327,7 +344,8 @@ export async function sendWhatsAppMessage(
           messageId: data.messages[0].id || messageId,
           channel: 'meta_cloud_api',
           status: 'sent',
-          details: data
+          details: data,
+          buttons: matchedTemplate?.buttons
         };
       } else {
         console.warn('Meta WhatsApp Cloud API error response:', JSON.stringify(data));
@@ -367,7 +385,8 @@ export async function sendWhatsAppMessage(
       mode: 'sandbox_simulation',
       provider: 'Direct Meta WhatsApp Cloud API Engine',
       note: 'Message delivered via Direct Meta WhatsApp Cloud API Engine.'
-    }
+    },
+    buttons: matchedTemplate?.buttons
   };
 }
 
@@ -408,6 +427,19 @@ export async function fetchMetaWhatsAppTemplates(): Promise<WhatsAppTemplate[]> 
       const bodyText = bodyComponent?.text || '';
       if (!bodyText) continue;
 
+      // Extract buttons
+      const buttonsComponent = Array.isArray(raw.components)
+        ? raw.components.find((c: any) => c.type === 'BUTTONS' || c.type === 'buttons')
+        : null;
+      const buttons: string[] = [];
+      if (buttonsComponent && Array.isArray(buttonsComponent.buttons)) {
+        buttonsComponent.buttons.forEach((btn: any) => {
+          if (btn && btn.text) {
+            buttons.push(btn.text);
+          }
+        });
+      }
+
       // Map Meta's category (e.g. UTILITY, MARKETING, AUTHENTICATION) to one of our categories
       let category: 'onboarding' | 'interview' | 'documentation' | 'status' | 'offer' | 'quick_reply' = 'status';
       const metaCat = raw.category ? String(raw.category).toUpperCase() : '';
@@ -431,7 +463,8 @@ export async function fetchMetaWhatsAppTemplates(): Promise<WhatsAppTemplate[]> 
         description: `Meta Approved Template (${raw.category || 'Utility'})`,
         text: bodyText,
         type: 'template',
-        language: raw.language || 'en'
+        language: raw.language || 'en',
+        buttons: buttons.length > 0 ? buttons : undefined
       });
     }
 

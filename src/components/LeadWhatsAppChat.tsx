@@ -835,88 +835,243 @@ export default function LeadWhatsAppChat({
                     <div className="absolute top-0 -left-1.5 w-1.5 h-2.5 bg-white dark:bg-[#202c33]" style={{ clipPath: 'polygon(100% 0, 0 0, 100% 100%)' }} />
                   )}
 
-                  {/* Template tag if sent from template or quick reply */}
-                  {msg.templateName && (
-                    <div className="mb-1.5 pb-0.5 border-b border-[#000000]/05 dark:border-white/10 text-[10px] font-bold uppercase text-[#00a884] dark:text-emerald-400 flex items-center gap-1 select-none">
-                      {msg.templateType === 'quick_reply' ? (
-                        <>
-                          <Zap className="h-2.5 w-2.5 text-amber-500 fill-current" />
-                          <span>Quick Reply:</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>📑 Template:</span>
-                        </>
-                      )}
-                      <span className="truncate">{msg.templateName}</span>
-                    </div>
-                  )}
+                  {/* Template/Automated rich view card in the style of AI Sensy */}
+                  {(() => {
+                    const isReactivationOutreach = msg.senderName === 'CGP Reactivation Outreach';
+                    const isReactivationBot = msg.senderName === 'CGP Reactivation Bot';
+                    const isAutoReply = msg.senderName === 'CGP Auto-Reply';
+                    const isTemplate = !!msg.templateName;
+                    const isAutomatedOrTemplate = isTemplate || isReactivationOutreach || isReactivationBot || isAutoReply;
 
-                  {/* Quoted Message Reply Box */}
-                  {msg.replyToId && (
-                    <div className="mb-1.5 p-2 rounded-md bg-[#000000]/04 dark:bg-[#000000]/25 border-l-[4px] border-[#00a884] dark:border-emerald-500 text-[12px] leading-tight select-none text-[#111b21]/80 dark:text-[#e9edef]/85">
-                      <div className="font-bold text-[11px] text-[#00a884] dark:text-emerald-400 mb-0.5 truncate flex items-center gap-1">
-                        <CornerUpLeft className="h-3 w-3" />
-                        <span>{msg.replyToSender || 'Contact'}</span>
-                      </div>
-                      <div className="line-clamp-2 italic text-[#111b21]/70 dark:text-[#e9edef]/75">
-                        {msg.replyToText}
-                      </div>
-                    </div>
-                  )}
+                    if (isAutomatedOrTemplate) {
+                      let typeLabel = "📑 Template Message";
+                      let bgClass = "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300";
+                      let icon = "📑";
 
-                  {/* Media Content Previews */}
-                  {msg.type === 'image' && msg.mediaUrl && (
-                    <div className="mb-1.5 rounded-md overflow-hidden border border-[#000000]/05 bg-[#f0f2f5] dark:bg-[#111b21] max-w-full">
-                      <img
-                        src={getDisplayUrl(msg.mediaUrl)}
-                        alt={msg.fileName || 'WhatsApp Attachment'}
-                        referrerPolicy="no-referrer"
-                        className="max-h-64 w-full object-cover hover:scale-[1.01] transition-transform duration-200 cursor-zoom-in"
-                        onClick={() => window.open(getDisplayUrl(msg.mediaUrl), '_blank')}
-                      />
-                    </div>
-                  )}
+                      if (isReactivationOutreach) {
+                        typeLabel = "📢 BROADCAST OUTREACH";
+                        bgClass = "bg-indigo-500/10 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300";
+                        icon = "📢";
+                      } else if (isReactivationBot) {
+                        typeLabel = "🤖 AI CHATBOT PRE-SCREENING";
+                        bgClass = "bg-purple-500/10 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300";
+                        icon = "🤖";
+                      } else if (isAutoReply) {
+                        typeLabel = "⚡ AUTOMATED REPLY";
+                        bgClass = "bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300";
+                        icon = "⚡";
+                      }
 
-                  {(msg.type === 'pdf' || msg.type === 'document') && msg.mediaUrl && (
-                    <div className="mb-1.5 p-2 rounded-lg border border-[#000000]/05 bg-[#f0f2f5]/60 dark:bg-[#111b21]/40 flex items-center gap-2.5 max-w-full">
-                      <div className="p-2 rounded-lg bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 shrink-0">
-                        <FileText className="h-5 w-5" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[12px] font-bold text-[#111b21] dark:text-[#e9edef] truncate">
-                           {msg.fileName || 'Attachment Document'}
-                        </p>
-                        <p className="text-[10px] text-[#667781] dark:text-[#8696a0] font-mono">
-                          {msg.fileSize || 'Unknown Size'} • {msg.type?.toUpperCase()}
-                        </p>
-                      </div>
-                      <a
-                        href={getDisplayUrl(msg.mediaUrl)}
-                        download={msg.fileName || 'document'}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="p-1.5 rounded-full bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 text-[#54656f] dark:text-[#8696a0] transition-colors cursor-pointer shrink-0"
-                        title="Download File"
-                      >
-                        <Download className="h-4 w-4" />
-                      </a>
-                    </div>
-                  )}
+                      return (
+                        <div className="mb-2 p-2.5 rounded-xl border border-emerald-500/10 dark:border-emerald-400/20 bg-emerald-50/50 dark:bg-[#112421]/30 space-y-2">
+                          {/* AI Sensy style header badge */}
+                          <div className="flex items-center justify-between pb-1.5 border-b border-emerald-500/10 dark:border-emerald-400/10 text-[9.5px] font-black tracking-wider leading-none">
+                            <span className={`px-2 py-1 rounded-md flex items-center gap-1 ${bgClass}`}>
+                              <span>{icon}</span>
+                              <span>{typeLabel}</span>
+                            </span>
+                            {isTemplate && (
+                              <span className="text-slate-400 dark:text-slate-500 truncate max-w-[150px]" title={msg.templateName}>
+                                {msg.templateName}
+                              </span>
+                            )}
+                          </div>
 
-                  {/* Body Text */}
-                  {msg.text && 
-                   msg.text !== 'Sent an image' && 
-                   msg.text !== 'Sent a PDF document' && 
-                   msg.text !== 'Sent a document' && 
-                   !msg.text.startsWith('Sent an image:') && 
-                   !msg.text.startsWith('Sent a PDF:') && 
-                   !msg.text.startsWith('Sent a document:') && 
-                   !msg.text.startsWith('Sent a PDF document:') && (
-                    <span className="whitespace-pre-wrap leading-normal font-sans font-normal text-[14px] select-text break-words tracking-normal">
-                      {msg.text}
-                    </span>
-                  )}
+                          {/* Quoted Message Reply Box */}
+                          {msg.replyToId && (
+                            <div className="p-2 rounded-md bg-black/5 dark:bg-black/25 border-l-[3px] border-emerald-500 text-[11px] leading-tight select-none text-slate-700 dark:text-slate-300">
+                              <div className="font-bold text-[10px] text-emerald-600 dark:text-emerald-400 mb-0.5 truncate flex items-center gap-1">
+                                <CornerUpLeft className="h-2.5 w-2.5" />
+                                <span>{msg.replyToSender || 'Contact'}</span>
+                              </div>
+                              <div className="line-clamp-2 italic text-slate-500 dark:text-slate-400">
+                                {msg.replyToText}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Media Content Previews */}
+                          {msg.type === 'image' && msg.mediaUrl && (
+                            <div className="rounded-md overflow-hidden border border-black/5 bg-[#f0f2f5] dark:bg-[#111b21] max-w-full">
+                              <img
+                                src={getDisplayUrl(msg.mediaUrl)}
+                                alt={msg.fileName || 'WhatsApp Attachment'}
+                                referrerPolicy="no-referrer"
+                                className="max-h-64 w-full object-cover hover:scale-[1.01] transition-transform duration-200 cursor-zoom-in"
+                                onClick={() => window.open(getDisplayUrl(msg.mediaUrl), '_blank')}
+                              />
+                            </div>
+                          )}
+
+                          {(msg.type === 'pdf' || msg.type === 'document') && msg.mediaUrl && (
+                            <div className="p-2 rounded-lg border border-black/5 bg-[#f0f2f5]/60 dark:bg-[#111b21]/40 flex items-center gap-2 max-w-full">
+                              <div className="p-2 rounded-lg bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 shrink-0">
+                                <FileText className="h-4.5 w-4.5" />
+                              </div>
+                              <div className="flex-1 min-w-0 text-left">
+                                <p className="text-[11.5px] font-bold text-slate-800 dark:text-slate-200 truncate">
+                                   {msg.fileName || 'Attachment Document'}
+                                </p>
+                                <p className="text-[9.5px] text-slate-500 dark:text-slate-400 font-mono">
+                                  {msg.fileSize || 'Unknown Size'} • {msg.type?.toUpperCase()}
+                                </p>
+                              </div>
+                              <a
+                                href={getDisplayUrl(msg.mediaUrl)}
+                                download={msg.fileName || 'document'}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="p-1 rounded-full bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 text-slate-500 dark:text-slate-400 cursor-pointer shrink-0"
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                              </a>
+                            </div>
+                          )}
+
+                          {/* Rich view formatted Body Text */}
+                          {msg.text && (
+                            <div className="whitespace-pre-wrap leading-relaxed font-sans font-normal text-[13.8px] text-[#111b21] dark:text-[#e9edef] select-text break-words tracking-normal">
+                              {msg.text}
+                            </div>
+                          )}
+
+                          {/* Quick Reply Buttons inside template/automated card */}
+                          {msg.buttons && msg.buttons.length > 0 && (
+                            <div className="pt-2 flex flex-col gap-1.5 border-t border-emerald-500/10 dark:border-emerald-400/10">
+                              {msg.buttons.map((btnText, bIdx) => (
+                                <button
+                                  key={bIdx}
+                                  onClick={() => handleSimulateReply(btnText)}
+                                  disabled={simulatingReply}
+                                  className="w-full py-1.5 px-3 rounded-lg bg-[#ffffff] hover:bg-[#f3f4f6] dark:bg-[#202c33] dark:hover:bg-[#2b3943] border border-[#e5e7eb] dark:border-[#2f3b43] text-center text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center justify-center gap-1.5 shadow-sm transition active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                                >
+                                  <CornerUpLeft className="h-3 w-3 text-emerald-500" />
+                                  <span>{btnText}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Premium AI Sensy Delivery Status Banner */}
+                          <div className="pt-1.5 border-t border-emerald-500/10 dark:border-emerald-400/10 flex items-center justify-between text-[9.5px] font-bold select-none leading-none">
+                            <span className="text-slate-400 dark:text-slate-500 font-mono uppercase tracking-wider">
+                              Ai Sensy Rich View
+                            </span>
+                            
+                            {msg.status === 'failed' ? (
+                              <span className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-extrabold uppercase bg-rose-500/10 px-2 py-1 rounded-md border border-rose-500/20">
+                                <AlertCircle className="h-3 w-3 animate-pulse" />
+                                <span>DELIVERY FAILED</span>
+                              </span>
+                            ) : msg.status === 'read' ? (
+                              <span className="flex items-center gap-1.5 text-sky-600 dark:text-sky-400 font-extrabold uppercase bg-sky-500/10 px-2 py-1 rounded-md border border-sky-500/20">
+                                <CheckCheck className="h-3 w-3 text-sky-500 stroke-[3]" />
+                                <span>DELIVERED & READ</span>
+                              </span>
+                            ) : msg.status === 'delivered' ? (
+                              <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-extrabold uppercase bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20">
+                                <CheckCheck className="h-3 w-3 text-emerald-500 stroke-[2.5]" />
+                                <span>DELIVERED TO DEVICE</span>
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 font-extrabold uppercase bg-slate-500/10 px-2 py-1 rounded-md border border-slate-500/20">
+                                <Check className="h-3 w-3 text-slate-500 stroke-[2.5]" />
+                                <span>DISPATCHED / SENT</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // Fallback to standard message view
+                    return (
+                      <>
+                        {/* Standard Template tag if sent from template or quick reply */}
+                        {msg.templateName && (
+                          <div className="mb-1.5 pb-0.5 border-b border-[#000000]/05 dark:border-white/10 text-[10px] font-bold uppercase text-[#00a884] dark:text-emerald-400 flex items-center gap-1 select-none">
+                            {msg.templateType === 'quick_reply' ? (
+                              <>
+                                <Zap className="h-2.5 w-2.5 text-amber-500 fill-current" />
+                                <span>Quick Reply:</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>📑 Template:</span>
+                              </>
+                            )}
+                            <span className="truncate">{msg.templateName}</span>
+                          </div>
+                        )}
+
+                        {/* Quoted Message Reply Box */}
+                        {msg.replyToId && (
+                          <div className="mb-1.5 p-2 rounded-md bg-[#000000]/04 dark:bg-[#000000]/25 border-l-[4px] border-[#00a884] dark:border-emerald-500 text-[12px] leading-tight select-none text-[#111b21]/80 dark:text-[#e9edef]/85">
+                            <div className="font-bold text-[11px] text-[#00a884] dark:text-emerald-400 mb-0.5 truncate flex items-center gap-1">
+                              <CornerUpLeft className="h-3 w-3" />
+                              <span>{msg.replyToSender || 'Contact'}</span>
+                            </div>
+                            <div className="line-clamp-2 italic text-[#111b21]/70 dark:text-[#e9edef]/75">
+                              {msg.replyToText}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Media Content Previews */}
+                        {msg.type === 'image' && msg.mediaUrl && (
+                          <div className="mb-1.5 rounded-md overflow-hidden border border-[#000000]/05 bg-[#f0f2f5] dark:bg-[#111b21] max-w-full">
+                            <img
+                              src={getDisplayUrl(msg.mediaUrl)}
+                              alt={msg.fileName || 'WhatsApp Attachment'}
+                              referrerPolicy="no-referrer"
+                              className="max-h-64 w-full object-cover hover:scale-[1.01] transition-transform duration-200 cursor-zoom-in"
+                              onClick={() => window.open(getDisplayUrl(msg.mediaUrl), '_blank')}
+                            />
+                          </div>
+                        )}
+
+                        {(msg.type === 'pdf' || msg.type === 'document') && msg.mediaUrl && (
+                          <div className="mb-1.5 p-2 rounded-lg border border-[#000000]/05 bg-[#f0f2f5]/60 dark:bg-[#111b21]/40 flex items-center gap-2.5 max-w-full">
+                            <div className="p-2 rounded-lg bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 shrink-0">
+                              <FileText className="h-5 w-5" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[12px] font-bold text-[#111b21] dark:text-[#e9edef] truncate">
+                                 {msg.fileName || 'Attachment Document'}
+                              </p>
+                              <p className="text-[10px] text-[#667781] dark:text-[#8696a0] font-mono">
+                                {msg.fileSize || 'Unknown Size'} • {msg.type?.toUpperCase()}
+                              </p>
+                            </div>
+                            <a
+                              href={getDisplayUrl(msg.mediaUrl)}
+                              download={msg.fileName || 'document'}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="p-1.5 rounded-full bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 text-[#54656f] dark:text-[#8696a0] transition-colors cursor-pointer shrink-0"
+                              title="Download File"
+                            >
+                              <Download className="h-4 w-4" />
+                            </a>
+                          </div>
+                        )}
+
+                        {/* Body Text */}
+                        {msg.text && 
+                         msg.text !== 'Sent an image' && 
+                         msg.text !== 'Sent a PDF document' && 
+                         msg.text !== 'Sent a document' && 
+                         !msg.text.startsWith('Sent an image:') && 
+                         !msg.text.startsWith('Sent a PDF:') && 
+                         !msg.text.startsWith('Sent a document:') && 
+                         !msg.text.startsWith('Sent a PDF document:') && (
+                          <span className="whitespace-pre-wrap leading-normal font-sans font-normal text-[14px] select-text break-words tracking-normal">
+                            {msg.text}
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {/* Bubble Footer Info - Floated gracefully in the bottom-right corner */}
                   <span className={`inline-flex items-center justify-end gap-1 text-[11px] select-none float-right ml-4 mt-1.5 leading-none ${

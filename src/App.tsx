@@ -661,7 +661,7 @@ export default function App() {
           { id: 'list', label: 'Spreadsheet', icon: Table },
           { id: 'analytics', label: 'Reports', icon: BarChart3 },
           { id: 'ai-matcher', label: 'AI Matcher', icon: Sparkles },
-          { id: 'reactivation', label: 'Talent Re-Engage', icon: RefreshCw },
+          { id: 'reactivation', label: 'Broadcast', icon: RefreshCw },
           { id: 'jobs', label: 'Active Jobs', icon: Briefcase },
           { id: 'wallet', label: 'Incentive Wallet', icon: PiggyBank },
           { id: 'media', label: 'Media Library', icon: Image },

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { 
   Sparkles, 
   Send, 
@@ -75,13 +76,357 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
   // Campaign Dashboard statistics & tracking (loaded from DB/API)
   const [activeCampaigns, setActiveCampaigns] = useState<any[]>([]);
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(true);
+  const [expandedCampaignName, setExpandedCampaignName] = useState<string | null>(null);
+  const [campaignSubFilter, setCampaignSubFilter] = useState<'all' | 'replied' | 'qualified'>('all');
 
-  // Fetch available jobs, campaigns, and WhatsApp templates
+  // Reactivation Directory Filter States
+  const [countryFilter, setCountryFilter] = useState('All');
+  const [coordinatorFilter, setCoordinatorFilter] = useState('All');
+  const [projectFilter, setProjectFilter] = useState('All');
+  const [positionFilter, setPositionFilter] = useState('All');
+  const [tagFilter, setTagFilter] = useState('All');
+  const [fitScoreFilter, setFitScoreFilter] = useState('All');
+  const [genderFilter, setGenderFilter] = useState('All');
+  const [remarksFilter, setRemarksFilter] = useState('All');
+  const [dateFilter, setDateFilter] = useState('All');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+
+  // Loaded metadata & coordinators list
+  const [allCoordinators, setAllCoordinators] = useState<any[]>([]);
+  const [globalMetadata, setGlobalMetadata] = useState<{ countries?: string[]; positions?: string[]; projects?: string[]; tagsList?: string[] }>({});
+
+  // Fetch available jobs, campaigns, WhatsApp templates, coordinators, and metadata
   useEffect(() => {
     fetchActiveJobs();
     fetchReactivationCampaigns();
     fetchTemplates();
+    fetchCoordinators();
+    fetchMetadata();
+    loadCandidatesOnMount();
   }, []);
+
+  const fetchCoordinators = () => {
+    fetch('/api/coordinators')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setAllCoordinators(data);
+        }
+      })
+      .catch(err => console.error('Error fetching coordinators:', err));
+  };
+
+  const fetchMetadata = () => {
+    fetch('/api/metadata')
+      .then(res => res.json())
+      .then(data => {
+        if (data) {
+          setGlobalMetadata(data);
+        }
+      })
+      .catch(err => console.error('Error fetching metadata:', err));
+  };
+
+  const loadCandidatesOnMount = async () => {
+    try {
+      const res = await fetch('/api/reactivation/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobTitle: '',
+          country: '',
+          salary: '',
+          experience: '',
+          requirements: '',
+          inactivityMonths: -1, // -1 means Show All Candidates (Active & Inactive)
+          limit: -1, // -1 means All Profiles (Whole CRM - No Limit)
+          gender: 'ALL',
+          skipAI: true
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.candidates) {
+          setMatchedCandidates(data.candidates);
+          // By default, do not select any on mount so they can filter first
+          setSelectedCandidateIds(new Set());
+        }
+      }
+    } catch (err) {
+      console.error('Error loading candidates on mount:', err);
+    }
+  };
+
+  // Extract unique filter lists dynamically
+  const targetCountriesList = useMemo(() => {
+    const list = globalMetadata.countries && globalMetadata.countries.length > 0
+      ? globalMetadata.countries
+      : Array.from(new Set(matchedCandidates.map(l => l.country).filter(Boolean)));
+    
+    const seen = new Set<string>();
+    const deduplicated: string[] = [];
+    list.forEach(c => {
+      const lower = c.trim().toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        deduplicated.push(c.trim());
+      }
+    });
+    return ['All', ...deduplicated.sort((a, b) => a.localeCompare(b))];
+  }, [matchedCandidates, globalMetadata.countries]);
+
+  const targetProjectsList = useMemo(() => {
+    const list = globalMetadata.projects && globalMetadata.projects.length > 0
+      ? globalMetadata.projects
+      : Array.from(new Set(matchedCandidates.map(l => l.project).filter(Boolean)));
+    
+    const seen = new Set<string>();
+    const deduplicated: string[] = [];
+    list.forEach(p => {
+      const lower = p.trim().toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        deduplicated.push(p.trim());
+      }
+    });
+    return ['All', ...deduplicated.sort((a, b) => a.localeCompare(b))];
+  }, [matchedCandidates, globalMetadata.projects]);
+
+  const targetPositionsList = useMemo(() => {
+    const list = globalMetadata.positions && globalMetadata.positions.length > 0
+      ? globalMetadata.positions
+      : Array.from(new Set(matchedCandidates.map(l => l.position).filter(Boolean)));
+    
+    const seen = new Set<string>();
+    const deduplicated: string[] = [];
+    list.forEach(p => {
+      const lower = p.trim().toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        deduplicated.push(p.trim());
+      }
+    });
+    return ['All', ...deduplicated.sort((a, b) => a.localeCompare(b))];
+  }, [matchedCandidates, globalMetadata.positions]);
+
+  const availableTagsList = useMemo(() => {
+    const list = globalMetadata.tagsList && globalMetadata.tagsList.length > 0
+      ? globalMetadata.tagsList
+      : [];
+    
+    // Always include global metadata tags plus any tags actually assigned to the matched candidates
+    const rawTags = [...list];
+    matchedCandidates.forEach(l => {
+      if (l.tags && Array.isArray(l.tags)) {
+        l.tags.forEach(t => { if (t && t.trim()) rawTags.push(t.trim()); });
+      }
+    });
+    
+    const seen = new Set<string>();
+    const deduplicated: string[] = [];
+    rawTags.forEach(t => {
+      const lower = t.trim().toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        deduplicated.push(t.trim());
+      }
+    });
+    return ['All', ...deduplicated.sort((a, b) => a.localeCompare(b))];
+  }, [matchedCandidates, globalMetadata.tagsList]);
+
+  // Option lists for SearchableSelect
+  const countryOptions = useMemo(() => [
+    { value: 'All', label: 'All Applied Countries' },
+    ...targetCountriesList.filter(c => c !== 'All').map(country => ({
+      value: country,
+      label: `✈️ ${country.toUpperCase()}`
+    }))
+  ], [targetCountriesList]);
+
+  const coordinatorOptions = useMemo(() => {
+    const list = [
+      { value: 'All', label: '👤 All Coordinators' },
+      { value: 'Unassigned', label: '👤 Unassigned Only' }
+    ];
+    if (allCoordinators && allCoordinators.length > 0) {
+      allCoordinators.forEach(coord => {
+        list.push({
+          value: coord.username,
+          label: `👤 ${coord.displayName.toUpperCase()}`
+        });
+      });
+    }
+    return list;
+  }, [allCoordinators]);
+
+  const projectOptions = useMemo(() => [
+    { value: 'All', label: 'All Projects' },
+    ...targetProjectsList.filter(p => p !== 'All').map(proj => ({
+      value: proj,
+      label: `🎯 ${proj.toUpperCase()}`
+    }))
+  ], [targetProjectsList]);
+
+  const positionOptions = useMemo(() => [
+    { value: 'All', label: 'All Target Positions' },
+    ...targetPositionsList.filter(p => p !== 'All').map(pos => ({
+      value: pos,
+      label: `💼 ${pos.toUpperCase()}`
+    }))
+  ], [targetPositionsList]);
+
+  const tagOptions = useMemo(() => [
+    { value: 'All', label: 'All Tags' },
+    ...availableTagsList.filter(t => t !== 'All').map(tag => ({
+      value: tag,
+      label: `🏷️ ${tag}`
+    }))
+  ], [availableTagsList]);
+
+  const fitScoreOptions = useMemo(() => [
+    { value: 'All', label: 'All AI Quality Fit' },
+    { value: 'high', label: '🥇 High Fit Quality' },
+    { value: 'medium', label: '🥈 Medium Fit Quality' },
+    { value: 'low', label: '🥉 Low Fit Quality' },
+    { value: 'unqualified', label: '🛑 Unqualified / Spam' }
+  ], []);
+
+  const genderOptions = useMemo(() => [
+    { value: 'All', label: 'All Genders' },
+    { value: 'MALE', label: '👨 MALE' },
+    { value: 'FEMALE', label: '👩 FEMALE' }
+  ], []);
+
+  const remarksOptions = useMemo(() => [
+    { value: 'All', label: 'Remarks: All' },
+    { value: 'remarks1', label: '💬 Has 1st Remarks' },
+    { value: 'remarks2', label: '💬 Has 2nd Remarks' },
+    { value: 'remarks3', label: '💬 Has 3rd Remarks' },
+    { value: 'remarks1Only', label: '💬 Has 1st Remarks ONLY' },
+    { value: 'remarks2Only', label: '💬 Has 2nd Remarks ONLY' },
+    { value: 'remarks3Only', label: '💬 Has 3rd Remarks ONLY' },
+    { value: 'noRemarks', label: '💬 No Remarks Added' },
+    { value: 'allRemarks', label: '💬 Has All 3 Remarks' }
+  ], []);
+
+  const dateOptions = useMemo(() => [
+    { value: 'All', label: '📅 All Dates' },
+    { value: 'Today', label: '📅 Today' },
+    { value: 'Yesterday', label: '📅 Yesterday' },
+    { value: 'Last7Days', label: '📅 Last 7 Days' },
+    { value: 'Last30Days', label: '📅 Last 30 Days' },
+    { value: 'Custom', label: '📅 Custom Date Range...' }
+  ], []);
+
+  // Filter matchedCandidates to obtain filteredCandidates
+  const filteredCandidates = useMemo(() => {
+    return matchedCandidates.filter(lead => {
+      // 1. Country Applied filter
+      const matchesCountry = countryFilter === 'All' || 
+        (lead.country && lead.country.trim().toLowerCase() === countryFilter.trim().toLowerCase());
+      
+      // 2. Hiring Project filter
+      const matchesProject = projectFilter === 'All' || 
+        (lead.project && lead.project.trim().toLowerCase() === projectFilter.trim().toLowerCase());
+
+      // 3. Target Job Position filter
+      const matchesPosition = positionFilter === 'All' || 
+        (lead.position && lead.position.trim().toLowerCase() === positionFilter.trim().toLowerCase());
+
+      // 4. Inbound Quality Fit score filter
+      const matchesFit = fitScoreFilter === 'All' || 
+        (lead.fitScore && lead.fitScore.trim().toLowerCase() === fitScoreFilter.trim().toLowerCase());
+
+      // 5. Dynamic Tags filter
+      const matchesTag = tagFilter === 'All' || 
+        (lead.tags && lead.tags.some(t => t.trim().toLowerCase() === tagFilter.trim().toLowerCase()));
+
+      // 6. Date Wise Filter
+      let matchesDate = true;
+      if (dateFilter !== 'All') {
+        const leadTime = new Date(lead.createdAt || lead.entryDate || Date.now()).getTime();
+        const startOfDay = (d: Date) => {
+          const res = new Date(d);
+          res.setHours(0,0,0,0);
+          return res.getTime();
+        };
+        const endOfDay = (d: Date) => {
+          const res = new Date(d);
+          res.setHours(23,59,59,999);
+          return res.getTime();
+        };
+
+        const today = new Date();
+        if (dateFilter === 'Today') {
+          matchesDate = leadTime >= startOfDay(today) && leadTime <= endOfDay(today);
+        } else if (dateFilter === 'Yesterday') {
+          const yesterday = new Date();
+          yesterday.setDate(today.getDate() - 1);
+          matchesDate = leadTime >= startOfDay(yesterday) && leadTime <= endOfDay(yesterday);
+        } else if (dateFilter === 'Last7Days') {
+          const sevenDaysAgo = new Date();
+          sevenDaysAgo.setDate(today.getDate() - 7);
+          matchesDate = leadTime >= startOfDay(sevenDaysAgo) && leadTime <= endOfDay(today);
+        } else if (dateFilter === 'Last30Days') {
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(today.getDate() - 30);
+          matchesDate = leadTime >= startOfDay(thirtyDaysAgo) && leadTime <= endOfDay(today);
+        } else if (dateFilter === 'Custom') {
+          const start = customStartDate ? startOfDay(new Date(customStartDate)) : 0;
+          const end = customEndDate ? endOfDay(new Date(customEndDate)) : Infinity;
+          matchesDate = leadTime >= start && leadTime <= end;
+        }
+      }
+
+      // 7. Coordinator Filter (only relevant for admin)
+      const matchesCoordinator = 
+        userRole !== 'admin' || 
+        coordinatorFilter === 'All' || 
+        (coordinatorFilter === 'Unassigned' ? !lead.assignedTo : (lead.assignedTo?.toLowerCase() === coordinatorFilter.toLowerCase() || lead.assignedTo === coordinatorFilter));
+
+      // 8. Gender Filter
+      let matchesGender = true;
+      if (genderFilter !== 'All') {
+        const g = String(lead.gender || '').toUpperCase().trim();
+        const filterG = String(genderFilter).toUpperCase().trim();
+        if (filterG === 'MALE' || filterG === 'M') {
+          matchesGender = g === 'M' || g === 'MALE';
+        } else if (filterG === 'FEMALE' || filterG === 'F') {
+          matchesGender = g === 'F' || g === 'FEMALE';
+        }
+      }
+
+      // 9. Remarks Filter
+      let matchesRemarks = true;
+      if (remarksFilter !== 'All') {
+        const r1 = !!(lead.remarks1 && lead.remarks1.trim());
+        const r2 = !!(lead.remarks2 && lead.remarks2.trim());
+        const r3 = !!(lead.remarks3 && lead.remarks3.trim());
+
+        if (remarksFilter === 'remarks1') {
+          matchesRemarks = r1;
+        } else if (remarksFilter === 'remarks2') {
+          matchesRemarks = r2;
+        } else if (remarksFilter === 'remarks3') {
+          matchesRemarks = r3;
+        } else if (remarksFilter === 'remarks1Only') {
+          matchesRemarks = r1 && !r2 && !r3;
+        } else if (remarksFilter === 'remarks2Only') {
+          matchesRemarks = r2 && !r1 && !r3;
+        } else if (remarksFilter === 'remarks3Only') {
+          matchesRemarks = r3 && !r1 && !r2;
+        } else if (remarksFilter === 'noRemarks') {
+          matchesRemarks = !r1 && !r2 && !r3;
+        } else if (remarksFilter === 'allRemarks') {
+          matchesRemarks = r1 && r2 && r3;
+        }
+      }
+
+      return matchesCountry && matchesProject && matchesPosition && matchesFit && matchesTag && matchesDate && matchesCoordinator && matchesGender && matchesRemarks;
+    });
+  }, [matchedCandidates, countryFilter, projectFilter, positionFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, coordinatorFilter, remarksFilter]);
 
   const fetchActiveJobs = () => {
     fetch('/api/jobs')
@@ -340,14 +685,20 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
     setSelectedCandidateIds(updated);
   };
 
-  // Toggle all
+  // Toggle all visible candidates
   const handleToggleSelectAll = () => {
-    if (selectedCandidateIds.size === matchedCandidates.length) {
-      setSelectedCandidateIds(new Set());
+    const visibleIds = filteredCandidates.map(c => c.id);
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedCandidateIds.has(id));
+    
+    const updated = new Set(selectedCandidateIds);
+    if (allVisibleSelected) {
+      // Deselect all visible
+      visibleIds.forEach(id => updated.delete(id));
     } else {
-      const allIds = matchedCandidates.map(c => c.id);
-      setSelectedCandidateIds(new Set(allIds));
+      // Select all visible
+      visibleIds.forEach(id => updated.add(id));
     }
+    setSelectedCandidateIds(updated);
   };
 
   // Edit custom message for specific candidate inline
@@ -359,25 +710,24 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
 
   // Launch campaign (Send WhatsApp Outreach)
   const handleLaunchCampaign = async () => {
-    if (selectedCandidateIds.size === 0) {
+    const visibleSelectedTargets = filteredCandidates.filter(c => selectedCandidateIds.has(c.id));
+    if (visibleSelectedTargets.length === 0) {
       alert('Please select at least 1 candidate to launch the outreach campaign.');
       return;
     }
 
-    if (!window.confirm(`Are you sure you want to launch the WhatsApp Reactivation Campaign for ${selectedCandidateIds.size} candidate(s)? This will send personalized messages instantly.`)) {
+    if (!window.confirm(`Are you sure you want to launch the WhatsApp Reactivation Campaign for ${visibleSelectedTargets.length} candidate(s)? This will send personalized messages instantly.`)) {
       return;
     }
 
     setIsLaunching(true);
     try {
-      const targets = matchedCandidates
-        .filter(c => selectedCandidateIds.has(c.id))
-        .map(c => ({
-          leadId: c.id,
-          message: c.customMessage,
-          phone: c.phone,
-          name: c.name
-        }));
+      const targets = visibleSelectedTargets.map(c => ({
+        leadId: c.id,
+        message: c.customMessage,
+        phone: c.phone,
+        name: c.name
+      }));
 
       const res = await fetch('/api/reactivation/launch', {
         method: 'POST',
@@ -396,7 +746,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
       }
 
       setLaunchSummary({
-        sentCount: selectedCandidateIds.size,
+        sentCount: visibleSelectedTargets.length,
         jobTitle
       });
       setCampaignLaunched(true);
@@ -436,6 +786,17 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
   const totalInterested = activeCampaigns.reduce((sum, c) => sum + (c.interestedCount || 0), 0);
   const totalQualified = activeCampaigns.reduce((sum, c) => sum + (c.qualifiedCount || 0), 0);
 
+  const isDefaultFilters = 
+    countryFilter === 'All' &&
+    coordinatorFilter === 'All' &&
+    projectFilter === 'All' &&
+    positionFilter === 'All' &&
+    tagFilter === 'All' &&
+    fitScoreFilter === 'All' &&
+    genderFilter === 'All' &&
+    remarksFilter === 'All' &&
+    dateFilter === 'All';
+
   return (
     <div className="space-y-6 text-slate-100" id="candidate-reactivation-view">
       
@@ -447,7 +808,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
           <div className="text-left">
             <h2 className="text-sm font-black text-slate-100 uppercase tracking-widest flex items-center gap-2.5 font-display">
               <Sparkles className="h-5 w-5 text-indigo-400 animate-pulse" />
-              Talent Re-Engage Hub (AI Outreach)
+              Broadcast Hub (AI Outreach)
             </h2>
             <p className="text-[11px] text-slate-400 font-bold mt-1">
               Automatically identify stale, inactive placement candidates from your archives, match them against new active vacancies, and engage them on WhatsApp.
@@ -492,6 +853,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
                     onChange={(e) => setInactivityMonths(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 focus:border-indigo-500 outline-none transition-all font-mono"
                   >
+                    <option value={-1}>Show All Candidates (Active & Inactive)</option>
                     <option value={1}>1+ Month Inactive</option>
                     <option value={3}>3+ Months Inactive</option>
                     <option value={6}>6+ Months Inactive (Default)</option>
@@ -512,6 +874,10 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
                     <option value={30}>30 Profiles</option>
                     <option value={50}>50 Profiles</option>
                     <option value={100}>100 Profiles</option>
+                    <option value={250}>250 Profiles</option>
+                    <option value={500}>500 Profiles</option>
+                    <option value={1000}>1000 Profiles</option>
+                    <option value={-1}>All Profiles (Whole CRM)</option>
                   </select>
                 </div>
               </div>
@@ -656,7 +1022,9 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
         <div className="bg-slate-900/40 rounded-3xl border border-slate-800 p-6 shadow-xl text-left space-y-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-800 pb-4">
             <div>
-              <h3 className="text-xs font-black uppercase text-indigo-400 tracking-wider">Matched Stale Candidates ({matchedCandidates.length} found)</h3>
+              <h3 className="text-xs font-black uppercase text-indigo-400 tracking-wider">
+                Matched Stale Candidates ({filteredCandidates.length} matches / {matchedCandidates.length} total found)
+              </h3>
               <p className="text-[10px] text-slate-400 mt-0.5">Review suitability, select targets, edit their custom WhatsApp hook, and initiate blast.</p>
             </div>
             
@@ -665,12 +1033,12 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
                 onClick={handleToggleSelectAll}
                 className="text-[11px] bg-slate-950 border border-slate-800 hover:bg-slate-800 px-3.5 py-2 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer"
               >
-                {selectedCandidateIds.size === matchedCandidates.length ? 'Deselect All' : 'Select All'}
+                {filteredCandidates.length > 0 && filteredCandidates.every(c => selectedCandidateIds.has(c.id)) ? 'Deselect All' : 'Select All'}
               </button>
               
               <button
                 onClick={handleLaunchCampaign}
-                disabled={isLaunching || selectedCandidateIds.size === 0}
+                disabled={isLaunching || filteredCandidates.filter(c => selectedCandidateIds.has(c.id)).length === 0}
                 className="text-[11px] bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl font-black uppercase tracking-wider flex items-center gap-1.5 transition disabled:opacity-50 cursor-pointer"
               >
                 {isLaunching ? (
@@ -681,11 +1049,180 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
                 ) : (
                   <>
                     <Send className="h-3.5 w-3.5" />
-                    <span>Launch Blast ({selectedCandidateIds.size})</span>
+                    <span>Launch Blast ({filteredCandidates.filter(c => selectedCandidateIds.has(c.id)).length})</span>
                   </>
                 )}
               </button>
             </div>
+          </div>
+
+          {/* DIRECTORY FILTERS Grid Section */}
+          <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-2xl space-y-3.5 text-left animate-fade-in">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+              <div className="flex items-center gap-1.5 text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none select-none font-mono">
+                <Filter className="h-3.5 w-3.5" /> DIRECTORY FILTERS ({filteredCandidates.length} Matches):
+              </div>
+              
+              <div className="flex flex-wrap items-center gap-2">
+                {matchedCandidates.length < 1500 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      loadCandidatesOnMount();
+                    }}
+                    className="text-[9px] font-black text-indigo-400 hover:text-indigo-300 uppercase tracking-widest flex items-center gap-1.5 bg-indigo-950/25 px-2.5 py-1 rounded-lg cursor-pointer transition-all border border-indigo-500/20 active:scale-95 font-mono"
+                  >
+                    🔄 Reload Full CRM Pool
+                  </button>
+                )}
+
+                {(countryFilter !== 'All' || coordinatorFilter !== 'All' || projectFilter !== 'All' || positionFilter !== 'All' || tagFilter !== 'All' || fitScoreFilter !== 'All' || genderFilter !== 'All' || remarksFilter !== 'All' || dateFilter !== 'All') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCountryFilter('All');
+                      setCoordinatorFilter('All');
+                      setProjectFilter('All');
+                      setPositionFilter('All');
+                      setTagFilter('All');
+                      setFitScoreFilter('All');
+                      setGenderFilter('All');
+                      setRemarksFilter('All');
+                      setDateFilter('All');
+                      setCustomStartDate('');
+                      setCustomEndDate('');
+                    }}
+                    className="text-[9px] font-black text-red-400 hover:text-red-300 uppercase tracking-widest flex items-center gap-1.5 bg-red-950/20 px-2.5 py-1 rounded-lg cursor-pointer transition-all border border-red-500/20 active:scale-95 font-mono"
+                  >
+                    ✕ Clear All Filters
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Filters Responsive Grid - 9 Filters total */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2 w-full">
+              
+              {/* Country filter */}
+              <div className="w-full">
+                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Country</label>
+                <SearchableSelect
+                  value={countryFilter}
+                  onChange={setCountryFilter}
+                  options={countryOptions}
+                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+                />
+              </div>
+
+              {/* Coordinator Filter */}
+              <div className="w-full">
+                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Coordinator</label>
+                <SearchableSelect
+                  value={coordinatorFilter}
+                  onChange={setCoordinatorFilter}
+                  options={coordinatorOptions}
+                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+                />
+              </div>
+
+              {/* Hiring Project filter */}
+              <div className="w-full">
+                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Project</label>
+                <SearchableSelect
+                  value={projectFilter}
+                  onChange={setProjectFilter}
+                  options={projectOptions}
+                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+                />
+              </div>
+
+              {/* Target Job Position Filter */}
+              <div className="w-full">
+                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Position</label>
+                <SearchableSelect
+                  value={positionFilter}
+                  onChange={setPositionFilter}
+                  options={positionOptions}
+                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+                />
+              </div>
+
+              {/* Tags Filter Dropdown */}
+              <div className="w-full">
+                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Tag</label>
+                <SearchableSelect
+                  value={tagFilter}
+                  onChange={setTagFilter}
+                  options={tagOptions}
+                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+                />
+              </div>
+
+              {/* Fit Score Filter */}
+              <div className="w-full">
+                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Fit Score</label>
+                <SearchableSelect
+                  value={fitScoreFilter}
+                  onChange={setFitScoreFilter}
+                  options={fitScoreOptions}
+                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+                />
+              </div>
+
+              {/* Gender Filter */}
+              <div className="w-full">
+                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Gender</label>
+                <SearchableSelect
+                  value={genderFilter}
+                  onChange={setGenderFilter}
+                  options={genderOptions}
+                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+                />
+              </div>
+
+              {/* Remarks Status Filter */}
+              <div className="w-full">
+                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Remarks Status</label>
+                <SearchableSelect
+                  value={remarksFilter}
+                  onChange={setRemarksFilter}
+                  options={remarksOptions}
+                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+                />
+              </div>
+
+              {/* Date wise Period filter */}
+              <div className="w-full">
+                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Date Period</label>
+                <SearchableSelect
+                  value={dateFilter}
+                  onChange={setDateFilter}
+                  options={dateOptions}
+                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+                />
+              </div>
+
+            </div>
+
+            {/* Custom Date Range selector if Custom is selected */}
+            {dateFilter === 'Custom' && (
+              <div className="flex flex-wrap items-center gap-2.5 p-3.5 bg-slate-950 rounded-xl border border-slate-800/80 w-fit text-xs animate-fade-in mt-1">
+                <span className="font-extrabold text-[10px] text-indigo-400 uppercase tracking-wider font-mono">Custom Range:</span>
+                <input 
+                  type="date" 
+                  value={customStartDate} 
+                  onChange={e => setCustomStartDate(e.target.value)}
+                  className="bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-xs focus:border-indigo-500 outline-none font-mono text-slate-300"
+                />
+                <span className="text-slate-500">to</span>
+                <input 
+                  type="date" 
+                  value={customEndDate} 
+                  onChange={e => setCustomEndDate(e.target.value)}
+                  className="bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-xs focus:border-indigo-500 outline-none font-mono text-slate-300"
+                />
+              </div>
+            )}
           </div>
 
           {/* WhatsApp Template Selector & Sync Tool */}
@@ -756,7 +1293,8 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
 
 
           {/* Table list */}
-          <div className="overflow-x-auto rounded-2xl border border-slate-800/80 bg-slate-950/20">
+          {isDefaultFilters ? null : (
+            <div className="overflow-x-auto rounded-2xl border border-slate-800/80 bg-slate-950/20">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-950/60 border-b border-slate-800/80">
@@ -769,7 +1307,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
-                {matchedCandidates.map(c => {
+                {filteredCandidates.map(c => {
                   const isSelected = selectedCandidateIds.has(c.id);
                   return (
                     <tr 
@@ -810,8 +1348,17 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
                           <span>•</span>
                           <span>🎯 {c.position}</span>
                         </div>
+                        {c.tags && c.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {c.tags.map((tag, tIdx) => (
+                              <span key={tIdx} className="bg-slate-800 text-slate-300 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border border-slate-700">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         {c.adminRemarks && (
-                          <div className="text-[9px] text-slate-500 bg-slate-900/50 px-2 py-0.5 rounded-md inline-block max-w-sm truncate">
+                          <div className="text-[9px] text-slate-500 bg-slate-900/50 px-2 py-0.5 rounded-md inline-block max-w-sm truncate mt-1">
                             Remarks: {c.adminRemarks}
                           </div>
                         )}
@@ -870,6 +1417,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
               </tbody>
             </table>
           </div>
+          )}
         </div>
       )}
 
@@ -890,28 +1438,6 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
           </button>
         </div>
 
-        {/* Global stats block */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="bg-slate-950/50 border border-slate-800 p-3.5 rounded-2xl text-left">
-            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Sent Outreach</span>
-            <strong className="text-lg font-black text-indigo-400 mt-1 block">{totalCampaignLeads}</strong>
-          </div>
-          <div className="bg-slate-950/50 border border-slate-800 p-3.5 rounded-2xl text-left">
-            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Replied (YES / Other)</span>
-            <strong className="text-lg font-black text-amber-400 mt-1 block">
-              {totalReplies} <span className="text-xs text-slate-500">({totalCampaignLeads > 0 ? Math.round((totalReplies/totalCampaignLeads)*100) : 0}%)</span>
-            </strong>
-          </div>
-          <div className="bg-slate-950/50 border border-slate-800 p-3.5 rounded-2xl text-left">
-            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Interested</span>
-            <strong className="text-lg font-black text-emerald-400 mt-1 block">{totalInterested}</strong>
-          </div>
-          <div className="bg-slate-950/50 border border-slate-800 p-3.5 rounded-2xl text-left">
-            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Qualified & Shortlisted</span>
-            <strong className="text-lg font-black text-indigo-400 mt-1 block">{totalQualified}</strong>
-          </div>
-        </div>
-
         {/* Active Campaigns list */}
         {isCampaignsLoading ? (
           <div className="py-12 flex justify-center items-center gap-2">
@@ -926,122 +1452,240 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
           </div>
         ) : (
           <div className="space-y-4">
-            {activeCampaigns.map((campaign, idx) => (
-              <div 
-                key={campaign.name} 
-                className="border border-slate-800 bg-slate-950/30 rounded-2xl p-4 space-y-4"
-              >
-                {/* Header */}
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-800 pb-3">
-                  <div>
-                    <h4 className="text-xs font-black text-indigo-300 uppercase tracking-wide flex items-center gap-1.5">
-                      <Briefcase className="h-4 w-4 text-indigo-400" />
-                      {campaign.name}
-                    </h4>
-                    <span className="text-[9px] font-mono text-slate-500">Created: {campaign.createdAt ? new Date(campaign.createdAt).toLocaleDateString() : 'N/A'}</span>
-                  </div>
-                  
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-md text-slate-300">
-                      🎯 <strong>{campaign.leadsCount}</strong> outreach sent
-                    </span>
-                    <span className="text-[10px] bg-emerald-950/30 border border-emerald-900/50 px-2.5 py-1 rounded-md text-emerald-400">
-                      ⭐ <strong>{campaign.qualifiedCount}</strong> qualified
-                    </span>
-                  </div>
-                </div>
+            {activeCampaigns.map((campaign, idx) => {
+              const isExpanded = expandedCampaignName === campaign.name;
 
-                {/* Candidate list under this campaign */}
-                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                  {campaign.candidates && campaign.candidates.map((cand: any) => {
-                    // Check status style
-                    let statusClass = 'text-slate-400 bg-slate-900 border border-slate-800';
-                    if (cand.reactivationStatus === 'qualified') {
-                      statusClass = 'text-emerald-400 bg-emerald-950/50 border border-emerald-900/30';
-                    } else if (cand.reactivationStatus === 'interested') {
-                      statusClass = 'text-amber-400 bg-amber-950/50 border border-amber-900/30';
-                    } else if (cand.reactivationStatus === 'replied') {
-                      statusClass = 'text-indigo-400 bg-indigo-950/50 border border-indigo-900/30';
-                    }
+              // Filter candidates for list rendering based on selected badge sub-filter
+              const filteredCampaignCandidates = (campaign.candidates || []).filter((cand: any) => {
+                const statusVal = cand.reactivationStatus || 'sent';
+                if (campaignSubFilter === 'replied') {
+                  return ['replied', 'interested', 'qualified', 'unqualified'].includes(statusVal) || (Array.isArray(cand.messages) && cand.messages.length > 0);
+                }
+                if (campaignSubFilter === 'qualified') {
+                  return statusVal === 'qualified';
+                }
+                return true; // 'all'
+              });
 
-                    return (
-                      <div 
-                        key={cand.id}
-                        className="bg-slate-950/60 hover:bg-slate-900/50 border border-slate-800/80 p-3 rounded-xl flex flex-col md:flex-row justify-between md:items-center gap-4 transition"
-                      >
-                        {/* Name/Details */}
-                        <div className="text-left space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span 
-                              onClick={() => onSelectLead(cand)}
-                              className="text-xs font-black text-indigo-400 hover:underline cursor-pointer"
-                            >
-                              {cand.name}
-                            </span>
-                            <span className="text-[10px] text-slate-400">{cand.phone}</span>
-                            <span className={`text-[9px] font-mono font-black uppercase px-2 py-0.5 rounded-full ${statusClass}`}>
-                              {cand.reactivationStatus || 'sent'}
-                            </span>
-                          </div>
-                          
-                          {/* Messages preview */}
-                          {cand.messages && cand.messages.length > 0 ? (
-                            <div className="text-[10px] bg-slate-900/40 p-1.5 rounded-lg border border-slate-800/40 max-w-xl">
-                              <span className="font-bold text-indigo-300">Last reply:</span>{' '}
-                              <span className="text-slate-300 italic">
-                                "{cand.messages[cand.messages.length - 1]?.text}"
-                              </span>
-                              <span className="text-[8px] text-slate-500 ml-1.5 font-mono">
-                                ({new Date(cand.messages[cand.messages.length - 1]?.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] text-slate-500 italic">No incoming response yet. Waiting on WhatsApp hook...</span>
-                          )}
-                        </div>
-
-                        {/* Quick actions & simulation */}
-                        <div className="flex items-center gap-2.5 self-end md:self-auto shrink-0">
-                          {cand.reactivationStatus === 'sent' && (
-                            <>
-                              <button
-                                onClick={() => handleSimulateCandidateReply(cand.id, 'YES')}
-                                className="text-[9px] bg-emerald-950/30 hover:bg-emerald-900/30 border border-emerald-900/50 text-emerald-400 px-2.5 py-1.5 rounded-lg font-extrabold cursor-pointer transition"
-                              >
-                                Simulate YES Reply
-                              </button>
-                              <button
-                                onClick={() => handleSimulateCandidateReply(cand.id, 'No, not looking for Dubai right now')}
-                                className="text-[9px] bg-rose-950/30 hover:bg-rose-900/30 border border-rose-900/50 text-rose-400 px-2.5 py-1.5 rounded-lg font-extrabold cursor-pointer transition"
-                              >
-                                Simulate NO Reply
-                              </button>
-                            </>
-                          )}
-
-                          {cand.reactivationStatus === 'replied' && (
-                            <button
-                              onClick={() => handleSimulateCandidateReply(cand.id, 'I have 4 years experience in 5-star hotels and a valid Indian passport.')}
-                              className="text-[9px] bg-indigo-950 border border-indigo-800/50 text-indigo-400 px-2.5 py-1.5 rounded-lg font-extrabold cursor-pointer transition"
-                            >
-                              Simulate Pre-Screen Response
-                            </button>
-                          )}
-
-                          <button
-                            onClick={() => onSelectLead(cand)}
-                            className="text-[9.5px] bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <span>Open Profile</span>
-                            <ChevronRight className="h-3 w-3" />
-                          </button>
-                        </div>
+              return (
+                <div 
+                  key={campaign.name} 
+                  className="border border-slate-800 bg-slate-950/30 rounded-2xl overflow-hidden transition-all duration-200"
+                >
+                  {/* Header Row (Click to toggle expansion) */}
+                  <div 
+                    onClick={() => {
+                      if (isExpanded) {
+                        setExpandedCampaignName(null);
+                        setCampaignSubFilter('all');
+                      } else {
+                        setExpandedCampaignName(campaign.name);
+                        setCampaignSubFilter('all');
+                      }
+                    }}
+                    className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 p-4 hover:bg-slate-900/30 transition cursor-pointer select-none"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3 md:gap-6 text-left">
+                      <div>
+                        <h4 className="text-xs font-black text-indigo-300 uppercase tracking-wide flex items-center gap-2">
+                          <Briefcase className="h-4 w-4 text-indigo-400" />
+                          {campaign.name}
+                        </h4>
+                        <p className="text-[9px] font-mono text-slate-500 mt-0.5">Created: {campaign.createdAt ? new Date(campaign.createdAt).toLocaleDateString() : 'N/A'}</p>
                       </div>
-                    );
-                  })}
+
+                      {/* Clickable Badges next to campaign name */}
+                      <div className="flex flex-wrap items-center gap-2 font-mono">
+                        {/* Sent Badge */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!isExpanded) {
+                              setExpandedCampaignName(campaign.name);
+                            }
+                            setCampaignSubFilter('all');
+                          }}
+                          className={`text-[9.5px] px-2.5 py-1 rounded-lg border font-bold flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
+                            isExpanded && campaignSubFilter === 'all'
+                              ? 'ring-2 ring-indigo-500 bg-indigo-500/20 border-indigo-500 text-indigo-300'
+                              : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800'
+                          }`}
+                        >
+                          🎯 {campaign.leadsCount} outreach sent
+                        </button>
+
+                        {/* Replied Badge */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!isExpanded) {
+                              setExpandedCampaignName(campaign.name);
+                            }
+                            setCampaignSubFilter('replied');
+                          }}
+                          className={`text-[9.5px] px-2.5 py-1 rounded-lg border font-bold flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
+                            isExpanded && campaignSubFilter === 'replied'
+                              ? 'ring-2 ring-amber-500 bg-amber-500/20 border-amber-500 text-amber-300'
+                              : 'bg-slate-900/80 border-slate-800 text-amber-400 hover:bg-slate-800'
+                          }`}
+                        >
+                          💬 {campaign.repliedCount || 0} replied ({campaign.leadsCount > 0 ? Math.round(((campaign.repliedCount || 0)/campaign.leadsCount)*100) : 0}%)
+                        </button>
+
+                        {/* Qualified Badge */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!isExpanded) {
+                              setExpandedCampaignName(campaign.name);
+                            }
+                            setCampaignSubFilter('qualified');
+                          }}
+                          className={`text-[9.5px] px-2.5 py-1 rounded-lg border font-bold flex items-center gap-1.5 transition active:scale-95 cursor-pointer ${
+                            isExpanded && campaignSubFilter === 'qualified'
+                              ? 'ring-2 ring-emerald-500 bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                              : 'bg-slate-900/80 border-slate-800 text-emerald-400 hover:bg-slate-800'
+                          }`}
+                        >
+                          ⭐ {campaign.qualifiedCount || 0} qualified
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2.5 shrink-0 self-end md:self-auto">
+                      <ChevronRight className={`h-4 w-4 text-slate-500 transition-transform ${isExpanded ? 'rotate-90 text-indigo-400' : ''}`} />
+                    </div>
+                  </div>
+
+                  {/* Collapsible Candidate list details */}
+                  {isExpanded && (
+                    <div className="p-4 border-t border-slate-800/80 bg-slate-950/20 space-y-4 animate-fade-in">
+                      {/* Active filter category indicator */}
+                      <div className="text-[10px] text-slate-400 flex items-center justify-between pb-2 border-b border-slate-800/60 font-mono select-none">
+                        <span>
+                          Active Category Filter: <strong className="uppercase font-bold tracking-wide text-indigo-400">{campaignSubFilter === 'all' ? 'All Candidates' : campaignSubFilter === 'replied' ? 'Replied' : 'Qualified'}</strong>
+                        </span>
+                        <span>
+                          Showing {filteredCampaignCandidates.length} of {campaign.candidates?.length || 0} profiles
+                        </span>
+                      </div>
+
+                      {/* Candidate list under this campaign */}
+                      <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                        {filteredCampaignCandidates.length === 0 ? (
+                          <div className="text-center py-6 text-slate-500 text-[10.5px] italic bg-slate-950/40 rounded-xl border border-slate-800/40">
+                            No candidates match the selected sub-filter ({campaignSubFilter === 'replied' ? 'Replied' : 'Qualified'}).
+                          </div>
+                        ) : (
+                          filteredCampaignCandidates.map((cand: any) => {
+                            // Compute simplified YES/NO response badge
+                            let responseBadge = null;
+                            const statusVal = cand.reactivationStatus || 'sent';
+
+                            if (statusVal === 'qualified' || statusVal === 'interested') {
+                              responseBadge = (
+                                <span className="text-[9.5px] bg-emerald-950/45 border border-emerald-900/60 text-emerald-400 font-extrabold uppercase px-2 py-0.5 rounded-lg flex items-center gap-1.5 shadow-sm">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                  YES (Interested)
+                                </span>
+                              );
+                            } else if (statusVal === 'unqualified' || statusVal === 'not_interested') {
+                              responseBadge = (
+                                <span className="text-[9.5px] bg-rose-950/45 border border-rose-900/60 text-rose-400 font-extrabold uppercase px-2 py-0.5 rounded-lg flex items-center gap-1.5 shadow-sm">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-rose-500"></span>
+                                  NO (Not Interested)
+                                </span>
+                              );
+                            } else if (statusVal === 'replied') {
+                              responseBadge = (
+                                <span className="text-[9.5px] bg-amber-950/45 border border-amber-900/60 text-amber-400 font-extrabold uppercase px-2 py-0.5 rounded-lg flex items-center gap-1.5 shadow-sm">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+                                  Replied (Pending AI)
+                                </span>
+                              );
+                            } else if (statusVal === 'failed') {
+                              responseBadge = (
+                                <span className="text-[9.5px] bg-rose-950/45 border border-rose-900/60 text-rose-500 font-extrabold uppercase px-2 py-0.5 rounded-lg flex items-center gap-1.5 shadow-sm">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-rose-600 animate-pulse"></span>
+                                  Failed to Deliver
+                                </span>
+                              );
+                            } else {
+                              responseBadge = (
+                                <span className="text-[9.5px] bg-slate-900 border border-slate-800 text-slate-400 font-extrabold uppercase px-2 py-0.5 rounded-lg flex items-center gap-1.5 shadow-sm">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-slate-600"></span>
+                                  Outreach Sent
+                                </span>
+                              );
+                            }
+
+                            return (
+                              <div 
+                                key={cand.id}
+                                className="bg-slate-950/60 hover:bg-slate-900/50 border border-slate-800/80 p-3 rounded-xl flex flex-col md:flex-row justify-between md:items-center gap-4 transition"
+                              >
+                                {/* Name/Details */}
+                                <div className="text-left space-y-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span 
+                                      onClick={() => onSelectLead(cand)}
+                                      className="text-xs font-black text-indigo-400 hover:underline cursor-pointer"
+                                    >
+                                      {cand.name}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400">({cand.phone})</span>
+                                    {responseBadge}
+                                  </div>
+                                  
+                                  {cand.tags && cand.tags.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {cand.tags.map((tag: string, tIdx: number) => (
+                                        <span key={tIdx} className="bg-slate-800 text-slate-300 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border border-slate-700">
+                                          {tag}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                  
+                                  {/* Messages preview */}
+                                  {cand.messages && cand.messages.length > 0 ? (
+                                    <div className="text-[10px] bg-slate-900/40 p-1.5 rounded-lg border border-slate-800/40 max-w-xl">
+                                      <span className="font-bold text-indigo-300">Last message:</span>{' '}
+                                      <span className="text-slate-300 italic">
+                                        "{cand.messages[cand.messages.length - 1]?.text}"
+                                      </span>
+                                      <span className="text-[8px] text-slate-500 ml-1.5 font-mono">
+                                        ({new Date(cand.messages[cand.messages.length - 1]?.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-500 italic">No incoming response yet. Waiting on WhatsApp hook...</span>
+                                  )}
+                                </div>
+
+                                {/* Quick actions */}
+                                <div className="flex items-center gap-2.5 shrink-0 self-end md:self-auto">
+                                  <button
+                                    onClick={() => onSelectLead(cand)}
+                                    className="text-[9.5px] bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <span>Open Profile</span>
+                                    <ChevronRight className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

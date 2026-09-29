@@ -40,6 +40,7 @@ export interface Message {
   replyToText?: string;
   replyToSender?: string;
   errorDetails?: string;
+  buttons?: string[];
 }
 
 export interface WhatsAppTemplate {
@@ -50,6 +51,7 @@ export interface WhatsAppTemplate {
   text: string;
   type?: 'template' | 'quick_reply';
   language?: string;
+  buttons?: string[];
 }
 
 export interface Lead {
@@ -109,6 +111,7 @@ export interface Lead {
   deletedAt?: string | null;
   assignedFrom?: string;
   reactivationStatus?: 'sent' | 'replied' | 'qualified' | 'unqualified' | string;
+  salaryRange?: string;
   lastContactedMonths?: number;
   inactivityText?: string;
   tasks?: {
