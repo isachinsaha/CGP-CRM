@@ -3623,6 +3623,26 @@ app.post('/api/notifications/clear', async (req, res) => {
   }
 });
 
+// DELETE single notification
+app.delete('/api/notifications/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const notifications = await getNotifications();
+    const idx = notifications.findIndex(n => n.id === id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Notification not found' });
+      return;
+    }
+
+    const filtered = notifications.filter(n => n.id !== id);
+    await saveNotifications(filtered);
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+
 // GET all incentive rules
 app.get('/api/incentive-rules', async (req, res) => {
   try {

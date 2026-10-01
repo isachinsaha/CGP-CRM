@@ -851,8 +851,8 @@ export default function LeadBoard({
       {/* Pipeline Border Card Container */}
       <div className="bg-slate-950/40 rounded-3xl border border-emerald-600/35 dark:border-emerald-500/20 p-6 shadow-xl text-left">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between mb-5 border-b border-slate-700 pb-4 gap-3.5">
-          {/* Left Side: Controls in One Straight Line in exact requested order */}
-          <div className="flex items-center gap-2.5 xl:gap-3.5 overflow-x-auto no-scrollbar w-full xl:w-auto pb-1.5 xl:pb-0">
+          {/* Left Side: Controls wrapping nicely on small screens to prevent clipping */}
+          <div className="flex flex-wrap items-center gap-2.5 xl:gap-3.5 w-full xl:w-auto pb-1.5 xl:pb-0">
             {/* 1. Search option */}
             <div className="relative w-40 xl:w-56 text-left shrink-0">
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" />

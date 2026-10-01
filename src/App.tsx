@@ -1781,10 +1781,23 @@ export default function App() {
                         isRead ? 'bg-transparent opacity-75' : 'bg-indigo-600/5'
                       }`}
                     >
-                      {/* Read/Unread Status Dot indicator */}
-                      {!isRead && (
-                        <div className="absolute top-4.5 right-4 h-2 w-2 rounded-full bg-indigo-500 animate-pulse" />
-                      )}
+                      {/* Individual Clear Button */}
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            await fetch(`/api/notifications/${n.id}`, { method: 'DELETE' });
+                            fetchNotifications();
+                          } catch (err) {
+                            console.error('Failed to delete notification:', err);
+                          }
+                        }}
+                        className="absolute top-3 right-3 p-1 rounded-full text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors duration-150 cursor-pointer z-20 flex items-center justify-center"
+                        title="Clear notification"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
 
                       {/* Icon */}
                       <div className={`h-8 w-8 rounded-xl border flex items-center justify-center shrink-0 ${iconBg}`}>
@@ -1796,12 +1809,15 @@ export default function App() {
                       </div>
 
                       {/* Content */}
-                      <div className="flex-1 min-w-0 pr-2">
+                      <div className="flex-1 min-w-0 pr-6">
                         <div className="flex items-center justify-between gap-1.5 mb-1">
-                          <span className="font-extrabold text-[12px] text-slate-200 truncate">
+                          <span className="font-extrabold text-[12px] text-slate-200 truncate flex items-center gap-1.5">
+                            {!isRead && (
+                              <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 inline-block animate-pulse shrink-0" />
+                            )}
                             {n.leadName || 'Candidate Inquiry'}
                           </span>
-                          <span className="text-[9px] font-medium text-slate-500 shrink-0 font-mono">
+                          <span className="text-[9px] font-medium text-slate-500 shrink-0 font-mono pr-2">
                             {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
                           </span>
                         </div>
