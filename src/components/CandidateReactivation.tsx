@@ -72,6 +72,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(new Set());
   const [campaignLaunched, setCampaignLaunched] = useState(false);
   const [launchSummary, setLaunchSummary] = useState<{ sentCount: number; jobTitle: string } | null>(null);
+  const [hasScanned, setHasScanned] = useState(false);
 
   // Campaign Dashboard statistics & tracking (loaded from DB/API)
   const [activeCampaigns, setActiveCampaigns] = useState<any[]>([]);
@@ -601,6 +602,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
   // Run AI Search on Old Database
   const handleScanOldDatabase = async () => {
     setIsScanning(true);
+    setHasScanned(true);
     setCampaignLaunched(false);
     setLaunchSummary(null);
     setMatchedCandidates([]);
@@ -635,7 +637,8 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
           requirements: jobRequirements,
           inactivityMonths,
           limit: limitCount,
-          gender: jobGender
+          gender: jobGender,
+          candidateIds: isDefaultFilters ? undefined : filteredCandidates.map(c => c.id)
         })
       });
 
@@ -819,7 +822,177 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
           </span>
         </div>
 
-        {/* Setup Parameters Panel */}
+        {/* STEP 1: SEARCH & FILTER CRM POOL */}
+        <div className="pt-5 space-y-3.5 text-left border-b border-slate-800/60 pb-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none select-none font-mono">
+              <Filter className="h-3.5 w-3.5" /> 1. SEARCH & FILTER CRM POOL ({filteredCandidates.length} Matches / {matchedCandidates.length} Total):
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-2">
+              {matchedCandidates.length < 1500 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHasScanned(true);
+                    loadCandidatesOnMount();
+                  }}
+                  className="text-[9px] font-black text-indigo-400 hover:text-indigo-300 uppercase tracking-widest flex items-center gap-1.5 bg-indigo-950/25 px-2.5 py-1 rounded-lg cursor-pointer transition-all border border-indigo-500/20 active:scale-95 font-mono"
+                >
+                  🔄 Reload Full CRM Pool
+                </button>
+              )}
+
+              {(countryFilter !== 'All' || coordinatorFilter !== 'All' || projectFilter !== 'All' || positionFilter !== 'All' || tagFilter !== 'All' || fitScoreFilter !== 'All' || genderFilter !== 'All' || remarksFilter !== 'All' || dateFilter !== 'All') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCountryFilter('All');
+                    setCoordinatorFilter('All');
+                    setProjectFilter('All');
+                    setPositionFilter('All');
+                    setTagFilter('All');
+                    setFitScoreFilter('All');
+                    setGenderFilter('All');
+                    setRemarksFilter('All');
+                    setDateFilter('All');
+                    setCustomStartDate('');
+                    setCustomEndDate('');
+                  }}
+                  className="text-[9px] font-black text-red-400 hover:text-red-300 uppercase tracking-widest flex items-center gap-1.5 bg-red-950/20 px-2.5 py-1 rounded-lg cursor-pointer transition-all border border-red-500/20 active:scale-95 font-mono"
+                >
+                  ✕ Clear All Filters
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Filters Responsive Grid - 9 Filters total */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2 w-full">
+            
+            {/* Country filter */}
+            <div className="w-full">
+              <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Country</label>
+              <SearchableSelect
+                value={countryFilter}
+                onChange={setCountryFilter}
+                options={countryOptions}
+                className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+              />
+            </div>
+
+            {/* Coordinator Filter */}
+            <div className="w-full">
+              <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Coordinator</label>
+              <SearchableSelect
+                value={coordinatorFilter}
+                onChange={setCoordinatorFilter}
+                options={coordinatorOptions}
+                className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+              />
+            </div>
+
+            {/* Hiring Project filter */}
+            <div className="w-full">
+              <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Project</label>
+              <SearchableSelect
+                value={projectFilter}
+                onChange={setProjectFilter}
+                options={projectOptions}
+                className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+              />
+            </div>
+
+            {/* Target Job Position Filter */}
+            <div className="w-full">
+              <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Position</label>
+              <SearchableSelect
+                value={positionFilter}
+                onChange={setPositionFilter}
+                options={positionOptions}
+                className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+              />
+            </div>
+
+            {/* Tags Filter Dropdown */}
+            <div className="w-full">
+              <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Tag</label>
+              <SearchableSelect
+                value={tagFilter}
+                onChange={setTagFilter}
+                options={tagOptions}
+                className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+              />
+            </div>
+
+            {/* Fit Score Filter */}
+            <div className="w-full">
+              <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Fit Score</label>
+              <SearchableSelect
+                value={fitScoreFilter}
+                onChange={setFitScoreFilter}
+                options={fitScoreOptions}
+                className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+              />
+            </div>
+
+            {/* Gender Filter */}
+            <div className="w-full">
+              <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Gender</label>
+              <SearchableSelect
+                value={genderFilter}
+                onChange={setGenderFilter}
+                options={genderOptions}
+                className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+              />
+            </div>
+
+            {/* Remarks Status Filter */}
+            <div className="w-full">
+              <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Remarks Status</label>
+              <SearchableSelect
+                value={remarksFilter}
+                onChange={setRemarksFilter}
+                options={remarksOptions}
+                className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+              />
+            </div>
+
+            {/* Date wise Period filter */}
+            <div className="w-full">
+              <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Date Period</label>
+              <SearchableSelect
+                value={dateFilter}
+                onChange={setDateFilter}
+                options={dateOptions}
+                className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
+              />
+            </div>
+
+          </div>
+
+          {/* Custom Date Range selector if Custom is selected */}
+          {dateFilter === 'Custom' && (
+            <div className="flex flex-wrap items-center gap-2.5 p-3.5 bg-slate-950 rounded-xl border border-slate-800/80 w-fit text-xs animate-fade-in mt-1">
+              <span className="font-extrabold text-[10px] text-indigo-400 uppercase tracking-wider font-mono">Custom Range:</span>
+              <input 
+                type="date" 
+                value={customStartDate} 
+                onChange={e => setCustomStartDate(e.target.value)}
+                className="bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-xs focus:border-indigo-500 outline-none font-mono text-slate-300"
+              />
+              <span className="text-slate-500">to</span>
+              <input 
+                type="date" 
+                value={customEndDate} 
+                onChange={e => setCustomEndDate(e.target.value)}
+                className="bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-xs focus:border-indigo-500 outline-none font-mono text-slate-300"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* STEP 2: JOB VACANCY & SCAN PARAMETERS PANEL */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-5">
           {/* Left: Input parameters */}
           <div className="lg:col-span-8 space-y-4 text-left">
@@ -827,7 +1000,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[11px] font-black text-slate-400 uppercase tracking-wider mb-1.5">
-                  1. Match against Vacancy / Active Job
+                  2. Match against Vacancy / Active Job
                 </label>
                 <select
                   value={selectedJobId}
@@ -963,7 +1136,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
             <div className="space-y-3">
               <h4 className="text-xs font-black uppercase text-indigo-400 tracking-wider">Reactivation Blueprint</h4>
               <ul className="text-[11px] text-slate-300 space-y-2 list-disc list-inside">
-                <li>Retrieves archives with no outbound/inbound texts for <strong>{inactivityMonths} months</strong>.</li>
+                <li>Processes the filtered pool of candidates with no outbound/inbound texts.</li>
                 <li>Uses AI to analyze their past profile resumes, remarks, and logged positions.</li>
                 <li>Shortlists best suitability fits and drafts targeted WhatsApp hooks.</li>
                 <li><strong>Interactive AI chat</strong>: Gemini handles replies, pre-screens credentials, and automatically shortlists candidates in the Pipeline!</li>
@@ -1056,175 +1229,6 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
             </div>
           </div>
 
-          {/* DIRECTORY FILTERS Grid Section */}
-          <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-2xl space-y-3.5 text-left animate-fade-in">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
-              <div className="flex items-center gap-1.5 text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none select-none font-mono">
-                <Filter className="h-3.5 w-3.5" /> DIRECTORY FILTERS ({filteredCandidates.length} Matches):
-              </div>
-              
-              <div className="flex flex-wrap items-center gap-2">
-                {matchedCandidates.length < 1500 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      loadCandidatesOnMount();
-                    }}
-                    className="text-[9px] font-black text-indigo-400 hover:text-indigo-300 uppercase tracking-widest flex items-center gap-1.5 bg-indigo-950/25 px-2.5 py-1 rounded-lg cursor-pointer transition-all border border-indigo-500/20 active:scale-95 font-mono"
-                  >
-                    🔄 Reload Full CRM Pool
-                  </button>
-                )}
-
-                {(countryFilter !== 'All' || coordinatorFilter !== 'All' || projectFilter !== 'All' || positionFilter !== 'All' || tagFilter !== 'All' || fitScoreFilter !== 'All' || genderFilter !== 'All' || remarksFilter !== 'All' || dateFilter !== 'All') && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCountryFilter('All');
-                      setCoordinatorFilter('All');
-                      setProjectFilter('All');
-                      setPositionFilter('All');
-                      setTagFilter('All');
-                      setFitScoreFilter('All');
-                      setGenderFilter('All');
-                      setRemarksFilter('All');
-                      setDateFilter('All');
-                      setCustomStartDate('');
-                      setCustomEndDate('');
-                    }}
-                    className="text-[9px] font-black text-red-400 hover:text-red-300 uppercase tracking-widest flex items-center gap-1.5 bg-red-950/20 px-2.5 py-1 rounded-lg cursor-pointer transition-all border border-red-500/20 active:scale-95 font-mono"
-                  >
-                    ✕ Clear All Filters
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Filters Responsive Grid - 9 Filters total */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2 w-full">
-              
-              {/* Country filter */}
-              <div className="w-full">
-                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Country</label>
-                <SearchableSelect
-                  value={countryFilter}
-                  onChange={setCountryFilter}
-                  options={countryOptions}
-                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
-                />
-              </div>
-
-              {/* Coordinator Filter */}
-              <div className="w-full">
-                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Coordinator</label>
-                <SearchableSelect
-                  value={coordinatorFilter}
-                  onChange={setCoordinatorFilter}
-                  options={coordinatorOptions}
-                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
-                />
-              </div>
-
-              {/* Hiring Project filter */}
-              <div className="w-full">
-                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Project</label>
-                <SearchableSelect
-                  value={projectFilter}
-                  onChange={setProjectFilter}
-                  options={projectOptions}
-                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
-                />
-              </div>
-
-              {/* Target Job Position Filter */}
-              <div className="w-full">
-                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Position</label>
-                <SearchableSelect
-                  value={positionFilter}
-                  onChange={setPositionFilter}
-                  options={positionOptions}
-                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
-                />
-              </div>
-
-              {/* Tags Filter Dropdown */}
-              <div className="w-full">
-                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Tag</label>
-                <SearchableSelect
-                  value={tagFilter}
-                  onChange={setTagFilter}
-                  options={tagOptions}
-                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
-                />
-              </div>
-
-              {/* Fit Score Filter */}
-              <div className="w-full">
-                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Fit Score</label>
-                <SearchableSelect
-                  value={fitScoreFilter}
-                  onChange={setFitScoreFilter}
-                  options={fitScoreOptions}
-                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
-                />
-              </div>
-
-              {/* Gender Filter */}
-              <div className="w-full">
-                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Gender</label>
-                <SearchableSelect
-                  value={genderFilter}
-                  onChange={setGenderFilter}
-                  options={genderOptions}
-                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
-                />
-              </div>
-
-              {/* Remarks Status Filter */}
-              <div className="w-full">
-                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Remarks Status</label>
-                <SearchableSelect
-                  value={remarksFilter}
-                  onChange={setRemarksFilter}
-                  options={remarksOptions}
-                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
-                />
-              </div>
-
-              {/* Date wise Period filter */}
-              <div className="w-full">
-                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Date Period</label>
-                <SearchableSelect
-                  value={dateFilter}
-                  onChange={setDateFilter}
-                  options={dateOptions}
-                  className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
-                />
-              </div>
-
-            </div>
-
-            {/* Custom Date Range selector if Custom is selected */}
-            {dateFilter === 'Custom' && (
-              <div className="flex flex-wrap items-center gap-2.5 p-3.5 bg-slate-950 rounded-xl border border-slate-800/80 w-fit text-xs animate-fade-in mt-1">
-                <span className="font-extrabold text-[10px] text-indigo-400 uppercase tracking-wider font-mono">Custom Range:</span>
-                <input 
-                  type="date" 
-                  value={customStartDate} 
-                  onChange={e => setCustomStartDate(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-xs focus:border-indigo-500 outline-none font-mono text-slate-300"
-                />
-                <span className="text-slate-500">to</span>
-                <input 
-                  type="date" 
-                  value={customEndDate} 
-                  onChange={e => setCustomEndDate(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-xs focus:border-indigo-500 outline-none font-mono text-slate-300"
-                />
-              </div>
-            )}
-          </div>
-
           {/* WhatsApp Template Selector & Sync Tool */}
           <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-2xl space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1293,7 +1297,11 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
 
 
           {/* Table list */}
-          {isDefaultFilters ? null : (
+          {isDefaultFilters && !hasScanned ? (
+            <div className="text-center py-10 text-slate-500 text-[11px] italic bg-slate-950/20 rounded-2xl border border-slate-800/40">
+              Please click "Scan Old Database" or apply any directory filters above to explore candidate profiles.
+            </div>
+          ) : (
             <div className="overflow-x-auto rounded-2xl border border-slate-800/80 bg-slate-950/20">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -1457,12 +1465,11 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
 
               // Filter candidates for list rendering based on selected badge sub-filter
               const filteredCampaignCandidates = (campaign.candidates || []).filter((cand: any) => {
-                const statusVal = cand.reactivationStatus || 'sent';
                 if (campaignSubFilter === 'replied') {
-                  return ['replied', 'interested', 'qualified', 'unqualified'].includes(statusVal) || (Array.isArray(cand.messages) && cand.messages.length > 0);
+                  return cand.hasReplied === true;
                 }
                 if (campaignSubFilter === 'qualified') {
-                  return statusVal === 'qualified';
+                  return cand.reactivationStatus === 'qualified';
                 }
                 return true; // 'all'
               });
@@ -1660,6 +1667,12 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
                                       <span className="text-[8px] text-slate-500 ml-1.5 font-mono">
                                         ({new Date(cand.messages[cand.messages.length - 1]?.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
                                       </span>
+                                      {cand.messages[cand.messages.length - 1]?.status === 'failed' && (
+                                        <div className="text-[9.5px] text-rose-400 mt-1 font-mono flex items-center gap-1.5 font-bold">
+                                          <AlertCircle className="h-3.5 w-3.5 animate-pulse shrink-0" />
+                                          <span>Error: {cand.messages[cand.messages.length - 1]?.errorDetails || 'Meta Delivery Fail'}</span>
+                                        </div>
+                                      )}
                                     </div>
                                   ) : (
                                     <span className="text-[10px] text-slate-500 italic">No incoming response yet. Waiting on WhatsApp hook...</span>

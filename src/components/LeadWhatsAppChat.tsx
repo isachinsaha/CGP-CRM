@@ -863,7 +863,7 @@ export default function LeadWhatsAppChat({
                       }
 
                       return (
-                        <div className="mb-2 p-2.5 rounded-xl border border-emerald-500/10 dark:border-emerald-400/20 bg-emerald-50/50 dark:bg-[#112421]/30 space-y-2">
+                        <div className="mb-1 p-2 pb-1.5 rounded-xl border border-emerald-500/10 dark:border-emerald-400/20 bg-emerald-50/50 dark:bg-[#112421]/30 space-y-2">
                           {/* AI Sensy style header badge */}
                           <div className="flex items-center justify-between pb-1.5 border-b border-emerald-500/10 dark:border-emerald-400/10 text-[9.5px] font-black tracking-wider leading-none">
                             <span className={`px-2 py-1 rounded-md flex items-center gap-1 ${bgClass}`}>
@@ -952,34 +952,7 @@ export default function LeadWhatsAppChat({
                             </div>
                           )}
 
-                          {/* Premium AI Sensy Delivery Status Banner */}
-                          <div className="pt-1.5 border-t border-emerald-500/10 dark:border-emerald-400/10 flex items-center justify-between text-[9.5px] font-bold select-none leading-none">
-                            <span className="text-slate-400 dark:text-slate-500 font-mono uppercase tracking-wider">
-                              Ai Sensy Rich View
-                            </span>
-                            
-                            {msg.status === 'failed' ? (
-                              <span className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-extrabold uppercase bg-rose-500/10 px-2 py-1 rounded-md border border-rose-500/20">
-                                <AlertCircle className="h-3 w-3 animate-pulse" />
-                                <span>DELIVERY FAILED</span>
-                              </span>
-                            ) : msg.status === 'read' ? (
-                              <span className="flex items-center gap-1.5 text-sky-600 dark:text-sky-400 font-extrabold uppercase bg-sky-500/10 px-2 py-1 rounded-md border border-sky-500/20">
-                                <CheckCheck className="h-3 w-3 text-sky-500 stroke-[3]" />
-                                <span>DELIVERED & READ</span>
-                              </span>
-                            ) : msg.status === 'delivered' ? (
-                              <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-extrabold uppercase bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20">
-                                <CheckCheck className="h-3 w-3 text-emerald-500 stroke-[2.5]" />
-                                <span>DELIVERED TO DEVICE</span>
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 font-extrabold uppercase bg-slate-500/10 px-2 py-1 rounded-md border border-slate-500/20">
-                                <Check className="h-3 w-3 text-slate-500 stroke-[2.5]" />
-                                <span>DISPATCHED / SENT</span>
-                              </span>
-                            )}
-                          </div>
+                          {/* Removed redundant inner Premium Delivery Status Banner to eliminate extra space */}
                         </div>
                       );
                     }
@@ -1193,7 +1166,7 @@ export default function LeadWhatsAppChat({
           )}
           <div className="flex items-center gap-1.5 text-[10.5px] text-[#00a884] dark:text-emerald-400 font-bold uppercase tracking-wider font-mono bg-[#d9fdd3] dark:bg-[#005c4b]/20 px-2.5 py-1 rounded-full shadow-3xs">
             <span className="h-1.5 w-1.5 rounded-full bg-[#00a884] animate-pulse" />
-            <span>AI Sensy Active</span>
+            <span>AI Active</span>
           </div>
         </div>
       </div>

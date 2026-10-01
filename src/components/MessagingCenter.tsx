@@ -1570,12 +1570,12 @@ export default function MessagingCenter({
                         </p>
                       </div>
 
-                      {/* AiSensy TAGS SECTION (Reference Image 3 & 4 Parity) */}
+                      {/* TAGS SECTION (Reference Image 3 & 4 Parity) */}
                       <div className="p-3.5 bg-slate-800 dark:bg-slate-950 border border-slate-750 dark:border-slate-800 rounded-xl space-y-2.5">
                         <div className="flex items-center justify-between">
                           <label className="text-[11px] font-black text-slate-100 dark:text-slate-200 uppercase flex items-center gap-1.5">
                             <Tag className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                            <span>Tags (AiSensy Hub)</span>
+                            <span>Tags (Campaign Hub)</span>
                           </label>
                           <span className="text-[9.5px] font-bold text-slate-500 dark:text-slate-400 font-mono">
                             {leadFormData.tags.length} assigned

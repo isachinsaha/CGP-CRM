@@ -37,7 +37,6 @@ import {
   executeScheduledFullBackup,
   restoreDatabaseFromBackup,
   listAvailableBackups,
-  FullDatabaseBackup,
   clearLeadsCache,
   getWhatsAppTemplates,
   saveWhatsAppTemplate,
@@ -50,7 +49,8 @@ import {
   getMediaItems,
   saveMediaItems
 } from './src/server/db.ts';
-import { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem } from './src/types.ts';
+import type { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem } from './src/types.ts';
+import type { FullDatabaseBackup } from './src/server/db.ts';
 import { isDefaultExperience, getEffectiveExperience, getEffectiveIntake } from './src/utils.ts';
 import { DEFAULT_WHATSAPP_TEMPLATES, sendWhatsAppMessage, replaceTemplatePlaceholders, formatPhoneForWhatsApp, fetchMetaWhatsAppTemplates } from './src/server/whatsapp.ts';
 
@@ -3655,7 +3655,7 @@ async function handleReactivationChatbot(leadId: string, messageBody: string) {
         nextStatus = resObj.nextStatus;
         if (resObj.isQualified) {
           nextStatus = "qualified";
-          nextStage = "strong_opportunity"; // auto shortlist in CRM!
+          // Keeping nextStage equal to lead.stage to preserve full user/coordinator control over the CRM pipeline.
           addTag = "Reactivation - Interested";
         }
         timelineText = resObj.timelineMessage;
@@ -3686,7 +3686,7 @@ async function handleReactivationChatbot(leadId: string, messageBody: string) {
         if (hasPassport) {
           replyText = `Fantastic! You fit the core requirements. I have shortlisted your profile and notified our placement coordinators. We will contact you shortly to review your resume and schedule your interview. Thank you!`;
           nextStatus = 'qualified';
-          nextStage = 'strong_opportunity';
+          // Preserving original stage to maintain user-controlled pipeline
           addTag = 'Reactivation - Interested';
           timelineText = "Candidate confirmed passport and experience. AI shortlisted candidate!";
         } else {
@@ -3784,7 +3784,9 @@ app.get('/api/reactivation/campaigns', async (req, res) => {
     }> = {};
 
     reactivationLeads.forEach(l => {
-      const cName = l.campaign!;
+      // Trim campaign name to prevent trailing space grouping bugs
+      const cName = String(l.campaign || '').trim();
+      if (!cName) return;
       
       // Determine the timestamp of the actual outreach message sent for this reactivation campaign
       let outreachTimestamp = 0;
@@ -3831,40 +3833,28 @@ app.get('/api/reactivation/campaigns', async (req, res) => {
 
       const campaign = campaignMap[cName];
       
-      // Only count genuine successful outreach sent
-      if (l.reactivationStatus !== 'failed') {
-        campaign.leadsCount++;
-      }
-
       // Check if candidate genuinely replied AFTER the outreach message was sent
-      const hasLeadReplied = ['replied', 'interested', 'qualified', 'unqualified'].includes(l.reactivationStatus || '') || (outreachTimestamp > 0 && (l.messages || []).some(m => {
-        return m.sender === 'lead' && new Date(m.timestamp).getTime() > outreachTimestamp;
-      }));
-
-      // A genuine reply is only counted if the lead's status is replied/interested/qualified/unqualified,
-      // or if they genuinely replied after the outreach message was sent, and reactivationStatus is NOT 'failed'!
-      if (hasLeadReplied && l.reactivationStatus !== 'failed') {
-        campaign.repliedCount++;
-      }
-
-      if (l.reactivationStatus === 'interested') {
-        campaign.interestedCount++;
-      } else if (l.reactivationStatus === 'qualified') {
-        campaign.interestedCount++;
-        campaign.qualifiedCount++;
-      }
+      const hasLeadReplied = ['replied', 'interested', 'qualified', 'unqualified'].includes(l.reactivationStatus || '') || (l.messages || []).some(m => {
+        if (m.sender !== 'lead') return false;
+        if (outreachTimestamp > 0) {
+          return new Date(m.timestamp).getTime() > outreachTimestamp;
+        }
+        return true;
+      });
 
       campaign.candidates.push({
-        id: l.id,
-        name: l.name,
-        phone: l.phone,
-        gender: l.gender,
-        age: l.age,
-        experience: l.experience,
-        position: l.position,
-        reactivationStatus: l.reactivationStatus || 'sent',
-        messages: l.messages || []
+        ...l,
+        assignedTo: l.assignedTo || 'unassigned',
+        hasReplied: hasLeadReplied
       });
+    });
+
+    // Calibrate all summary metrics directly from the accumulated candidates list for perfect consistency
+    Object.values(campaignMap).forEach(campaign => {
+      campaign.leadsCount = campaign.candidates.length;
+      campaign.repliedCount = campaign.candidates.filter(c => c.hasReplied).length;
+      campaign.interestedCount = campaign.candidates.filter(c => c.reactivationStatus === 'interested' || c.reactivationStatus === 'qualified').length;
+      campaign.qualifiedCount = campaign.candidates.filter(c => c.reactivationStatus === 'qualified').length;
     });
 
     // Sort campaigns descending by launch date so newly launched ones instantly bubble to the top of the list!
@@ -3975,9 +3965,12 @@ function calculateInactivityPeriod(c: any): { months: number; text: string } {
 // POST scan old database for suitable stale candidates
 app.post('/api/reactivation/scan', async (req, res) => {
   try {
-    const { jobTitle, country, salary, experience, requirements, inactivityMonths, limit, gender, skipAI } = req.body;
+    const { jobTitle, country, salary, experience, requirements, inactivityMonths, limit, gender, skipAI, candidateIds } = req.body;
     
-    const leads = await getLeads(true);
+    let leads = await getLeads(true);
+    if (Array.isArray(candidateIds) && candidateIds.length > 0) {
+      leads = leads.filter(l => candidateIds.includes(l.id));
+    }
     
     // Filter stale/inactive leads
     let inactiveCandidates = leads.filter(l => {
@@ -4237,7 +4230,10 @@ app.post('/api/reactivation/launch', async (req, res) => {
       return;
     }
 
-    const campaignName = `Reactivation - ${jobTitle} ${country}`;
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const campaignName = `Reactivation - ${jobTitle} ${country} (${dateStr} ${timeStr})`;
     const leads = await getLeads(true);
     
     // Retrieve Meta template if specified
@@ -4268,7 +4264,7 @@ app.post('/api/reactivation/launch', async (req, res) => {
           adminRemarks: 'ORGANIC - Materialized from stale archives via Reactivation.',
           assignedTo: 'unassigned',
           importance: 4,
-          stage: 'cold_leads',
+          stage: 'new',
           budget: 500,
           budgetRaw: '500',
           summary: 'Matched via AI Reactivation Campaign',
@@ -4293,7 +4289,7 @@ app.post('/api/reactivation/launch', async (req, res) => {
       } else {
         lead = leads[leadIdx];
         lead.campaign = campaignName;
-        lead.stage = 'cold_leads';
+        // Preserving lead.stage on campaign launch to prevent automated CRM pipeline shifts. Only Admins and Coordinators can modify stages.
         lead.salaryRange = salary || lead.salaryRange || '180 OMR';
         lead.position = jobTitle || lead.position;
         lead.country = country || lead.country;
@@ -4326,6 +4322,7 @@ app.post('/api/reactivation/launch', async (req, res) => {
         channel: 'whatsapp',
         templateName: matchedTemplate ? matchedTemplate.id : undefined,
         templateType: matchedTemplate ? 'template' : undefined,
+        errorDetails: dispatchResult.status === 'failed' ? (dispatchResult.details?.error?.message || JSON.stringify(dispatchResult.details)) : undefined,
         buttons: dispatchResult.buttons
       };
 
@@ -4414,6 +4411,14 @@ app.post('/api/reactivation/simulate-reply', async (req, res) => {
 
 
 
+// Helper to robustly match phone numbers by comparing the last 10 digits
+function arePhonesMatching(phoneA: string, phoneB: string): boolean {
+  const cleanA = String(phoneA || '').replace(/\D/g, '');
+  const cleanB = String(phoneB || '').replace(/\D/g, '');
+  if (!cleanA || !cleanB) return false;
+  return cleanA === cleanB || (cleanA.length >= 10 && cleanB.length >= 10 && cleanA.slice(-10) === cleanB.slice(-10));
+}
+
 // POST simulate incoming WhatsApp Meta ad Webhook lead
 app.post('/api/webhook/whatsapp', async (req, res) => {
   try {
@@ -4428,6 +4433,50 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
     const profileName = whatsappName || 'WhatsApp Contact';
 
     console.log(`Processing inbound WhatsApp webhook lead from ${profileName} (${phone})...`);
+
+    // Fetch leads to check if this candidate already exists
+    const leads = await getLeads();
+    const existingLead = leads.find(l => arePhonesMatching(l.phone, phone) || (l.alternateNo && arePhonesMatching(l.alternateNo, phone)));
+
+    if (existingLead) {
+      console.log(`[Webhook System] Inbound lead already exists: "${existingLead.name}" (ID: ${existingLead.id}, Assigned: @${existingLead.assignedTo || 'unassigned'}). Appending message and preserving previous details and coordinator.`);
+      
+      // Append message
+      if (!Array.isArray(existingLead.messages)) existingLead.messages = [];
+      existingLead.messages.push({
+        id: `msg_webhook_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        sender: 'lead',
+        senderName: existingLead.name,
+        text: initialMessage,
+        timestamp: new Date().toISOString(),
+        status: 'delivered',
+        channel: 'whatsapp'
+      });
+
+      // Update campaign/source if not already set or override to trace the latest campaign attribution
+      existingLead.campaign = finalCampaignName;
+
+      // Add timeline event
+      if (!Array.isArray(existingLead.timeline)) existingLead.timeline = [];
+      existingLead.timeline.push({
+        id: `tl_webhook_${Date.now()}`,
+        type: 'message',
+        text: `Inbound query on campaign: "${finalCampaignName}". Message: "${initialMessage}"`,
+        actor: existingLead.name,
+        timestamp: new Date().toISOString()
+      });
+
+      existingLead.updatedAt = new Date().toISOString();
+
+      clearLeadsCache();
+      await saveLeads(leads);
+
+      // Trigger auto-reply if enabled
+      handleAutoReplyIfEnabled(existingLead.id, phone, existingLead.name);
+
+      res.json({ success: true, lead: existingLead, merged: true });
+      return;
+    }
 
     // Dynamic AI Lead Profiling with Gemini
     const ai = getGemini();
@@ -4532,8 +4581,7 @@ Extract:
       }
     }
 
-    // Save newly created lead
-    const leads = await getLeads();
+    // Save newly created lead (since they don't exist yet)
     const cleanNameId = String(aiAnalysis.name).toUpperCase().trim().replace(/[^A-Z0-9]/g, '_');
     const newLeadId = generateUniqueLeadId(leads, cleanNameId);
     const newLead: Lead = {
@@ -5597,14 +5645,16 @@ async function startServer() {
     }
   }, 5000);
 
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.join(process.cwd(), 'dist');
+  const isProduction = process.env.NODE_ENV === 'production' || fs.existsSync(distPath);
+
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));

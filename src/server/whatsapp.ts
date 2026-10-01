@@ -1,4 +1,4 @@
-import { Lead, Message, WhatsAppTemplate } from '../types.ts';
+import type { Lead, Message, WhatsAppTemplate } from '../types.ts';
 
 export const DEFAULT_WHATSAPP_TEMPLATES: WhatsAppTemplate[] = [
   {
@@ -260,7 +260,7 @@ export async function sendWhatsAppMessage(
       let type = 'text';
       let payload: any = {};
 
-      if (matchedTemplate) {
+      if (matchedTemplate && matchedTemplate.type !== 'quick_reply') {
         type = 'template';
         
         // Extract variables in order of appearance in original template text
