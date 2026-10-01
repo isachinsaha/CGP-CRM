@@ -848,16 +848,20 @@ export default function LeadWhatsAppChat({
                       let bgClass = "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300";
                       let icon = "📑";
 
-                      if (isReactivationOutreach) {
-                        typeLabel = "📢 BROADCAST OUTREACH";
+                      if (msg.templateType === 'quick_reply') {
+                        typeLabel = "QUICK REPLY";
+                        bgClass = "bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300";
+                        icon = "⚡";
+                      } else if (isReactivationOutreach) {
+                        typeLabel = "BROADCAST OUTREACH";
                         bgClass = "bg-indigo-500/10 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300";
                         icon = "📢";
                       } else if (isReactivationBot) {
-                        typeLabel = "🤖 AI CHATBOT PRE-SCREENING";
+                        typeLabel = "AI CHATBOT PRE-SCREENING";
                         bgClass = "bg-purple-500/10 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300";
                         icon = "🤖";
                       } else if (isAutoReply) {
-                        typeLabel = "⚡ AUTOMATED REPLY";
+                        typeLabel = "AUTOMATED REPLY";
                         bgClass = "bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300";
                         icon = "⚡";
                       }
