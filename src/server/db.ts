@@ -19,7 +19,7 @@ import {
   writeBatch,
   setLogLevel
 } from 'firebase/firestore';
-import type { Lead, Message, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem } from '../types.ts';
+import type { Lead, Message, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem, AppNotification } from '../types.ts';
 import { getEffectiveIntake } from '../utils.ts';
 
 // Configure Firebase SDK to only log errors, suppressing gRPC connection warnings
@@ -40,6 +40,7 @@ const INCENTIVE_RULES_FILE = path.join(DATA_DIR, 'incentive_rules.json');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'whatsapp_templates.json');
 const AUTOREPLY_FILE = path.join(DATA_DIR, 'whatsapp_autoreply.json');
 const MEDIA_FILE = path.join(DATA_DIR, 'media_library.json');
+const NOTIFICATIONS_FILE = path.join(DATA_DIR, 'notifications.json');
 
 // --- SAFE ATOMIC JSON READ / WRITE / RECOVERY HELPERS ---
 
@@ -442,6 +443,7 @@ const dbCache = {
   templates: null as CacheEntry<WhatsAppTemplate[]> | null,
   auto_reply: null as CacheEntry<WhatsAppAutoReplySettings> | null,
   media: null as CacheEntry<MediaItem[]> | null,
+  notifications: null as CacheEntry<AppNotification[]> | null,
 };
 
 let lastFullLeadsSyncTime = 0;
@@ -3437,6 +3439,101 @@ export async function saveMediaItems(items: MediaItem[]): Promise<void> {
     } catch (err: any) {
       console.error('[Firestore Client] Failed to sync media library to cloud:', err);
       handleCloudError(err);
+    }
+  }
+}
+
+// ==========================================
+// NOTIFICATIONS PERSISTENCE MANAGEMENT
+// ==========================================
+
+async function initializeNotificationsDatabase(): Promise<void> {
+  if (!fs.existsSync(NOTIFICATIONS_FILE)) {
+    safeWriteJsonSync(NOTIFICATIONS_FILE, []);
+  }
+}
+
+export async function getNotifications(): Promise<AppNotification[]> {
+  await initializeNotificationsDatabase();
+
+  if (dbCache.notifications && (Date.now() - dbCache.notifications.timestamp < CACHE_TTL_MS)) {
+    return dbCache.notifications.data;
+  }
+
+  if (checkCloudStatus()) {
+    try {
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'notifications')), 10000);
+      const notifications: AppNotification[] = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data) {
+          notifications.push({
+            id: docSnap.id,
+            leadId: data.leadId,
+            leadName: data.leadName,
+            phone: data.phone,
+            text: data.text || '',
+            previewText: data.previewText,
+            coordinatorName: data.coordinatorName,
+            type: data.type,
+            isRead: !!data.isRead,
+            createdAt: data.createdAt || new Date().toISOString()
+          } as AppNotification);
+        }
+      });
+      const sorted = notifications.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      dbCache.notifications = { data: sorted, timestamp: Date.now() };
+      safeWriteJsonSync(NOTIFICATIONS_FILE, sorted);
+      return sorted;
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to fetch notifications from cloud, falling back to local files:', err);
+    }
+  }
+
+  let items: AppNotification[] = [];
+  if (fs.existsSync(NOTIFICATIONS_FILE)) {
+    try {
+      items = JSON.parse(fs.readFileSync(NOTIFICATIONS_FILE, 'utf8'));
+    } catch (e) {
+      console.error('Failed to parse notifications file:', e);
+    }
+  }
+  items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  dbCache.notifications = { data: items, timestamp: Date.now() };
+  return items;
+}
+
+export async function saveNotifications(notifications: AppNotification[]): Promise<void> {
+  notifications.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  dbCache.notifications = { data: notifications, timestamp: Date.now() };
+  safeWriteJsonSync(NOTIFICATIONS_FILE, notifications);
+
+  if (checkCloudStatus()) {
+    try {
+      const batch = writeBatch(db);
+      // Keep only last 100 notifications on cloud to preserve space
+      const cloudNotifications = notifications.slice(0, 100);
+      cloudNotifications.forEach(item => {
+        const docRef = doc(db, 'notifications', item.id);
+        batch.set(docRef, cleanForFirestore(item));
+      });
+      await runWithTimeout(batch.commit(), 8000);
+
+      // Clean up deleted ones
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'notifications')), 8000);
+      const deleteBatch = writeBatch(db);
+      let hasDeletes = false;
+      snapshot.forEach(docSnap => {
+        if (!notifications.some(item => item.id === docSnap.id)) {
+          deleteBatch.delete(docSnap.ref);
+          hasDeletes = true;
+        }
+      });
+      if (hasDeletes) {
+        await runWithTimeout(deleteBatch.commit(), 8000);
+      }
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to sync notifications to cloud:', err);
     }
   }
 }

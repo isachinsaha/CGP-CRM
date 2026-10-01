@@ -425,7 +425,8 @@ export default function LeadWhatsAppChat({
     customText?: string, 
     templateName?: string, 
     mediaParams?: { type: 'image' | 'pdf' | 'document'; mediaUrl: string; fileName: string; fileSize: string },
-    templateParams?: Record<string, string>
+    templateParams?: Record<string, string>,
+    templateType?: 'template' | 'quick_reply'
   ) => {
     const textToSend = (customText !== undefined ? customText : inputText).trim();
     if (!textToSend && !mediaParams && !sending) return;
@@ -446,6 +447,7 @@ export default function LeadWhatsAppChat({
           sender: 'user',
           senderName,
           templateName: templateName || undefined,
+          templateType: templateType || undefined,
           templateParams: templateParams || undefined,
           channel: 'whatsapp',
           ...(mediaParams || {}),
@@ -707,7 +709,7 @@ export default function LeadWhatsAppChat({
       // Direct send/insert since there are no parameters
       const formatted = replaceTemplatePlaceholders(template.text, lead, lead.assignedTo || currentAgentId, template.id);
       if (directSend) {
-        handleSendMessage(formatted, template.title);
+        handleSendMessage(formatted, template.title, undefined, undefined, template.type);
       } else {
         setInputText(formatted);
         setShowTemplates(false);
@@ -1339,7 +1341,7 @@ export default function LeadWhatsAppChat({
                        const finalMsg = getFormattedPreviewText(selectedConfigTemplate.text, configParamValues);
                        setSending(true);
                        try {
-                         await handleSendMessage(finalMsg, selectedConfigTemplate.title, undefined, configParamValues);
+                         await handleSendMessage(finalMsg, selectedConfigTemplate.title, undefined, configParamValues, selectedConfigTemplate.type);
                          
                          // Cache parameter values for autocomplete suggestions next time
                          Object.entries(configParamValues).forEach(([k, val]) => {
@@ -1478,7 +1480,7 @@ export default function LeadWhatsAppChat({
               <div className="flex items-center gap-2">
                 <Zap className="h-4 w-4 text-amber-500 fill-current animate-pulse" />
                 <h5 className="text-xs font-bold text-[#111b21] dark:text-[#e9edef] uppercase tracking-wider">
-                  ⚡ Quick Reply Messages
+                  Quick Reply Messages
                 </h5>
               </div>
               <div className="flex items-center gap-3">
@@ -1738,7 +1740,7 @@ export default function LeadWhatsAppChat({
                     if (selected) {
                       setSending(true);
                       try {
-                        await handleSendMessage(historyPreviewText, selected.id, undefined, historyParamValues);
+                        await handleSendMessage(historyPreviewText, selected.id, undefined, historyParamValues, selected.type);
                         
                         // Cache parameter values for next time
                         Object.entries(historyParamValues).forEach(([k, val]) => {

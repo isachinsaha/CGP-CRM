@@ -222,6 +222,19 @@ export interface MediaItem {
   uploadedAt: string;
 }
 
+export interface AppNotification {
+  id: string;
+  leadId?: string;
+  leadName?: string;
+  phone?: string;
+  text: string;
+  previewText?: string;
+  coordinatorName: string; // e.g. 'joyce', 'sarina', 'unassigned', 'admin'
+  type: 'reactivation_reply' | 'incoming_whatsapp';
+  isRead: boolean;
+  createdAt: string;
+}
+
 
 
 

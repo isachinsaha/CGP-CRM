@@ -47,9 +47,11 @@ import {
   backupFileToFirestore,
   syncAndRestoreMissingUploadsFromFirestore,
   getMediaItems,
-  saveMediaItems
+  saveMediaItems,
+  getNotifications,
+  saveNotifications
 } from './src/server/db.ts';
-import type { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem } from './src/types.ts';
+import type { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem, AppNotification } from './src/types.ts';
 import type { FullDatabaseBackup } from './src/server/db.ts';
 import { isDefaultExperience, getEffectiveExperience, getEffectiveIntake } from './src/utils.ts';
 import { DEFAULT_WHATSAPP_TEMPLATES, sendWhatsAppMessage, replaceTemplatePlaceholders, formatPhoneForWhatsApp, fetchMetaWhatsAppTemplates } from './src/server/whatsapp.ts';
@@ -3070,6 +3072,34 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
         await saveLeads(leads);
         console.log(`[Meta Webhook POST] Saved inbound message to candidate database and cleared memory cache.`);
 
+        // Dispatch coordinator inbox notification for incoming WhatsApp message after assigned
+        const assignedCoord = lead.assignedTo && lead.assignedTo !== 'unassigned' && lead.assignedTo.trim() !== '' ? lead.assignedTo : undefined;
+        if (assignedCoord) {
+          try {
+            const notifications = await getNotifications();
+            const newNotif: AppNotification = {
+              id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              leadId: lead.id,
+              leadName: lead.name,
+              phone: lead.phone,
+              text: `Incoming Message`,
+              previewText: String(messageBody),
+              coordinatorName: assignedCoord,
+              type: 'incoming_whatsapp',
+              isRead: false,
+              createdAt: new Date().toISOString()
+            };
+            notifications.unshift(newNotif);
+            if (notifications.length > 200) {
+              notifications.splice(200);
+            }
+            await saveNotifications(notifications);
+            console.log(`[Meta Webhook POST] Dispatched incoming_whatsapp notification for @${assignedCoord}`);
+          } catch (notifErr) {
+            console.error('Failed to dispatch incoming WhatsApp notification:', notifErr);
+          }
+        }
+
         // Trigger auto-reply if enabled OR candidate is on reactivation campaign
         if (lead.campaign && lead.campaign.startsWith('Reactivation -')) {
           console.log(`[Meta Webhook POST] Candidate is enrolled in Reactivation campaign "${lead.campaign}". Calling chatbot...`);
@@ -3481,6 +3511,118 @@ app.delete('/api/updates/:id', async (req, res) => {
   }
 });
 
+// ==========================================
+// NOTIFICATIONS REST API ENDPOINTS
+// ==========================================
+
+// GET notifications
+app.get('/api/notifications', async (req, res) => {
+  try {
+    const list = await getNotifications();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST add a notification manually or programmatically
+app.post('/api/notifications', async (req, res) => {
+  try {
+    const { leadId, leadName, phone, text, previewText, coordinatorName, type } = req.body;
+    if (!text || !coordinatorName || !type) {
+      res.status(400).json({ error: 'Text, coordinatorName, and type are required' });
+      return;
+    }
+
+    const notifications = await getNotifications();
+    const newNotif: AppNotification = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      leadId: leadId || undefined,
+      leadName: leadName || undefined,
+      phone: phone || undefined,
+      text: String(text).trim(),
+      previewText: previewText ? String(previewText).trim() : undefined,
+      coordinatorName: String(coordinatorName).trim(),
+      type: type as any,
+      isRead: false,
+      createdAt: new Date().toISOString()
+    };
+
+    notifications.unshift(newNotif);
+    await saveNotifications(notifications);
+    res.status(201).json(newNotif);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// PUT mark single notification as read
+app.put('/api/notifications/:id/read', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const notifications = await getNotifications();
+    const idx = notifications.findIndex(n => n.id === id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Notification not found' });
+      return;
+    }
+
+    notifications[idx].isRead = true;
+    await saveNotifications(notifications);
+    res.json(notifications[idx]);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST mark all read for a coordinator or admin
+app.post('/api/notifications/mark-all-read', async (req, res) => {
+  try {
+    const { coordinatorName, isAdmin } = req.body;
+    const notifications = await getNotifications();
+    
+    let updated = false;
+    notifications.forEach(n => {
+      // If admin, they mark everything as read. If coordinator, they mark their own as read
+      if (isAdmin || n.coordinatorName === coordinatorName || (n.coordinatorName === 'unassigned' && isAdmin)) {
+        if (!n.isRead) {
+          n.isRead = true;
+          updated = true;
+        }
+      }
+    });
+
+    if (updated) {
+      await saveNotifications(notifications);
+    }
+    res.json({ success: true, count: notifications.filter(n => n.isRead).length });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST clear/delete notifications for a coordinator or admin
+app.post('/api/notifications/clear', async (req, res) => {
+  try {
+    const { coordinatorName, isAdmin } = req.body;
+    const notifications = await getNotifications();
+    
+    let filtered;
+    if (isAdmin) {
+      // Admins clear all
+      filtered = [];
+    } else {
+      // Coordinators only clear their own
+      filtered = notifications.filter(n => n.coordinatorName !== coordinatorName);
+    }
+
+    await saveNotifications(filtered);
+    res.json({ success: true, remaining: filtered.length });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // GET all incentive rules
 app.get('/api/incentive-rules', async (req, res) => {
   try {
@@ -3721,7 +3863,8 @@ async function handleReactivationChatbot(leadId: string, messageBody: string) {
       if (!Array.isArray(fl.messages)) fl.messages = [];
       fl.messages.push(outboundMsg);
       fl.reactivationStatus = nextStatus;
-      fl.stage = nextStage;
+      // Preserving fl.stage to ensure automated chatbot never overrides or shifts pipeline stages. Only Admins and Coordinators can modify stages.
+      fl.stage = fl.stage;
       if (addTag) {
         if (!Array.isArray(fl.tags)) fl.tags = [];
         if (!fl.tags.includes(addTag)) fl.tags.push(addTag);
@@ -3742,24 +3885,30 @@ async function handleReactivationChatbot(leadId: string, messageBody: string) {
       await saveLeads(updatedLeads);
       console.log(`[Reactivation Chatbot] Successfully updated lead ID="${leadId}" to reactivationStatus="${nextStatus}"`);
 
-      // Notify the leading coordinator of the reply!
-      const coordinatorName = fl.assignedTo && fl.assignedTo !== 'unassigned' ? fl.assignedTo : 'Unassigned';
+      // Notify the leading coordinator of the reply via the new Notification center!
+      const coordinatorName = fl.assignedTo && fl.assignedTo !== 'unassigned' && fl.assignedTo.trim() !== '' ? fl.assignedTo : 'unassigned';
       try {
-        const updates = await getUpdates();
-        const notificationText = `🔔 [Reactivation Reply] Candidate "${fl.name}" (${fl.phone}) replied to Reactivation Campaign! Leading Coordinator: @${coordinatorName}. Reply: "${messageBody}"`;
-        const newNotification: ImportantUpdate = {
-          id: `update_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          text: notificationText,
+        const notifications = await getNotifications();
+        const newNotif: AppNotification = {
+          id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          leadId: fl.id,
+          leadName: fl.name,
+          phone: fl.phone,
+          text: `Reactivation Campaign Reply`,
+          previewText: messageBody,
+          coordinatorName: coordinatorName,
+          type: 'reactivation_reply',
+          isRead: false,
           createdAt: new Date().toISOString()
         };
-        updates.unshift(newNotification);
-        if (updates.length > 40) {
-          updates.splice(40);
+        notifications.unshift(newNotif);
+        if (notifications.length > 200) {
+          notifications.splice(200);
         }
-        await saveUpdates(updates);
-        console.log(`[Reactivation Chatbot] Dispatched global coordinator notification for @${coordinatorName}`);
+        await saveNotifications(notifications);
+        console.log(`[Reactivation Chatbot] Dispatched inbox center notification for coordinator @${coordinatorName}`);
       } catch (updateErr) {
-        console.error('Failed to dispatch reactivation reply update:', updateErr);
+        console.error('Failed to dispatch reactivation reply notification:', updateErr);
       }
     }
   } catch (err) {
