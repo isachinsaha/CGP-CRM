@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { StatSummary, Lead, Coordinator } from '../types.ts';
+import CoordinatorPerformanceReport from './CoordinatorPerformanceReport.tsx';
 import { 
   BarChart3, TrendingUp, Target, Percent, Sparkles, 
   UserCheck, Inbox, Calendar, Users, Award, ShieldAlert, Clock, MapPin, CheckCircle,
@@ -74,7 +75,7 @@ export default function CampaignAnalytics({
   onSelectLead,
   coordinators = []
 }: CampaignAnalyticsProps) {
-  const [reportTab, setReportTab] = useState<'daily' | 'dpr' | 'weekly' | 'monthly' | 'custom'>('daily');
+  const [reportTab, setReportTab] = useState<'daily' | 'dpr' | 'weekly' | 'monthly' | 'custom' | 'coordinator_perf'>('daily');
   const [customStartDate, setCustomStartDate] = useState<string>('2025-01-01');
   const [customEndDate, setCustomEndDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [selectedCoordFilter, setSelectedCoordFilter] = useState<string>('All');
@@ -1485,7 +1486,8 @@ export default function CampaignAnalytics({
               { id: 'dpr', label: 'Daily Progress Report (DPR)' },
               { id: 'weekly', label: 'Weekly Report' },
               { id: 'monthly', label: 'Monthly Report' },
-              { id: 'custom', label: 'Select Date Wise' }
+              { id: 'custom', label: 'Select Date Wise' },
+              { id: 'coordinator_perf', label: 'Coordinator Performance' }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -2372,6 +2374,18 @@ export default function CampaignAnalytics({
             {renderTargetAchievementGraph()}
           </div>
         </div>
+      )}
+
+      {/* --- COORDINATOR PERFORMANCE REPORT CONTENT --- */}
+      {reportTab === 'coordinator_perf' && (
+        <CoordinatorPerformanceReport 
+          leads={leads || []}
+          coordinators={coordinators || []}
+          onSelectLead={onSelectLead || (() => {})}
+          onRefreshData={onRefreshData || (() => {})}
+          userRole={userRole || 'agent'}
+          currentAgentId={currentAgentId || ''}
+        />
       )}
 
       {/* --- CUSTOM DATE-WISE REPORT CONTENT --- */}

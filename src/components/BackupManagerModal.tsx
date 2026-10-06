@@ -46,10 +46,29 @@ export const BackupManagerModal: React.FC<BackupManagerModalProps> = ({
   const [selectedFileForRestore, setSelectedFileForRestore] = useState<File | null>(null);
   const [parsedRestoreInfo, setParsedRestoreInfo] = useState<any | null>(null);
 
+  const getSessionUser = () => {
+    try {
+      const saved = localStorage.getItem('cgp_crm_session');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return null;
+  };
+  const sessionUser = getSessionUser();
+  const queryParams = sessionUser 
+    ? `?agentId=${encodeURIComponent(sessionUser.username)}&role=${encodeURIComponent(sessionUser.role)}${sessionUser.token ? `&token=${encodeURIComponent(sessionUser.token)}` : ''}` 
+    : '';
+
   const fetchBackupsList = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/backup/list');
+      const res = await fetch(`/api/backup/list${queryParams}`, {
+        headers: {
+          'x-user-role': sessionUser?.role || 'user',
+          'x-agent-id': sessionUser?.username || 'System'
+        }
+      });
       if (res.ok) {
         const data = await res.json();
         setBackups(data.backups || []);
@@ -74,9 +93,13 @@ export const BackupManagerModal: React.FC<BackupManagerModalProps> = ({
     setTriggering(true);
     setStatusMessage({ type: 'info', text: 'Executing full snapshot of DB (.JSON) and Master Spreadsheet (.XLSX)...' });
     try {
-      const res = await fetch('/api/backup/trigger', {
+      const res = await fetch(`/api/backup/trigger${queryParams}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-role': sessionUser?.role || 'user',
+          'x-agent-id': sessionUser?.username || 'System'
+        },
         body: JSON.stringify({ isMonday: false })
       });
       if (res.ok) {
@@ -137,9 +160,13 @@ export const BackupManagerModal: React.FC<BackupManagerModalProps> = ({
     setStatusMessage({ type: 'info', text: 'Restoring database records and syncing with Cloud Firestore...' });
 
     try {
-      const res = await fetch('/api/backup/restore', {
+      const res = await fetch(`/api/backup/restore${queryParams}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-role': sessionUser?.role || 'user',
+          'x-agent-id': sessionUser?.username || 'System'
+        },
         body: JSON.stringify(parsedRestoreInfo)
       });
 
@@ -223,7 +250,7 @@ export const BackupManagerModal: React.FC<BackupManagerModalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
             {/* 1. Download Master XLSX */}
             <a
-              href="/api/backup/full-xlsx"
+              href={`/api/backup/full-xlsx${queryParams}`}
               className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900/40 bg-gradient-to-br from-emerald-50/50 to-teal-50/20 dark:from-emerald-950/20 dark:to-teal-950/10 hover:border-emerald-400 transition flex flex-col justify-between group"
             >
               <div className="flex items-center justify-between mb-2">
@@ -238,7 +265,7 @@ export const BackupManagerModal: React.FC<BackupManagerModalProps> = ({
 
             {/* 2. Download Restorable DB JSON */}
             <a
-              href="/api/backup/full-db"
+              href={`/api/backup/full-db${queryParams}`}
               className="p-4 rounded-xl border border-indigo-200 dark:border-indigo-900/40 bg-gradient-to-br from-indigo-50/50 to-blue-50/20 dark:from-indigo-950/20 dark:to-blue-950/10 hover:border-indigo-400 transition flex flex-col justify-between group"
             >
               <div className="flex items-center justify-between mb-2">
@@ -372,7 +399,7 @@ export const BackupManagerModal: React.FC<BackupManagerModalProps> = ({
                         </td>
                         <td className="px-3.5 py-2 text-right">
                           <a
-                            href={`/api/backup/download-file?file=${encodeURIComponent(b.fileName)}`}
+                            href={`/api/backup/download-file?file=${encodeURIComponent(b.fileName)}${queryParams ? queryParams.replace('?', '&') : ''}`}
                             className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[11px] font-bold transition"
                           >
                             <Download className="h-3 w-3" /> Download

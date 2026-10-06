@@ -1,8 +1,104 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Global Safety Net - default deny
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Coordinators collection
+    match /coordinators/{id} {
+      allow read: if true;
+      allow create, update: if isValidId(id) 
+        && request.resource.data.username is string 
+        && request.resource.data.username.size() <= 100
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 100;
+      allow delete: if false; // Deny coordinator deletion via client direct access
+    }
+
+    // Leads collection
+    match /leads/{id} {
+      allow read: if true;
+      allow create, update: if isValidId(id)
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 200
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() <= 50;
+      allow delete: if false; // Leads should only be soft-deleted by updating isDeleted field
+    }
+
+    // Jobs collection
+    match /jobs/{id} {
+      allow read: if true;
+      allow create, update: if isValidId(id)
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.country is string;
+      allow delete: if false;
+    }
+
+    // Updates collection
+    match /updates/{id} {
+      allow read: if true;
+      allow create, update: if isValidId(id)
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 5000;
+      allow delete: if false;
+    }
+
+    // Wallets collection
+    match /wallets/{id} {
+      allow read: if true;
+      allow write: if isValidId(id);
+    }
+
+    // Incentive rules collection
+    match /incentive_rules/{id} {
+      allow read: if true;
+      allow create, update: if isValidId(id)
+        && request.resource.data.projectName is string;
+      allow delete: if false;
+    }
+
+    // WhatsApp templates collection
+    match /whatsapp_templates/{id} {
+      allow read: if true;
+      allow create, update: if isValidId(id)
+        && request.resource.data.title is string;
+      allow delete: if true; // Allow deleting templates
+    }
+
+    // File backups & chunks
+    match /file_backups/{id} {
+      allow read, write: if isValidId(id);
+    }
+
+    match /file_backups/{fileName}/file_chunks/{id} {
+      allow read, write: if isValidId(fileName) && isValidId(id);
+    }
+
+    // Media library collection
+    match /media_library/{id} {
+      allow read: if true;
+      allow write: if isValidId(id);
+    }
+
+    // Notifications collection
+    match /notifications/{id} {
+      allow read: if true;
+      allow write: if isValidId(id);
+    }
+
+    // Metadata collection
+    match /metadata/{id} {
+      allow read, write: if isValidId(id);
     }
   }
 }

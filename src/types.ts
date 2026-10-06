@@ -128,6 +128,23 @@ export interface Lead {
     actor: string;
     timestamp: string;
   }[];
+  stageHistory?: {
+    candidateId: string;
+    previousStage: string;
+    newStage: string;
+    changedBy: string;
+    coordinatorId: string;
+    changedAt: string;
+    project?: string;
+    country?: string;
+  }[];
+  coordinatorHistory?: {
+    candidateId: string;
+    previousCoordinator: string;
+    newCoordinator: string;
+    changedBy: string;
+    changedAt: string;
+  }[];
 }
 
 export interface StatSummary {

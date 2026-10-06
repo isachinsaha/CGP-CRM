@@ -37,6 +37,29 @@ import MediaLibrary from './components/MediaLibrary.tsx';
 
 // Import local assets
 
+// Global fetch interceptor to inject secure session token header automatically into all outgoing requests
+if (typeof window !== 'undefined') {
+  const originalFetch = window.fetch;
+  window.fetch = async (input, init) => {
+    const sessionStr = localStorage.getItem('cgp_crm_session');
+    if (sessionStr) {
+      try {
+        const session = JSON.parse(sessionStr);
+        if (session && session.token) {
+          init = init || {};
+          init.headers = {
+            ...init.headers,
+            'x-session-token': session.token
+          };
+        }
+      } catch (e) {
+        // ignore parsing errors
+      }
+    }
+    return originalFetch(input, init);
+  };
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'board' | 'list' | 'messages' | 'analytics' | 'jobs' | 'ai-matcher' | 'reactivation' | 'wallet' | 'media'>('board');
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -107,6 +130,49 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [filterNotifCoord, setFilterNotifCoord] = useState<string>('all');
+
+  // Moveable Floating Bell Position & Dragging state
+  const [bellPosition, setBellPosition] = useState<{ x: number; y: number }>(() => {
+    try {
+      const saved = localStorage.getItem('cgp_crm_bell_position');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return { x: 0, y: 0 };
+  });
+  const [isBellDragging, setIsBellDragging] = useState(false);
+  const bellDragStart = useRef({ x: 0, y: 0 });
+  const bellPositionStart = useRef({ x: 0, y: 0 });
+  const bellHasMoved = useRef(false);
+
+  const handleBellPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    setIsBellDragging(true);
+    bellHasMoved.current = false;
+    bellDragStart.current = { x: e.clientX, y: e.clientY };
+    bellPositionStart.current = { ...bellPosition };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handleBellPointerMove = (e: React.PointerEvent) => {
+    if (!isBellDragging) return;
+    const dx = e.clientX - bellDragStart.current.x;
+    const dy = e.clientY - bellDragStart.current.y;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+      bellHasMoved.current = true;
+    }
+    const newX = bellPositionStart.current.x + dx;
+    const newY = bellPositionStart.current.y + dy;
+    setBellPosition({ x: newX, y: newY });
+  };
+
+  const handleBellPointerUp = (e: React.PointerEvent) => {
+    if (!isBellDragging) return;
+    setIsBellDragging(false);
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    localStorage.setItem('cgp_crm_bell_position', JSON.stringify(bellPosition));
+  };
 
   // Theme state
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -1646,7 +1712,14 @@ export default function App() {
       )}
 
       {/* 5. FLOATING LIVE NOTIFICATIONS CENTER (Bell Icon in Bottom-Right) */}
-      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end">
+      <div 
+        className="fixed z-40 flex flex-col items-end"
+        style={{
+          bottom: '24px',
+          right: '24px',
+          transform: `translate(${bellPosition.x}px, ${bellPosition.y}px)`
+        }}
+      >
         
         {/* Animated Popover Feed */}
         {isNotifOpen && (
@@ -1857,12 +1930,16 @@ export default function App() {
 
         {/* Floating Bell Button with Badge */}
         <button
+          onPointerDown={handleBellPointerDown}
+          onPointerMove={handleBellPointerMove}
+          onPointerUp={handleBellPointerUp}
           onClick={() => {
+            if (bellHasMoved.current) return; // Prevent clicking while dragging
             setIsNotifOpen(!isNotifOpen);
             // Re-fetch fresh notifications on click
             fetchNotifications();
           }}
-          className={`h-14 w-14 rounded-full flex items-center justify-center shadow-premium cursor-pointer transition-all duration-200 transform hover:scale-105 active:scale-95 border z-50 ${
+          className={`h-14 w-14 rounded-full flex items-center justify-center shadow-premium cursor-move transition-all duration-200 transform hover:scale-105 active:scale-95 border z-50 ${
             isNotifOpen 
               ? 'bg-slate-900 border-slate-750 text-indigo-400 hover:bg-slate-850' 
               : 'bg-indigo-600 hover:bg-indigo-500 text-white border-transparent'

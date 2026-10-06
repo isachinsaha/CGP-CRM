@@ -242,7 +242,7 @@ async function verifyDatabaseAccess(): Promise<boolean> {
   try {
     console.log(`[Firestore Client] Verifying connectivity to database: "${currentDbId}"...`);
     const testRef = doc(db, 'metadata', 'test_connection');
-    await runWithTimeout(getDoc(testRef), 8000);
+    await runWithTimeout(getDoc(testRef), 2000);
     dbVerified = true;
     cloudSyncEnabled = true;
     cloudErrorCount = 0;
@@ -272,7 +272,7 @@ async function verifyDatabaseAccess(): Promise<boolean> {
         db = initializeFirestore(firebaseApp, { experimentalForceLongPolling: true }, '(default)');
         currentDbId = '(default)';
         const testRef = doc(db, 'metadata', 'test_connection');
-        await runWithTimeout(getDoc(testRef), 10000);
+        await runWithTimeout(getDoc(testRef), 2000);
         dbVerified = true;
         cloudSyncEnabled = true;
         console.log(`[Firestore Client] Successfully connected to "(default)" database.`);

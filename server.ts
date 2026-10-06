@@ -62,6 +62,78 @@ const PORT = Number(process.env.PORT) || 3000;
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Secure Session Token Manager & Middleware
+interface Session {
+  username: string;
+  role: string;
+  expiresAt: number;
+}
+const activeSessions = new Map<string, Session>();
+const SESSIONS_FILE = path.join(process.cwd(), 'data', 'sessions.json');
+
+function saveSessions() {
+  try {
+    const parentDir = path.dirname(SESSIONS_FILE);
+    if (!fs.existsSync(parentDir)) {
+      fs.mkdirSync(parentDir, { recursive: true });
+    }
+    const obj = Object.fromEntries(activeSessions.entries());
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save sessions:', err);
+  }
+}
+
+function loadSessions() {
+  try {
+    if (fs.existsSync(SESSIONS_FILE)) {
+      const content = fs.readFileSync(SESSIONS_FILE, 'utf8');
+      const obj = JSON.parse(content);
+      for (const [token, sess] of Object.entries(obj)) {
+        activeSessions.set(token, sess as Session);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load sessions:', err);
+  }
+}
+
+// Load existing active sessions on server startup
+loadSessions();
+
+// Secure Request Authentication Middleware
+app.use((req, res, next) => {
+  // Extract session token from headers, query params, or req.body
+  const token = (req.headers['x-session-token'] as string) || 
+                (req.query.token as string) || 
+                (req.body && req.body.token);
+
+  // Strip/clear incoming unauthenticated x-user-role and x-agent-id to prevent spoofing
+  delete req.headers['x-user-role'];
+  delete req.headers['x-agent-id'];
+
+  if (token) {
+    const session = activeSessions.get(token);
+    if (session) {
+      if (Date.now() < session.expiresAt) {
+        // Authenticated! Bind session user and role to headers
+        req.headers['x-user-role'] = session.role;
+        req.headers['x-agent-id'] = session.username;
+        return next();
+      } else {
+        // Remove expired session
+        activeSessions.delete(token);
+        saveSessions();
+      }
+    }
+  }
+
+  // Default fallback for unauthenticated requests
+  req.headers['x-user-role'] = 'user';
+  req.headers['x-agent-id'] = 'unassigned';
+  next();
+});
+
 // Ensure uploads directory exists and mount it statically
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
@@ -323,9 +395,32 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Helper to verify that the request is made by a valid logged-in administrator
+async function verifyAdminAccess(req: express.Request): Promise<boolean> {
+  const role = (req.headers['x-user-role'] as string) || (req.query.role as string) || (req.body && req.body.role);
+  const agentId = (req.headers['x-agent-id'] as string) || (req.query.agentId as string) || (req.body && req.body.agentId);
+
+  if (!role || !agentId) return false;
+  if (role !== 'admin') return false;
+
+  try {
+    const coordinators = await getCoordinators();
+    const normalizedUser = String(agentId).trim().toLowerCase();
+    const matched = coordinators.find(c => c.username.toLowerCase() === normalizedUser);
+    return !!(matched && matched.role === 'admin');
+  } catch (err) {
+    console.error('Failed to verify admin access:', err);
+    return false;
+  }
+}
+
 // GET /api/backup/full-xlsx - Complete Master Database XLSX Backup Download (Zero limitations, 100% of all data)
 app.get('/api/backup/full-xlsx', async (req, res) => {
   try {
+    if (!(await verifyAdminAccess(req))) {
+      res.status(403).json({ error: 'Access denied: Admin credentials required' });
+      return;
+    }
     const wbBuffer = await generateFullXLSXBuffer();
     const todayStr = new Date().toISOString().split('T')[0];
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -339,6 +434,10 @@ app.get('/api/backup/full-xlsx', async (req, res) => {
 // GET /api/backup/full-db - Download complete JSON Database Backup file (suitable for full 1-click restore)
 app.get('/api/backup/full-db', async (req, res) => {
   try {
+    if (!(await verifyAdminAccess(req))) {
+      res.status(403).json({ error: 'Access denied: Admin credentials required' });
+      return;
+    }
     const backup = await createFullDatabaseBackup('Manual Download via API');
     const todayStr = new Date().toISOString().split('T')[0];
     res.setHeader('Content-Type', 'application/json');
@@ -350,8 +449,12 @@ app.get('/api/backup/full-db', async (req, res) => {
 });
 
 // GET /api/backup/list - Get list of all automatic and manual backups on disk
-app.get('/api/backup/list', (req, res) => {
+app.get('/api/backup/list', async (req, res) => {
   try {
+    if (!(await verifyAdminAccess(req))) {
+      res.status(403).json({ error: 'Access denied: Admin credentials required' });
+      return;
+    }
     const backups = listAvailableBackups();
     res.json({ backups });
   } catch (err) {
@@ -362,6 +465,10 @@ app.get('/api/backup/list', (req, res) => {
 // POST /api/backup/trigger - Immediately trigger a full automated backup of both DB and XLSX right now
 app.post('/api/backup/trigger', async (req, res) => {
   try {
+    if (!(await verifyAdminAccess(req))) {
+      res.status(403).json({ error: 'Access denied: Admin credentials required' });
+      return;
+    }
     const isMonday = req.body?.isMonday === true;
     const result = await executeScheduledFullBackup(isMonday);
     res.json({
@@ -377,6 +484,10 @@ app.post('/api/backup/trigger', async (req, res) => {
 // POST /api/backup/restore - Restore DB from uploaded JSON backup payload
 app.post('/api/backup/restore', async (req, res) => {
   try {
+    if (!(await verifyAdminAccess(req))) {
+      res.status(403).json({ error: 'Access denied: Admin credentials required' });
+      return;
+    }
     const backupData: FullDatabaseBackup = req.body;
     if (!backupData || !backupData.data || !Array.isArray(backupData.data.leads)) {
       return res.status(400).json({ error: 'Invalid backup file structure: missing data.leads array.' });
@@ -389,8 +500,12 @@ app.post('/api/backup/restore', async (req, res) => {
 });
 
 // GET /api/backup/download-file - Download a specific backup file by filename from the backup repository
-app.get('/api/backup/download-file', (req, res) => {
+app.get('/api/backup/download-file', async (req, res) => {
   try {
+    if (!(await verifyAdminAccess(req))) {
+      res.status(403).json({ error: 'Access denied: Admin credentials required' });
+      return;
+    }
     const fileName = req.query.file as string;
     if (!fileName || fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
       return res.status(400).json({ error: 'Invalid or unsafe file name parameter.' });
@@ -419,6 +534,7 @@ app.get('/api/leads', async (req, res) => {
     const forceRefresh = req.query.forceRefresh === 'true';
     const showDeleted = req.query.showDeleted === 'true';
     const rawLeads = await getLeads(forceRefresh);
+    rawLeads.forEach(lead => backfillLeadHistory(lead));
 
     // 1. Compute dynamic metadata from all unfiltered active leads (excluding soft-deleted)
     const countriesMap = new Map<string, string>(); // lowercase -> original casing
@@ -942,14 +1058,28 @@ app.post('/api/login', async (req, res) => {
       return;
     }
 
-    // Return user info (excluding password for security)
+    // Generate secure session token (crypto.randomUUID fallback using timestamp/random if not available natively)
+    const token = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `sess_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+
+    // Store in active sessions map (valid for 30 days of seamless persistent CRM operations)
+    activeSessions.set(token, {
+      username: matched.username,
+      role: matched.role,
+      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
+    });
+    saveSessions();
+
+    // Return user info (excluding password for security) with the authorization session token embedded
     res.json({
       success: true,
       user: {
         id: matched.id,
         username: matched.username,
         displayName: matched.displayName,
-        role: matched.role
+        role: matched.role,
+        token: token
       }
     });
   } catch (err) {
@@ -1526,6 +1656,8 @@ app.put('/api/leads/:id', async (req, res) => {
     // Ensure lists exist
     if (!lead.timeline) lead.timeline = [];
     if (!lead.tasks) lead.tasks = [];
+    if (!lead.stageHistory) lead.stageHistory = [];
+    if (!lead.coordinatorHistory) lead.coordinatorHistory = [];
 
     // Actor context
     const actorRole = req.headers['x-user-role'] || 'user';
@@ -1546,6 +1678,18 @@ app.put('/api/leads/:id', async (req, res) => {
         actor,
         timestamp: new Date().toISOString()
       });
+
+      lead.stageHistory.push({
+        candidateId: lead.id,
+        previousStage: lead.stage,
+        newStage: stage as LeadStage,
+        changedBy: actor,
+        coordinatorId: lead.assignedTo || 'unassigned',
+        changedAt: new Date().toISOString(),
+        project: lead.project || project || 'General',
+        country: lead.country || country || 'Unknown'
+      });
+
       lead.stage = stage as LeadStage;
     }
 
@@ -1561,6 +1705,15 @@ app.put('/api/leads/:id', async (req, res) => {
         actor,
         timestamp: new Date().toISOString()
       });
+
+      lead.coordinatorHistory.push({
+        candidateId: lead.id,
+        previousCoordinator: lead.assignedTo || 'unassigned',
+        newCoordinator: assignedTo || 'unassigned',
+        changedBy: actor,
+        changedAt: new Date().toISOString()
+      });
+
       lead.assignedTo = assignedTo;
       lead.assignDate = new Date().toISOString().split('T')[0];
       isAssignDateSetByServer = true;
@@ -1586,6 +1739,16 @@ app.put('/api/leads/:id', async (req, res) => {
         (remarks2 !== undefined && remarks2.trim() !== '' && !lead.remarks2) ||
         (remarks3 !== undefined && remarks3.trim() !== '' && !lead.remarks3);
       if (isAddingRemark) {
+        lead.stageHistory.push({
+          candidateId: lead.id,
+          previousStage: 'new',
+          newStage: 'negotiating' as LeadStage,
+          changedBy: 'System (Auto-Stage)',
+          coordinatorId: lead.assignedTo || 'unassigned',
+          changedAt: new Date().toISOString(),
+          project: lead.project || project || 'General',
+          country: lead.country || country || 'Unknown'
+        });
         lead.stage = 'negotiating';
         lead.timeline.push({
           id: `tl_${Date.now()}_auto_stage`,
@@ -3637,6 +3800,673 @@ app.delete('/api/notifications/:id', async (req, res) => {
     const filtered = notifications.filter(n => n.id !== id);
     await saveNotifications(filtered);
     res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// Helper function to reconstruct stage and coordinator histories from lead timeline
+function backfillLeadHistory(lead: any): boolean {
+  let modified = false;
+  if (!lead.stageHistory) {
+    lead.stageHistory = [];
+    modified = true;
+  }
+  if (!lead.coordinatorHistory) {
+    lead.coordinatorHistory = [];
+    modified = true;
+  }
+
+  // If histories are completely empty and we have timeline logs, let's reconstruct them
+  if (lead.stageHistory.length === 0 && lead.timeline && lead.timeline.length > 0) {
+    // Sort timeline ascending to process chronologically
+    const sortedTimeline = [...lead.timeline].sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+    
+    let currentStage = 'new';
+    let currentCoordinator = lead.assignedTo || 'unassigned';
+
+    // Seed initial values from creation
+    lead.stageHistory.push({
+      candidateId: lead.id,
+      previousStage: 'none',
+      newStage: 'new',
+      changedBy: 'System (Backfill)',
+      coordinatorId: currentCoordinator,
+      changedAt: lead.createdAt || lead.entryDate || new Date().toISOString(),
+      project: lead.project,
+      country: lead.country
+    });
+
+    sortedTimeline.forEach((t: any) => {
+      const text = (t.text || '').toLowerCase();
+      const timestamp = t.timestamp || new Date().toISOString();
+      const actor = t.actor || 'System';
+
+      if (t.type === 'status' || text.includes('pipeline stage changed') || text.includes('pipeline stage auto-moved')) {
+        let fromStage = '';
+        let toStage = '';
+
+        if (text.includes('changed from') && text.includes('to')) {
+          const parts = text.split('changed from');
+          if (parts[1]) {
+            const subParts = parts[1].split('to');
+            fromStage = subParts[0].replace(/['"“”]/g, '').trim();
+            toStage = subParts[1].replace(/['"“”]/g, '').trim();
+          }
+        } else if (text.includes('auto-moved to')) {
+          const parts = text.split('auto-moved to');
+          if (parts[1]) {
+            toStage = parts[1].split('due to')[0].replace(/['"“”]/g, '').trim();
+          }
+        }
+
+        const mapLabelToKey = (label: string): string => {
+          const l = label.toLowerCase().trim();
+          if (l.includes('new inbound') || l === 'new') return 'new';
+          if (l.includes('in discussion') || l.includes('negotiating') || l === 'discussion') return 'in_discussion';
+          if (l.includes('strong opportunity') || l.includes('rotations') || l === 'strong') return 'strong_opportunity';
+          if (l.includes('office visited') || l.includes('interview') || l.includes('proposal')) return 'office_visited';
+          if (l.includes('won') || l.includes('closed won')) return 'won';
+          if (l.includes('cold') || l.includes('cold leads')) return 'cold_leads';
+          if (l.includes('lost') || l.includes('closed lost')) return 'lost';
+          return l;
+        };
+
+        const newStageKey = toStage ? mapLabelToKey(toStage) : '';
+        const prevStageKey = fromStage ? mapLabelToKey(fromStage) : currentStage;
+
+        if (newStageKey) {
+          lead.stageHistory.push({
+            candidateId: lead.id,
+            previousStage: prevStageKey,
+            newStage: newStageKey,
+            changedBy: actor,
+            coordinatorId: currentCoordinator,
+            changedAt: timestamp,
+            project: lead.project,
+            country: lead.country
+          });
+          currentStage = newStageKey;
+        }
+      }
+
+      if (t.type === 'assignment' || text.includes('assigned coordinator changed')) {
+        let fromCoord = '';
+        let toCoord = '';
+        if (text.includes('changed from') && text.includes('to')) {
+          const parts = text.split('changed from');
+          if (parts[1]) {
+            const subParts = parts[1].split('to');
+            fromCoord = subParts[0].replace(/['"“”]/g, '').trim();
+            toCoord = subParts[1].split('via')[0].replace(/['"“”]/g, '').trim();
+          }
+        }
+
+        if (toCoord) {
+          lead.coordinatorHistory.push({
+            candidateId: lead.id,
+            previousCoordinator: fromCoord || 'unassigned',
+            newCoordinator: toCoord,
+            changedBy: actor,
+            changedAt: timestamp
+          });
+          currentCoordinator = toCoord;
+        }
+      }
+    });
+
+    lead.stageHistory.sort((a: any, b: any) => new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime());
+    lead.coordinatorHistory.sort((a: any, b: any) => new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime());
+    modified = true;
+  }
+
+  // Ensure baseline starting snapshot exists if history is still empty
+  if (lead.stageHistory.length === 0) {
+    lead.stageHistory.push({
+      candidateId: lead.id,
+      previousStage: 'none',
+      newStage: lead.stage || 'new',
+      changedBy: 'System (Initial)',
+      coordinatorId: lead.assignedTo || 'unassigned',
+      changedAt: lead.createdAt || lead.entryDate || new Date().toISOString(),
+      project: lead.project,
+      country: lead.country
+    });
+    modified = true;
+  }
+
+  if (lead.coordinatorHistory.length === 0) {
+    lead.coordinatorHistory.push({
+      candidateId: lead.id,
+      previousCoordinator: 'unassigned',
+      newCoordinator: lead.assignedTo || 'unassigned',
+      changedBy: 'System (Initial)',
+      changedAt: lead.assignDate || lead.createdAt || lead.entryDate || new Date().toISOString()
+    });
+    modified = true;
+  }
+
+  return modified;
+}
+
+// GET Coordinator Performance Report
+app.get('/api/reports/coordinator-performance', async (req, res) => {
+  try {
+    const month = (req.query.month as string) || new Date().toISOString().slice(0, 7);
+    const coordinator = (req.query.coordinator as string) || 'all';
+    const project = (req.query.project as string) || 'all';
+    const country = (req.query.country as string) || 'all';
+    const source = (req.query.source as string) || 'all';
+    const attributionMode = (req.query.attributionMode as string) || 'ownership'; // 'ownership' | 'activity'
+
+    const leads = await getLeads();
+    const coordinators = await getCoordinators();
+
+    // 1. Backfill all leads in memory
+    leads.forEach(lead => backfillLeadHistory(lead));
+
+    // Calculate previous month string
+    const [year, monthNum] = month.split('-').map(Number);
+    let prevYear = year;
+    let prevMonthNum = monthNum - 1;
+    if (prevMonthNum === 0) {
+      prevMonthNum = 12;
+      prevYear = year - 1;
+    }
+    const previousMonth = `${prevYear}-${String(prevMonthNum).padStart(2, '0')}`;
+
+    // Robust helper to get YYYY-MM from any date format safely
+    const getMonthStr = (dateVal: any): string => {
+      if (!dateVal) return '';
+      try {
+        const d = new Date(dateVal);
+        if (isNaN(d.getTime())) {
+          // Fallback if Date parsing fails but it resembles YYYY-MM
+          if (typeof dateVal === 'string' && /^\d{4}-\d{2}/.test(dateVal)) {
+            return dateVal.slice(0, 7);
+          }
+          return '';
+        }
+        return d.toISOString().slice(0, 7);
+      } catch {
+        return '';
+      }
+    };
+
+    // Helper to check if a timestamp matches a given YYYY-MM
+    const matchesMonth = (timestamp: string, targetMonth: string) => {
+      if (!timestamp) return false;
+      const mStr = getMonthStr(timestamp);
+      return mStr === targetMonth;
+    };
+
+    // Helper to standardize stage names
+    const stdStage = (st: string): string => {
+      if (!st) return 'new';
+      const s = st.toLowerCase().trim();
+      if (s === 'negotiating') return 'in_discussion';
+      if (s === 'rotations') return 'cold_leads'; // Maps correctly to cold_leads (Cold Leads)
+      if (s === 'proposal') return 'office_visited';
+      return s;
+    };
+
+    // Helper to check match of filters
+    const matchFilters = (lead: any) => {
+      if (project !== 'all' && String(lead.project || '').trim().toLowerCase() !== project.trim().toLowerCase()) return false;
+      if (country !== 'all' && String(lead.country || '').trim().toLowerCase() !== country.trim().toLowerCase()) return false;
+      if (source !== 'all' && String(lead.source || '').trim().toLowerCase() !== source.trim().toLowerCase()) return false;
+      return true;
+    };
+
+    // Get list of active agents (coordinators)
+    const activeCoordinators = coordinators.filter(c => c.role === 'agent');
+
+    // Reconstruct snapshot of a month's performance
+    const computeStats = (targetMonth: string, coordSelector: string) => {
+      let assignedLeads: any[] = [];
+      let touchedLeads: any[] = [];
+      let activePipelineLeads: any[] = [];
+      let strongOpportunityLeads: any[] = [];
+      let interviewLeads: any[] = [];
+      let wonLeads: any[] = [];
+      let coldLeads: any[] = [];
+      let lostLeads: any[] = [];
+
+      const byStageCounts: Record<string, number> = {
+        new: 0,
+        in_discussion: 0,
+        strong_opportunity: 0,
+        office_visited: 0,
+        won: 0,
+        cold_leads: 0,
+        lost: 0
+      };
+
+      // Stage movement variables
+      const stageMovement: Record<string, { entered: number, movedForward: number, movedBack: number, exited: number, stillIn: number }> = {};
+      const STAGE_KEYS = ['new', 'in_discussion', 'strong_opportunity', 'office_visited', 'won', 'cold_leads', 'lost'];
+      STAGE_KEYS.forEach(k => {
+        stageMovement[k] = { entered: 0, movedForward: 0, movedBack: 0, exited: 0, stillIn: 0 };
+      });
+
+      // Activity counts
+      let activityCounts = {
+        whatsappConversations: 0,
+        calls: 0,
+        remarksAdded: 0,
+        stageChanges: 0,
+        followups: 0,
+        profileUpdates: 0
+      };
+
+      leads.forEach(lead => {
+        // Ignore soft-deleted leads
+        if (lead.isDeleted) return;
+
+        // Exclude un-intaken leads from the performance reports to align with board counts
+        if (!getEffectiveIntake(lead)) return;
+
+        if (!matchFilters(lead)) return;
+
+        const leadCreatedDate = lead.createdAt || lead.entryDate || '';
+        const createdMonth = getMonthStr(leadCreatedDate);
+        if (createdMonth && createdMonth > targetMonth) {
+          // This lead did not exist in the target month under review!
+          return;
+        }
+
+        // Determine if lead was owned or touched by the coordinator in the target month
+        let isAssignedToTarget = false;
+        let isTouchedByTarget = false;
+
+        const leadOwnerHistory = lead.coordinatorHistory || [];
+        let ownerAtEndOfMonth = 'unassigned';
+        const monthEndBoundary = `${targetMonth}-31T23:59:59.999Z`;
+        const pastAssignments = leadOwnerHistory.filter((e: any) => e.changedAt <= monthEndBoundary);
+        if (pastAssignments.length > 0) {
+          ownerAtEndOfMonth = pastAssignments[pastAssignments.length - 1].newCoordinator;
+        } else {
+          const assignMonth = getMonthStr(lead.assignDate || leadCreatedDate);
+          if (assignMonth && assignMonth <= targetMonth) {
+            ownerAtEndOfMonth = lead.assignedTo || 'unassigned';
+          } else {
+            ownerAtEndOfMonth = 'unassigned';
+          }
+        }
+
+        const isMatchCoord = (username: string) => {
+          if (!username) return false;
+          if (coordSelector === 'all') {
+            return username.toLowerCase() !== 'unassigned';
+          }
+          return username.toLowerCase() === coordSelector.toLowerCase();
+        };
+
+        if (attributionMode === 'ownership') {
+          isAssignedToTarget = isMatchCoord(ownerAtEndOfMonth);
+        } else {
+          const assignedInMonth = leadOwnerHistory.some((e: any) => matchesMonth(e.changedAt, targetMonth) && isMatchCoord(e.newCoordinator));
+          isAssignedToTarget = assignedInMonth || (lead.assignDate && matchesMonth(lead.assignDate, targetMonth) && isMatchCoord(lead.assignedTo)) || isMatchCoord(ownerAtEndOfMonth);
+        }
+
+        const touchLogs = (lead.timeline || []).filter((t: any) => {
+          if (!matchesMonth(t.timestamp, targetMonth)) return false;
+          if (coordSelector === 'all') return true;
+          return t.actor && (t.actor.toLowerCase().includes(coordSelector.toLowerCase()) || (lead.assignedTo && lead.assignedTo.toLowerCase() === coordSelector.toLowerCase() && t.actor.toLowerCase().includes('coordinator')));
+        });
+
+        const touchMessages = (lead.messages || []).filter((m: any) => {
+          if (!matchesMonth(m.timestamp, targetMonth)) return false;
+          if (m.sender !== 'user') return false;
+          if (coordSelector === 'all') return true;
+          return m.senderName && m.senderName.toLowerCase() === coordSelector.toLowerCase();
+        });
+
+        isTouchedByTarget = touchLogs.length > 0 || touchMessages.length > 0;
+
+        if (!isAssignedToTarget && !isTouchedByTarget) return;
+
+        if (isAssignedToTarget) {
+          assignedLeads.push(lead);
+        }
+        if (isTouchedByTarget) {
+          touchedLeads.push(lead);
+        }
+
+        let stageAtEndOfMonth = 'new';
+        const pastStages = (lead.stageHistory || []).filter((e: any) => e.changedAt <= monthEndBoundary);
+        if (pastStages.length > 0) {
+          stageAtEndOfMonth = stdStage(pastStages[pastStages.length - 1].newStage);
+        } else {
+          stageAtEndOfMonth = stdStage(lead.stage || 'new');
+        }
+
+        if (isAssignedToTarget) {
+          byStageCounts[stageAtEndOfMonth] = (byStageCounts[stageAtEndOfMonth] || 0) + 1;
+
+          if (['new', 'in_discussion', 'strong_opportunity', 'office_visited'].includes(stageAtEndOfMonth)) {
+            activePipelineLeads.push(lead);
+          }
+          if (stageAtEndOfMonth === 'strong_opportunity') {
+            strongOpportunityLeads.push(lead);
+          }
+          if (stageAtEndOfMonth === 'office_visited') {
+            interviewLeads.push(lead);
+          }
+          if (stageAtEndOfMonth === 'won') {
+            wonLeads.push(lead);
+          }
+          if (stageAtEndOfMonth === 'cold_leads') {
+            coldLeads.push(lead);
+          }
+          if (stageAtEndOfMonth === 'lost') {
+            lostLeads.push(lead);
+          }
+        }
+
+        const monthStages = (lead.stageHistory || []).filter((e: any) => matchesMonth(e.changedAt, targetMonth));
+        if (monthStages.length > 0) {
+          monthStages.forEach((ev: any) => {
+            const fromS = stdStage(ev.previousStage);
+            const toS = stdStage(ev.newStage);
+            const fromIdx = STAGE_KEYS.indexOf(fromS);
+            const toIdx = STAGE_KEYS.indexOf(toS);
+
+            let byTarget = true;
+            if (coordSelector !== 'all') {
+              byTarget = ev.changedBy && ev.changedBy.toLowerCase().includes(coordSelector.toLowerCase());
+            }
+
+            if (byTarget) {
+              if (toS && stageMovement[toS]) {
+                stageMovement[toS].entered++;
+              }
+              if (fromS && stageMovement[fromS]) {
+                stageMovement[fromS].exited++;
+              }
+
+              if (fromIdx !== -1 && toIdx !== -1) {
+                if (toIdx > fromIdx) {
+                  if (fromS && stageMovement[fromS]) stageMovement[fromS].movedForward++;
+                } else if (toIdx < fromIdx) {
+                  if (fromS && stageMovement[fromS]) stageMovement[fromS].movedBack++;
+                }
+              }
+            }
+          });
+        }
+
+        if (isTouchedByTarget) {
+          touchMessages.forEach(m => {
+            activityCounts.whatsappConversations++;
+          });
+          touchLogs.forEach(l => {
+            const txt = (l.text || '').toLowerCase();
+            if (txt.includes('call status updated') || txt.includes('call status') || txt.includes('call connected')) {
+              activityCounts.calls++;
+            } else if (txt.includes('remarks: ') || txt.includes('updated 1st remarks') || txt.includes('updated 2nd remarks') || txt.includes('updated 3rd remarks')) {
+              activityCounts.remarksAdded++;
+            } else if (l.type === 'status' || txt.includes('pipeline stage changed')) {
+              activityCounts.stageChanges++;
+            } else if (l.type === 'task' || txt.includes('task')) {
+              activityCounts.followups++;
+            } else {
+              activityCounts.profileUpdates++;
+            }
+          });
+        }
+      });
+
+      STAGE_KEYS.forEach(k => {
+        stageMovement[k].stillIn = byStageCounts[k] || 0;
+      });
+
+      return {
+        assignedCount: assignedLeads.length,
+        touchedCount: touchedLeads.length,
+        activePipelineCount: activePipelineLeads.length,
+        strongOpportunityCount: strongOpportunityLeads.length,
+        interviewCount: interviewLeads.length,
+        wonCount: wonLeads.length,
+        coldCount: coldLeads.length,
+        lostCount: lostLeads.length,
+        byStage: byStageCounts,
+        stageMovement,
+        activityCounts,
+        assignedLeads,
+        touchedLeads
+      };
+    };
+
+    const currentStats = computeStats(month, coordinator);
+    const prevStats = computeStats(previousMonth, coordinator);
+
+    const calculateKpi = (currVal: number, prevVal: number) => {
+      const absChange = currVal - prevVal;
+      const pctChange = prevVal === 0 ? (currVal > 0 ? 100 : 0) : Number(((absChange / prevVal) * 100).toFixed(1));
+      return {
+        current: currVal,
+        previous: prevVal,
+        absChange,
+        pctChange
+      };
+    };
+
+    const kpis = {
+      leadsAssigned: calculateKpi(currentStats.assignedCount, prevStats.assignedCount),
+      leadsTouched: calculateKpi(currentStats.touchedCount, prevStats.touchedCount),
+      activePipeline: calculateKpi(currentStats.activePipelineCount, prevStats.activePipelineCount),
+      strongOpportunities: calculateKpi(currentStats.strongOpportunityCount, prevStats.strongOpportunityCount),
+      interviews: calculateKpi(currentStats.interviewCount, prevStats.interviewCount),
+      won: calculateKpi(currentStats.wonCount, prevStats.wonCount),
+      cold: calculateKpi(currentStats.coldCount, prevStats.coldCount),
+      lost: calculateKpi(currentStats.lostCount, prevStats.lostCount)
+    };
+
+    const coordinatorRows = activeCoordinators.map(coord => {
+      const cStats = computeStats(month, coord.username);
+      const cPrevStats = computeStats(previousMonth, coord.username);
+
+      const leadsAssigned = cStats.assignedCount;
+      const leadsTouched = cStats.touchedCount;
+      const touchRate = leadsAssigned === 0 ? 0 : Number(((leadsTouched / leadsAssigned) * 100).toFixed(1));
+      const wonRate = leadsAssigned === 0 ? 0 : Number(((cStats.wonCount / leadsAssigned) * 100).toFixed(2));
+
+      let progressions = 0;
+      Object.keys(cStats.stageMovement).forEach(k => {
+        progressions += cStats.stageMovement[k].movedForward;
+      });
+      const stageProgressionRate = leadsAssigned === 0 ? 0 : Number(((progressions / leadsAssigned) * 100).toFixed(1));
+
+      const momChangeVal = leadsAssigned - cPrevStats.assignedCount;
+      const momChangePct = cPrevStats.assignedCount === 0 ? 0 : Number(((momChangeVal / cPrevStats.assignedCount) * 100).toFixed(1));
+      const momChangeStr = momChangeVal >= 0 ? `+${momChangeVal} (+${momChangePct}%)` : `${momChangeVal} (${momChangePct}%)`;
+
+      return {
+        coordinator: coord.displayName,
+        username: coord.username,
+        leadsAssigned,
+        leadsTouched,
+        touchRate: `${touchRate}%`,
+        newInbound: cStats.byStage.new || 0,
+        inDiscussion: cStats.byStage.in_discussion || 0,
+        strongOpportunity: cStats.byStage.strong_opportunity || 0,
+        interview: cStats.byStage.office_visited || 0,
+        won: cStats.wonCount,
+        cold: cStats.coldCount,
+        lost: cStats.lostCount,
+        wonRate: `${wonRate}%`,
+        stageProgressionRate: `${stageProgressionRate}%`,
+        moMChange: momChangeStr
+      };
+    });
+
+    coordinatorRows.sort((a, b) => b.leadsAssigned - a.leadsAssigned);
+
+    const activeLeadsForAgeing = leads.filter(lead => {
+      if (!matchFilters(lead)) return false;
+      const isOwnedByTarget = coordinator === 'all' 
+        ? (lead.assignedTo && lead.assignedTo.toLowerCase() !== 'unassigned')
+        : (lead.assignedTo && lead.assignedTo.toLowerCase() === coordinator.toLowerCase());
+      const isActive = ['new', 'in_discussion', 'strong_opportunity', 'office_visited'].includes(stdStage(lead.stage || 'new'));
+      return isOwnedByTarget && isActive;
+    });
+
+    const ageingBuckets = {
+      '0-7': 0,
+      '8-15': 0,
+      '16-30': 0,
+      '31-60': 0,
+      '60+': 0
+    };
+
+    activeLeadsForAgeing.forEach(lead => {
+      const date = lead.createdAt || lead.entryDate || new Date().toISOString();
+      const diffTime = Math.abs(Date.now() - new Date(date).getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      if (diffDays <= 7) ageingBuckets['0-7']++;
+      else if (diffDays <= 15) ageingBuckets['8-15']++;
+      else if (diffDays <= 30) ageingBuckets['16-30']++;
+      else if (diffDays <= 60) ageingBuckets['31-60']++;
+      else ageingBuckets['60+']++;
+    });
+
+    const projectMap: Record<string, any> = {};
+    leads.forEach(lead => {
+      if (!matchFilters(lead)) return;
+      const isOwnedByTarget = coordinator === 'all'
+        ? (lead.assignedTo && lead.assignedTo.toLowerCase() !== 'unassigned')
+        : (lead.assignedTo && lead.assignedTo.toLowerCase() === coordinator.toLowerCase());
+      if (!isOwnedByTarget) return;
+
+      const proj = lead.project || 'General';
+      if (!projectMap[proj]) {
+        projectMap[proj] = { project: proj, leads: 0, touched: 0, discussion: 0, strongOpportunity: 0, interview: 0, won: 0, cold: 0, lost: 0 };
+      }
+
+      projectMap[proj].leads++;
+      const isTouched = (lead.timeline || []).some((t: any) => matchesMonth(t.timestamp, month)) || (lead.messages || []).some((m: any) => matchesMonth(m.timestamp, month));
+      if (isTouched) {
+        projectMap[proj].touched++;
+      }
+
+      const st = stdStage(lead.stage || 'new');
+      if (st === 'in_discussion') projectMap[proj].discussion++;
+      else if (st === 'strong_opportunity') projectMap[proj].strongOpportunity++;
+      else if (st === 'office_visited') projectMap[proj].interview++;
+      else if (st === 'won') projectMap[proj].won++;
+      else if (st === 'cold_leads') projectMap[proj].cold++;
+      else if (st === 'lost') projectMap[proj].lost++;
+    });
+
+    const projectPerformance = Object.values(projectMap).sort((a: any, b: any) => b.leads - a.leads);
+
+    const countryMapRes: Record<string, any> = {};
+    leads.forEach(lead => {
+      if (!matchFilters(lead)) return;
+      const isOwnedByTarget = coordinator === 'all'
+        ? (lead.assignedTo && lead.assignedTo.toLowerCase() !== 'unassigned')
+        : (lead.assignedTo && lead.assignedTo.toLowerCase() === coordinator.toLowerCase());
+      if (!isOwnedByTarget) return;
+
+      const ctry = lead.country || 'Unknown';
+      if (!countryMapRes[ctry]) {
+        countryMapRes[ctry] = { country: ctry, leads: 0, touched: 0, strongOpportunities: 0, interviews: 0, won: 0, lost: 0 };
+      }
+
+      countryMapRes[ctry].leads++;
+      const isTouched = (lead.timeline || []).some((t: any) => matchesMonth(t.timestamp, month)) || (lead.messages || []).some((m: any) => matchesMonth(m.timestamp, month));
+      if (isTouched) {
+        countryMapRes[ctry].touched++;
+      }
+
+      const st = stdStage(lead.stage || 'new');
+      if (st === 'strong_opportunity') countryMapRes[ctry].strongOpportunities++;
+      else if (st === 'office_visited') countryMapRes[ctry].interviews++;
+      else if (st === 'won') countryMapRes[ctry].won++;
+      else if (st === 'lost') countryMapRes[ctry].lost++;
+    });
+
+    const countryPerformance = Object.values(countryMapRes).sort((a: any, b: any) => b.leads - a.leads);
+
+    const sourceMapRes: Record<string, any> = {};
+    leads.forEach(lead => {
+      if (!matchFilters(lead)) return;
+      const isOwnedByTarget = coordinator === 'all'
+        ? (lead.assignedTo && lead.assignedTo.toLowerCase() !== 'unassigned')
+        : (lead.assignedTo && lead.assignedTo.toLowerCase() === coordinator.toLowerCase());
+      if (!isOwnedByTarget) return;
+
+      const src = lead.source || 'Organic';
+      if (!sourceMapRes[src]) {
+        sourceMapRes[src] = { source: src, leads: 0, touched: 0, strongOpportunities: 0, interviews: 0, won: 0, lost: 0 };
+      }
+
+      sourceMapRes[src].leads++;
+      const isTouched = (lead.timeline || []).some((t: any) => matchesMonth(t.timestamp, month)) || (lead.messages || []).some((m: any) => matchesMonth(m.timestamp, month));
+      if (isTouched) {
+        sourceMapRes[src].touched++;
+      }
+
+      const st = stdStage(lead.stage || 'new');
+      if (st === 'strong_opportunity') sourceMapRes[src].strongOpportunities++;
+      else if (st === 'office_visited') sourceMapRes[src].interviews++;
+      else if (st === 'won') sourceMapRes[src].won++;
+      else if (st === 'lost') sourceMapRes[src].lost++;
+    });
+
+    const sourcePerformance = Object.values(sourceMapRes).sort((a: any, b: any) => b.leads - a.leads);
+
+    const totalLeadsCount = leads.length;
+    let missingCoordinator = 0;
+    let missingStage = 0;
+    let missingActivityDate = 0;
+    let duplicateRecords = 0;
+
+    const seenPhones = new Set();
+    leads.forEach(lead => {
+      if (!lead.assignedTo || lead.assignedTo.toLowerCase() === 'unassigned') missingCoordinator++;
+      if (!lead.stage) missingStage++;
+      if (!lead.createdAt && !lead.entryDate) missingActivityDate++;
+      if (lead.phone) {
+        if (seenPhones.has(lead.phone)) duplicateRecords++;
+        else seenPhones.add(lead.phone);
+      }
+    });
+
+    const dataQualityScore = totalLeadsCount === 0 ? 100 : Number(((1 - ((missingCoordinator + missingStage + duplicateRecords) / (totalLeadsCount * 3))) * 100).toFixed(1));
+
+    res.json({
+      reportingPeriod: month,
+      comparisonPeriod: previousMonth,
+      attributionMode,
+      kpis,
+      coordinatorRows,
+      currentStats: {
+        byStage: currentStats.byStage,
+        stageMovement: currentStats.stageMovement,
+        activityCounts: currentStats.activityCounts
+      },
+      prevStats: {
+        byStage: prevStats.byStage,
+        stageMovement: prevStats.stageMovement,
+        activityCounts: prevStats.activityCounts
+      },
+      ageingBuckets,
+      projectPerformance,
+      countryPerformance,
+      sourcePerformance,
+      dataQuality: {
+        score: dataQualityScore,
+        missingCoordinator,
+        missingStage,
+        missingActivityDate,
+        duplicateRecords,
+        coverageDate: '2026-01-01'
+      }
+    });
+
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
