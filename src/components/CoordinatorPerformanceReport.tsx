@@ -75,10 +75,10 @@ export default function CoordinatorPerformanceReport({
       const l = label.toLowerCase().trim();
       if (l.includes('new inbound') || l === 'new') return 'new';
       if (l.includes('in discussion') || l.includes('negotiating') || l === 'discussion') return 'in_discussion';
-      if (l.includes('strong opportunity') || l.includes('rotations') || l === 'strong') return 'strong_opportunity';
+      if (l.includes('strong opportunity') || l === 'strong') return 'strong_opportunity';
       if (l.includes('office visited') || l.includes('interview') || l.includes('proposal')) return 'office_visited';
       if (l.includes('won') || l.includes('closed won')) return 'won';
-      if (l.includes('cold') || l.includes('cold leads')) return 'cold_leads';
+      if (l.includes('cold') || l.includes('cold leads') || l.includes('rotations')) return 'cold_leads';
       if (l.includes('lost') || l.includes('closed lost')) return 'lost';
       return l;
     };
@@ -266,7 +266,9 @@ export default function CoordinatorPerformanceReport({
 
     return trendMonths.map(monthStr => {
       let count = 0;
-      const monthEndBoundary = `${monthStr}-31T23:59:59.999Z`;
+      const [yParts, mParts] = monthStr.split('-');
+      const lastDay = new Date(Number(yParts), Number(mParts), 0).getDate();
+      const monthEndBoundary = `${monthStr}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`;
 
       processedLeads.forEach(lead => {
         // Soft delete ignore
@@ -793,12 +795,12 @@ export default function CoordinatorPerformanceReport({
 
           {/* 3. EXECUTIVE SUMMARY CARD GRID */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            
             {[
               { 
                 label: 'Leads Assigned', 
                 kpi: data.kpis.leadsAssigned, 
                 desc: 'Assigned in reporting month',
+                suffix: 'Total leads',
                 positiveIsGood: true,
                 warningValue: false
               },
@@ -806,6 +808,7 @@ export default function CoordinatorPerformanceReport({
                 label: 'Leads Touched', 
                 kpi: data.kpis.leadsTouched, 
                 desc: 'With recorded activity',
+                suffix: 'Touched',
                 positiveIsGood: true,
                 warningValue: false
               },
@@ -813,13 +816,15 @@ export default function CoordinatorPerformanceReport({
                 label: 'Active Pipeline', 
                 kpi: data.kpis.activePipeline, 
                 desc: 'Total active open files',
+                suffix: 'Active',
                 positiveIsGood: true,
                 warningValue: false
               },
               { 
                 label: 'Strong Opportunities', 
                 kpi: data.kpis.strongOpportunities, 
-                desc: 'Strong/Rotations pipeline',
+                desc: 'Strong opportunities pipeline',
+                suffix: 'Total opps',
                 positiveIsGood: true,
                 warningValue: false
               },
@@ -827,6 +832,7 @@ export default function CoordinatorPerformanceReport({
                 label: 'Interviews Scheduled', 
                 kpi: data.kpis.interviews, 
                 desc: 'Office visited/Interview stage',
+                suffix: 'Total scheduled',
                 positiveIsGood: true,
                 warningValue: false
               },
@@ -834,6 +840,7 @@ export default function CoordinatorPerformanceReport({
                 label: 'Closed Won', 
                 kpi: data.kpis.won, 
                 desc: 'Visa confirmed/Won files',
+                suffix: 'Total won',
                 positiveIsGood: true,
                 warningValue: false
               },
@@ -841,6 +848,7 @@ export default function CoordinatorPerformanceReport({
                 label: 'Cold Leads', 
                 kpi: data.kpis.cold, 
                 desc: 'Marked as cold files',
+                suffix: 'Total cold',
                 positiveIsGood: false,
                 warningValue: true
               },
@@ -848,37 +856,17 @@ export default function CoordinatorPerformanceReport({
                 label: 'Closed Lost', 
                 kpi: data.kpis.lost, 
                 desc: 'Marked as lost files',
+                suffix: 'Total lost',
                 positiveIsGood: false,
                 warningValue: false
               }
             ].map((item, idx) => {
-              const { label, kpi, desc, positiveIsGood, warningValue } = item;
+              const { label, kpi, desc, suffix, positiveIsGood } = item;
               const abs = kpi.absChange;
               const pct = kpi.pctChange;
               
               const isPositiveChange = abs > 0;
               const isNoChange = abs === 0;
-
-              let badgeColor = '';
-              let badgeText = '';
-
-              if (isNoChange) {
-                badgeColor = 'bg-slate-800 text-slate-400 border-slate-700/60';
-                badgeText = 'Flat';
-              } else if (warningValue) {
-                badgeColor = 'bg-amber-500/10 text-amber-500 border-amber-500/20';
-                badgeText = isPositiveChange ? `↑ +${abs}` : `↓ ${abs}`;
-              } else if (positiveIsGood) {
-                badgeColor = isPositiveChange 
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                  : 'bg-rose-500/10 text-rose-400 border-rose-500/20';
-                badgeText = isPositiveChange ? `↑ +${abs}` : `↓ ${abs}`;
-              } else {
-                badgeColor = isPositiveChange 
-                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' 
-                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-                badgeText = isPositiveChange ? `↑ +${abs}` : `↓ ${abs}`;
-              }
 
               // Drilldown parameters based on KPI
               const getStageFromLabel = (lbl: string) => {
@@ -892,6 +880,7 @@ export default function CoordinatorPerformanceReport({
               };
 
               const stageValue = getStageFromLabel(label);
+              const isAssignedCard = label === 'Leads Assigned';
 
               return (
                 <div 
@@ -902,31 +891,49 @@ export default function CoordinatorPerformanceReport({
                       title: `${selectedCoord.toUpperCase()} - ${label.toUpperCase()}`
                     });
                   }}
-                  className="bg-slate-900 border border-slate-800/80 hover:border-slate-700/80 rounded-3xl p-4.5 text-left relative overflow-hidden transition-all shadow-md group cursor-pointer"
+                  className="bg-slate-900/60 backdrop-blur-sm border border-slate-800/80 hover:border-indigo-500/35 rounded-2xl p-5 text-left relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-indigo-500/5 group cursor-pointer flex flex-col justify-between min-h-[145px]"
                 >
-                  <div className="flex justify-between items-start">
-                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider font-mono">{label}</span>
-                    <span className={`text-[10px] font-black font-mono border rounded-lg px-1.5 py-0.5 ${badgeColor}`}>
-                      {badgeText} ({pct >= 0 ? `+${pct}%` : `${pct}%`})
+                  {/* Card Header Row */}
+                  <div className="flex justify-between items-start gap-2">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-mono group-hover:text-indigo-300 transition-colors">{label}</span>
+                    <span className="text-[12.5px] font-extrabold px-3 py-1.5 rounded-lg shadow-sm font-mono whitespace-nowrap bg-slate-950/80 border border-slate-800/80 text-slate-200">
+                      <span className="text-indigo-400 font-black mr-1 text-[15.5px]">{kpi.cumulative !== undefined ? kpi.cumulative : kpi.current}</span> {suffix}
                     </span>
                   </div>
                   
-                  <div className="mt-3 flex items-baseline gap-2">
-                    <span className="text-2xl font-black text-slate-100 group-hover:text-indigo-400 transition-colors">
+                  {/* Card Middle Row (Large current metric with clean trend percentage) */}
+                  <div className="mt-3 flex items-baseline gap-2 flex-wrap">
+                    <span className="text-4xl font-black font-mono tracking-tight text-slate-100 group-hover:text-white transition-all duration-300">
                       {kpi.current}
                     </span>
-                    <span className="text-[10px] text-slate-550 font-bold">
-                      prev: {kpi.previous}
-                    </span>
+                    {(() => {
+                      const isGood = positiveIsGood ? isPositiveChange : !isPositiveChange;
+                      const trendColorClass = isNoChange 
+                        ? 'text-slate-400 bg-slate-950/40 border-slate-900/35'
+                        : isGood 
+                          ? 'text-emerald-400 bg-emerald-950/40 border-emerald-900/35' 
+                          : 'text-rose-400 bg-rose-950/40 border-rose-900/35';
+                      const displayPct = isAssignedCard && kpi.cumulativePctChange !== undefined ? kpi.cumulativePctChange : pct;
+                      return (
+                        <span className={`text-xs font-black font-mono px-2 py-0.5 rounded-md border ${trendColorClass}`}>
+                          {isNoChange ? 'Flat' : `${isPositiveChange ? '↑' : '↓'} (${displayPct >= 0 ? `+${displayPct}%` : `${displayPct}%`})`}
+                        </span>
+                      );
+                    })()}
                   </div>
 
-                  <p className="text-[10px] text-slate-450 font-medium font-sans mt-1">
-                    {desc}
-                  </p>
+                  {/* Card Footer Row */}
+                  <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-800/40 pt-2.5">
+                    <p className="text-slate-450 font-medium font-sans text-[10px] line-clamp-1 truncate" title={desc}>
+                      {desc}
+                    </p>
+                    <span className="text-xs text-slate-400 font-extrabold font-mono whitespace-nowrap text-right shrink-0 select-none">
+                      prev month: <span className="text-slate-100 font-black">{kpi.previous}</span>
+                    </span>
+                  </div>
                 </div>
               );
             })}
-
           </div>
 
           {/* MONTH-OVER-MONTH PERFORMANCE TRENDS CHART */}

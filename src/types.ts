@@ -24,6 +24,7 @@ export type FitScore = 'high' | 'medium' | 'low' | 'unqualified';
 
 export interface Message {
   id: string;
+  wamid?: string;
   sender: 'user' | 'lead' | 'system';
   text: string;
   timestamp: string;
@@ -109,6 +110,10 @@ export interface Lead {
   intake?: boolean;
   isDeleted?: boolean;
   deletedAt?: string | null;
+  isBlocked?: boolean;
+  blockedAt?: string;
+  blockedReason?: string;
+  blockedBy?: string;
   assignedFrom?: string;
   reactivationStatus?: 'sent' | 'replied' | 'qualified' | 'unqualified' | string;
   salaryRange?: string;

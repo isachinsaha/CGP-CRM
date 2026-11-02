@@ -21,7 +21,14 @@ import {
   TrendingUp,
   TrendingDown,
   Wallet as WalletIcon,
-  PiggyBank
+  PiggyBank,
+  RefreshCw,
+  Shield,
+  History,
+  Lock,
+  Database,
+  Download,
+  FileText
 } from 'lucide-react';
 import { Job, ImportantUpdate, Wallet, WalletTransaction } from '../types';
 import { getCountryFlagUrl, getCountryCode } from '../utils';
@@ -60,6 +67,149 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletSuccess, setWalletSuccess] = useState<string | null>(null);
   const [walletSubmitting, setWalletSubmitting] = useState(false);
+  const [reconcilingWallets, setReconcilingWallets] = useState(false);
+  const [txFilter, setTxFilter] = useState<'all' | 'credit' | 'debit'>('all');
+
+  const selectedWalletCredits = React.useMemo(() => {
+    return (selectedWallet?.transactions || [])
+      .filter(t => t.type === 'credit')
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  }, [selectedWallet]);
+
+  const selectedWalletDebits = React.useMemo(() => {
+    return (selectedWallet?.transactions || [])
+      .filter(t => t.type === 'debit')
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  }, [selectedWallet]);
+
+  const totalAgencyCredits = React.useMemo(() => {
+    return wallets.reduce((sum, w) => {
+      return sum + (w.transactions || []).filter(t => t.type === 'credit').reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    }, 0);
+  }, [wallets]);
+
+  const totalAgencyDebits = React.useMemo(() => {
+    return wallets.reduce((sum, w) => {
+      return sum + (w.transactions || []).filter(t => t.type === 'debit').reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    }, 0);
+  }, [wallets]);
+
+  const filteredTransactions = React.useMemo(() => {
+    if (!selectedWallet?.transactions) return [];
+    const list = selectedWallet.transactions.slice().sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    if (txFilter === 'credit') return list.filter(t => t.type === 'credit');
+    if (txFilter === 'debit') return list.filter(t => t.type === 'debit');
+    return list;
+  }, [selectedWallet?.transactions, txFilter]);
+
+  // Data Vault & Safe Storage State
+  const [safetyStatus, setSafetyStatus] = useState<any>(null);
+  const [isSnapshotsModalOpen, setIsSnapshotsModalOpen] = useState(false);
+  const [snapshotsList, setSnapshotsList] = useState<any[]>([]);
+  const [loadingSnapshots, setLoadingSnapshots] = useState(false);
+  const [newSnapshotReason, setNewSnapshotReason] = useState('');
+  const [creatingSnapshot, setCreatingSnapshot] = useState(false);
+
+  const fetchSafetyStatus = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/wallets/safety-status');
+      if (res.ok) {
+        const data = await res.json();
+        setSafetyStatus(data);
+      }
+    } catch {}
+  }, []);
+
+  const fetchSnapshotsList = async () => {
+    setLoadingSnapshots(true);
+    try {
+      const res = await fetch('/api/wallets/snapshots', {
+        headers: { 'x-user-role': currentUser?.role || 'admin' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSnapshotsList(data);
+      }
+    } catch {} finally {
+      setLoadingSnapshots(false);
+    }
+  };
+
+  const handleCreateSnapshot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSnapshotReason.trim()) return;
+    setCreatingSnapshot(true);
+    try {
+      const res = await fetch('/api/wallets/snapshots', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser?.role || 'admin'
+        },
+        body: JSON.stringify({
+          reason: newSnapshotReason.trim(),
+          createdBy: currentUser?.displayName || currentUser?.username || 'Admin'
+        })
+      });
+      if (!res.ok) throw new Error('Failed to create snapshot');
+      setNewSnapshotReason('');
+      setWalletSuccess('Safe point-in-time snapshot created successfully in the Data Vault!');
+      await fetchSnapshotsList();
+      await fetchSafetyStatus();
+    } catch (err: any) {
+      setWalletError(err.message || 'Error creating snapshot');
+    } finally {
+      setCreatingSnapshot(false);
+    }
+  };
+
+  const handleRestoreSnapshot = async (snapshotId: string, reason: string) => {
+    const confirmed = window.confirm(
+      `Rollback to snapshot "${reason}"?\n\nA safeguard snapshot of current state will be preserved automatically.`
+    );
+    if (!confirmed) return;
+
+    setLoadingSnapshots(true);
+    try {
+      const res = await fetch(`/api/wallets/snapshots/${snapshotId}/restore`, {
+        method: 'POST',
+        headers: { 'x-user-role': currentUser?.role || 'admin' }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to restore snapshot');
+      setWalletSuccess(`Successfully restored state from snapshot ${snapshotId}!`);
+      setIsSnapshotsModalOpen(false);
+      await fetchWalletData();
+      await fetchSafetyStatus();
+    } catch (err: any) {
+      setWalletError(err.message || 'Error restoring snapshot');
+    } finally {
+      setLoadingSnapshots(false);
+    }
+  };
+
+  const handleReconcileWallets = async () => {
+    setReconcilingWallets(true);
+    setWalletError(null);
+    setWalletSuccess(null);
+    try {
+      const res = await fetch('/api/wallets/reconcile', {
+        method: 'POST',
+        headers: {
+          'x-user-role': currentUser?.role || 'admin'
+        }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to reconcile wallets');
+      setWalletSuccess(`Successfully verified and reconciled coordinator incentive wallets! (${data.count} coordinator ledgers synchronized with zero data loss)`);
+      await fetchWalletData();
+      await fetchSafetyStatus();
+    } catch (err: any) {
+      setWalletError(err.message || 'Error reconciling wallets');
+    } finally {
+      setReconcilingWallets(false);
+    }
+  };
 
   const fetchWalletData = React.useCallback(async () => {
     setWalletLoading(true);
@@ -96,8 +246,9 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
   useEffect(() => {
     if (subTab === 'wallet') {
       fetchWalletData();
+      fetchSafetyStatus();
     }
-  }, [subTab, fetchWalletData]);
+  }, [subTab, fetchWalletData, fetchSafetyStatus]);
 
   // When activeWalletUsername changes and wallets are already loaded, update selectedWallet
   const handleSelectWalletUser = (username: string) => {
@@ -154,6 +305,26 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
       setWalletError(err.message);
     } finally {
       setWalletSubmitting(false);
+    }
+  };
+
+  const handleDeleteWalletTransaction = async (txId: string) => {
+    if (!activeWalletUsername) return;
+    if (!window.confirm('Are you sure you want to remove this transaction record?')) return;
+    try {
+      const res = await fetch(`/api/wallets/${activeWalletUsername}/transaction/${txId}`, {
+        method: 'DELETE',
+        headers: {
+          'x-user-role': currentUser?.role || 'user'
+        }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete transaction.');
+      setWalletSuccess('Transaction successfully removed!');
+      await fetchWalletData();
+      setTimeout(() => setWalletSuccess(null), 3000);
+    } catch (err: any) {
+      setWalletError(err.message);
     }
   };
 
@@ -1251,18 +1422,90 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
           </div>
         </div>
 
+        {/* DATA VAULT & PERMANENT SAFE STORAGE HUB */}
+        <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/40 border border-slate-750 rounded-2xl p-4 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0 shadow-inner">
+              <Shield className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black uppercase text-slate-100 tracking-wide flex items-center gap-1.5">
+                  Incentive Data Vault & Safe Storage
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Active & Protected
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300">
+                Immutable write-ahead audit ledger & rolling point-in-time snapshots active. Live coordinator incentive management enabled.
+              </p>
+            </div>
+          </div>
+
+          {currentUser?.role === 'admin' && (
+            <div className="flex items-center gap-2 flex-wrap self-end md:self-auto shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  fetchSnapshotsList();
+                  setIsSnapshotsModalOpen(true);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 font-black text-[11px] uppercase tracking-wider transition cursor-pointer flex items-center gap-1.5"
+                title="View point-in-time snapshots and audit history"
+              >
+                <Database className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Snapshots Vault</span>
+              </button>
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* LEFT COLUMN: WALLETS LIST (For Admin only) */}
           {currentUser?.role === 'admin' ? (
             <div className="bg-slate-900 border border-slate-750 rounded-3xl p-5.5 shadow-xl space-y-4">
-              <div>
-                <h3 className="text-sm font-black text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                  <Users className="w-4 h-4 text-emerald-400" />
-                  Coordinators Ledgers
-                </h3>
-                <p className="text-[11px] text-slate-400 mt-1 font-semibold">
-                  Select a staff member's wallet below to inspect their audit timeline or post manual transactions.
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-black text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                    <Users className="w-4 h-4 text-emerald-400" />
+                    Coordinators Ledgers
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={handleReconcileWallets}
+                    disabled={reconcilingWallets}
+                    className="px-2.5 py-1 text-[11px] font-black uppercase tracking-wider rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    title="Recalculate, restore and synchronize all coordinator incentive balances from closed won & milestone placements"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${reconcilingWallets ? 'animate-spin' : ''}`} />
+                    <span>{reconcilingWallets ? 'Restoring...' : 'Restore & Sync'}</span>
+                  </button>
+                </div>
+                <div className="space-y-1.5 bg-slate-950/70 border border-slate-800 rounded-2xl p-3 text-[11px]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-semibold">Net Active Ledgers:</span>
+                    <span className="font-mono font-black text-emerald-400">
+                      INR {wallets.reduce((acc, w) => acc + (Number(w.balance) || 0), 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-850 text-[10px]">
+                    <span className="text-slate-500">Gross Credits Accrued:</span>
+                    <span className="font-mono font-bold text-emerald-400/90">
+                      +INR {totalAgencyCredits.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-slate-500">Total Debits / Deductions:</span>
+                    <span className="font-mono font-bold text-rose-400/90">
+                      -INR {totalAgencyDebits.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-400 font-semibold">
+                  Select a staff member's wallet below to inspect their audit timeline, view debits/credits, or post adjustments.
                 </p>
               </div>
 
@@ -1276,6 +1519,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                 <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
                   {wallets.map((w) => {
                     const isActive = activeWalletUsername === w.username;
+                    const debitsCount = (w.transactions || []).filter(t => t.type === 'debit').length;
                     return (
                       <button
                         key={w.username}
@@ -1293,7 +1537,14 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                         }`}
                       >
                         <div className="space-y-0.5">
-                          <p className="text-xs font-extrabold uppercase">{w.displayName || w.username}</p>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="text-xs font-extrabold uppercase">{w.displayName || w.username}</p>
+                            {debitsCount > 0 && (
+                              <span className="px-1.5 py-0.2 text-[9px] font-black uppercase tracking-wider rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30" title={`${debitsCount} debit(s) on file`}>
+                                {debitsCount} DR
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[10px] font-mono text-slate-500">@{w.username}</p>
                         </div>
                         <span className={`text-xs font-black font-mono px-2.5 py-1 rounded-lg ${
@@ -1322,11 +1573,23 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                 </p>
               </div>
               
-              <div className="mt-6 pt-4 border-t border-slate-800">
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">Current Balance</p>
-                <p className="text-3xl font-extrabold text-emerald-400 font-mono mt-1">
-                  INR {selectedWallet?.balance?.toLocaleString() || 0}
-                </p>
+              <div className="mt-6 pt-4 border-t border-slate-800 space-y-2">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">Current Net Balance</span>
+                  <span className="text-2xl font-extrabold text-emerald-400 font-mono">
+                    INR {selectedWallet?.balance?.toLocaleString() || 0}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-850 text-[10px]">
+                  <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800">
+                    <span className="text-slate-500 block font-semibold">Total Earned (CR)</span>
+                    <span className="text-emerald-400 font-mono font-bold">+INR {selectedWalletCredits.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800">
+                    <span className="text-slate-500 block font-semibold">Total Debited (DR)</span>
+                    <span className="text-rose-400 font-mono font-bold">-INR {selectedWalletDebits.toLocaleString()}</span>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -1345,25 +1608,78 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                   <p className="text-xs font-mono text-slate-400">Username: @{selectedWallet.username}</p>
                 </div>
                 
-                <div className="text-left sm:text-right">
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">CURRENT TOTAL WALLET VALUE</p>
-                  <p className="text-3xl font-extrabold text-emerald-400 font-mono tracking-tight mt-0.5">
-                    INR {selectedWallet.balance?.toLocaleString() || 0}
-                  </p>
+                <div className="text-left sm:text-right space-y-1.5">
+                  <div>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">NET WALLET BALANCE</p>
+                    <p className="text-3xl font-extrabold text-emerald-400 font-mono tracking-tight mt-0.5">
+                      INR {selectedWallet.balance?.toLocaleString() || 0}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs justify-start sm:justify-end">
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 font-mono font-bold text-[11px] border border-emerald-500/20">
+                      Credits: +INR {selectedWalletCredits.toLocaleString()}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 font-mono font-bold text-[11px] border border-rose-500/20">
+                      Debits: -INR {selectedWalletDebits.toLocaleString()}
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
 
             {/* TRANSACTIONS AUDIT TIMELINE */}
             <div className="bg-slate-900 border border-slate-750 rounded-3xl p-5.5 shadow-xl space-y-4">
-              <div>
-                <h3 className="text-sm font-black text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-emerald-400" />
-                  Transaction Audit History Timeline
-                </h3>
-                <p className="text-[11px] text-slate-400 mt-1 font-semibold">
-                  A transparent timeline of credits (CR) and manual adjustment logs.
-                </p>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-black text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-emerald-400" />
+                    Transaction Audit History Timeline
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-1 font-semibold">
+                    Comprehensive ledger of credits (CR), debits (DR), and payment withdrawals.
+                  </p>
+                </div>
+
+                {/* Filter tabs: All, Credits Only, Debits Only */}
+                {selectedWallet && selectedWallet.transactions && selectedWallet.transactions.length > 0 && (
+                  <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setTxFilter('all')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                        txFilter === 'all'
+                          ? 'bg-slate-800 text-slate-100 shadow-xs'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      All ({selectedWallet.transactions.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTxFilter('credit')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer flex items-center gap-1 ${
+                        txFilter === 'credit'
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : 'text-slate-400 hover:text-emerald-400'
+                      }`}
+                    >
+                      <TrendingUp className="w-3 h-3 text-emerald-400" />
+                      Credits ({selectedWallet.transactions.filter(t => t.type === 'credit').length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTxFilter('debit')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer flex items-center gap-1 ${
+                        txFilter === 'debit'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                          : 'text-slate-400 hover:text-rose-400'
+                      }`}
+                    >
+                      <TrendingDown className="w-3 h-3 text-rose-400" />
+                      Debits ({selectedWallet.transactions.filter(t => t.type === 'debit').length})
+                    </button>
+                  </div>
+                )}
               </div>
 
               {walletLoading ? (
@@ -1375,23 +1691,40 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                   <PiggyBank className="w-10 h-10 text-slate-600 mx-auto mb-2" />
                   <p className="text-xs text-slate-500 font-bold">No transactions recorded for this coordinator.</p>
                 </div>
+              ) : filteredTransactions.length === 0 ? (
+                <div className="text-center py-8 border border-slate-800 border-dashed rounded-2xl bg-slate-850/20">
+                  <p className="text-xs text-slate-500 font-bold">No {txFilter} transactions found.</p>
+                </div>
               ) : (
-                <div className="space-y-3.5 max-h-[350px] overflow-y-auto pr-1">
-                  {selectedWallet.transactions.slice().reverse().map((t: WalletTransaction) => {
+                <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                  {filteredTransactions.map((t: WalletTransaction) => {
                     const isCredit = t.type === 'credit';
                     return (
                       <div 
                         key={t.id} 
-                        className="bg-slate-850 border border-slate-800/80 p-3 rounded-2xl flex items-center justify-between gap-4 hover:border-slate-700 transition"
+                        className={`p-3.5 rounded-2xl border flex items-center justify-between gap-4 transition ${
+                          isCredit
+                            ? 'bg-slate-850 border-slate-800/80 hover:border-slate-700'
+                            : 'bg-rose-950/20 border-rose-800/40 hover:border-rose-700 shadow-xs'
+                        }`}
                       >
                         <div className="flex items-start gap-3">
                           <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                            isCredit ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                            isCredit ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                           }`}>
                             {isCredit ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
                           </div>
-                          <div className="text-left space-y-0.5">
-                            <p className="text-xs font-bold text-slate-200 leading-snug">{t.reason}</p>
+                          <div className="text-left space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md border ${
+                                isCredit 
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                                  : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                              }`}>
+                                {isCredit ? 'CREDIT (CR)' : 'DEBIT (DR)'}
+                              </span>
+                              <p className="text-xs font-bold text-slate-200 leading-snug">{t.reason}</p>
+                            </div>
                             <p className="text-[10px] text-slate-500 font-mono">
                               {new Date(t.timestamp).toLocaleString()}
                               {t.leadId && ` • Lead ID: ${t.leadId.substring(0,8)}`}
@@ -1399,11 +1732,28 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                           </div>
                         </div>
                         
-                        <span className={`text-xs font-black font-mono shrink-0 whitespace-nowrap px-2 py-0.5 rounded-md ${
-                          isCredit ? 'text-emerald-400 bg-emerald-500/10' : 'text-rose-400 bg-rose-500/10'
-                        }`}>
-                          {isCredit ? '+' : '-'} INR {t.amount}
-                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`text-sm font-black font-mono shrink-0 whitespace-nowrap px-2.5 py-1 rounded-lg border ${
+                            isCredit 
+                              ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' 
+                              : 'text-rose-300 bg-rose-500/20 border-rose-500/40 shadow-xs'
+                          }`}>
+                            {isCredit ? '+' : '-'} INR {Number(t.amount || 0).toLocaleString()}
+                          </span>
+                          {currentUser?.role === 'admin' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteWalletTransaction(t.id);
+                              }}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                              title="Delete / cancel this transaction record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -1414,14 +1764,31 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
             {/* ADMIN ADJUSTMENT PANEL (Only shown for Admin) */}
             {currentUser?.role === 'admin' && selectedWallet && (
               <form onSubmit={handleWalletAdjustment} className="bg-slate-900 border border-slate-750 rounded-3xl p-5.5 shadow-xl space-y-4">
-                <div>
-                  <h3 className="text-sm font-black text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                    <WalletIcon className="w-4 h-4 text-emerald-400" />
-                    Post Manual Wallet Transaction (Debit/Credit Adjustment)
-                  </h3>
-                  <p className="text-[11px] text-slate-400 mt-1 font-semibold">
-                    Withdraw money (Debit) or manually reward/correct coordinator balance. This adds a live, permanent timeline log.
-                  </p>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-black text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                      <WalletIcon className="w-4 h-4 text-emerald-400" />
+                      Post Manual Wallet Transaction (Debit/Credit Adjustment)
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-1 font-semibold">
+                      Withdraw money (Debit) or manually reward/correct coordinator balance. This adds a live, permanent timeline log.
+                    </p>
+                  </div>
+
+                  {selectedWallet.balance > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWalletType('debit');
+                        setWalletAmount(String(selectedWallet.balance));
+                        setWalletReason(`Coordinator Incentive Payout / Processed Withdrawal: Full Balance Settled`);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 font-extrabold text-[11px] transition cursor-pointer flex items-center gap-1.5 shrink-0"
+                    >
+                      <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Settle Full Balance (-INR {selectedWallet.balance.toLocaleString()})</span>
+                    </button>
+                  )}
                 </div>
 
                 {walletError && (
@@ -1987,6 +2354,140 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
         </div>
       )}
 
+      {/* SNAPSHOTS VAULT & POINT-IN-TIME RESTORE MODAL */}
+      {isSnapshotsModalOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-750 rounded-3xl max-w-2xl w-full shadow-2xl overflow-hidden animate-scale-up">
+            <div className="p-6 border-b border-slate-750 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 flex items-center justify-center shrink-0">
+                  <Database className="w-5 h-5 text-indigo-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-100 uppercase tracking-tight flex items-center gap-2">
+                    Point-in-Time Data Vault & Snapshots
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Safe, immutable checkpoints. Rollback or restore any verified state instantly.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSnapshotsModalOpen(false)}
+                className="p-2 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-slate-200 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+              {/* CREATE MANUAL SNAPSHOT FORM */}
+              <form onSubmit={handleCreateSnapshot} className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-200 flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                    Create New Safe Checkpoint
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">Immutable Backup</span>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    value={newSnapshotReason}
+                    onChange={(e) => setNewSnapshotReason(e.target.value)}
+                    placeholder="e.g. Pre-settlement checkpoint for October payouts"
+                    className="flex-1 px-3 py-2 text-xs rounded-xl bg-slate-900 border border-slate-750 text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-bold"
+                  />
+                  <button
+                    type="submit"
+                    disabled={creatingSnapshot || !newSnapshotReason.trim()}
+                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-zinc-950 font-black text-xs rounded-xl transition cursor-pointer shrink-0"
+                  >
+                    {creatingSnapshot ? 'Saving...' : 'Capture Snapshot'}
+                  </button>
+                </div>
+              </form>
+
+              {/* SNAPSHOTS LIST */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-300">Available Historical Snapshots</span>
+                  <button
+                    type="button"
+                    onClick={fetchSnapshotsList}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-bold cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${loadingSnapshots ? 'animate-spin' : ''}`} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+
+                {loadingSnapshots && snapshotsList.length === 0 ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="w-6 h-6 text-indigo-400 animate-spin" />
+                  </div>
+                ) : snapshotsList.length === 0 ? (
+                  <div className="text-center py-8 border border-slate-800 border-dashed rounded-2xl bg-slate-950/30">
+                    <Database className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                    <p className="text-xs text-slate-500 font-bold">No snapshots recorded yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {snapshotsList.map((s) => {
+                      return (
+                        <div
+                          key={s.id}
+                          className="p-4 rounded-2xl border transition flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-950/40 border-slate-800 hover:border-slate-700"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-black text-slate-100">{s.reason}</span>
+                              <span className="px-1.5 py-0.2 rounded-md bg-slate-850 text-slate-400 text-[9px] font-mono">
+                                {s.totalWallets} wallets
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 text-[11px] font-mono text-slate-400">
+                              <span>Net: INR {Number(s.netBalance || 0).toLocaleString()}</span>
+                              <span className="text-emerald-400/80">Cr: +{Number(s.totalCredits || 0).toLocaleString()}</span>
+                              <span className="text-rose-400/80">Dr: -{Number(s.totalDebits || 0).toLocaleString()}</span>
+                              <span className="text-slate-500">• {new Date(s.timestamp).toLocaleString()}</span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreSnapshot(s.id, s.reason)}
+                            className="px-3 py-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 text-xs font-black uppercase tracking-wider transition cursor-pointer self-end sm:self-auto shrink-0 flex items-center gap-1.5"
+                          >
+                            <History className="w-3.5 h-3.5" />
+                            <span>Rollback Here</span>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-950/80 border-t border-slate-750 flex items-center justify-between text-xs text-slate-400">
+              <span className="flex items-center gap-1 text-[11px]">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>All rollbacks save a pre-rollback checkpoint automatically.</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsSnapshotsModalOpen(false)}
+                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

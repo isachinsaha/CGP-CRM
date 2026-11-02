@@ -42,6 +42,7 @@ export const BackupManagerModal: React.FC<BackupManagerModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [selectedFileForRestore, setSelectedFileForRestore] = useState<File | null>(null);
   const [parsedRestoreInfo, setParsedRestoreInfo] = useState<any | null>(null);
@@ -57,8 +58,55 @@ export const BackupManagerModal: React.FC<BackupManagerModalProps> = ({
   };
   const sessionUser = getSessionUser();
   const queryParams = sessionUser 
-    ? `?agentId=${encodeURIComponent(sessionUser.username)}&role=${encodeURIComponent(sessionUser.role)}${sessionUser.token ? `&token=${encodeURIComponent(sessionUser.token)}` : ''}` 
-    : '';
+    ? `?agentId=${encodeURIComponent(sessionUser.username || 'admin')}&role=${encodeURIComponent(sessionUser.role || 'admin')}${sessionUser.token ? `&token=${encodeURIComponent(sessionUser.token)}` : ''}` 
+    : '?agentId=admin&role=admin';
+
+  const handleDownloadFile = async (url: string, fallbackFileName: string) => {
+    try {
+      setDownloadingFile(fallbackFileName);
+      setStatusMessage({ type: 'info', text: `Preparing download for ${fallbackFileName}... Please wait.` });
+
+      const res = await fetch(url, {
+        headers: {
+          'x-user-role': sessionUser?.role || 'admin',
+          'x-agent-id': sessionUser?.username || 'admin'
+        }
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Download failed with HTTP status ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const contentDisposition = res.headers.get('content-disposition');
+      let finalName = fallbackFileName;
+      if (contentDisposition && contentDisposition.includes('filename=')) {
+        const match = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) {
+          finalName = match[1];
+        }
+      }
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = finalName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(blobUrl);
+
+      setStatusMessage({ type: 'success', text: `Downloaded ${finalName} successfully!` });
+      setTimeout(() => setStatusMessage(null), 4000);
+    } catch (err: any) {
+      console.error('File download error:', err);
+      setStatusMessage({ type: 'error', text: err.message || 'Download failed. Opening direct link...' });
+      window.open(url, '_blank');
+    } finally {
+      setDownloadingFile(null);
+    }
+  };
 
   const fetchBackupsList = async () => {
     setLoading(true);
@@ -251,11 +299,19 @@ export const BackupManagerModal: React.FC<BackupManagerModalProps> = ({
             {/* 1. Download Master XLSX */}
             <a
               href={`/api/backup/full-xlsx${queryParams}`}
-              className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900/40 bg-gradient-to-br from-emerald-50/50 to-teal-50/20 dark:from-emerald-950/20 dark:to-teal-950/10 hover:border-emerald-400 transition flex flex-col justify-between group"
+              onClick={(e) => {
+                e.preventDefault();
+                handleDownloadFile(`/api/backup/full-xlsx${queryParams}`, `CGP_CRM_MASTER_BACKUP_${new Date().toISOString().split('T')[0]}.xlsx`);
+              }}
+              className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900/40 bg-gradient-to-br from-emerald-50/50 to-teal-50/20 dark:from-emerald-950/20 dark:to-teal-950/10 hover:border-emerald-400 transition flex flex-col justify-between group cursor-pointer"
             >
               <div className="flex items-center justify-between mb-2">
                 <FileSpreadsheet className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                <Download className="h-4 w-4 text-emerald-500 group-hover:translate-y-0.5 transition" />
+                {downloadingFile?.includes('.xlsx') ? (
+                  <RefreshCw className="h-4 w-4 text-emerald-500 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 text-emerald-500 group-hover:translate-y-0.5 transition" />
+                )}
               </div>
               <div>
                 <h4 className="font-bold text-slate-800 dark:text-slate-200">Download Master XLSX</h4>
@@ -266,11 +322,19 @@ export const BackupManagerModal: React.FC<BackupManagerModalProps> = ({
             {/* 2. Download Restorable DB JSON */}
             <a
               href={`/api/backup/full-db${queryParams}`}
-              className="p-4 rounded-xl border border-indigo-200 dark:border-indigo-900/40 bg-gradient-to-br from-indigo-50/50 to-blue-50/20 dark:from-indigo-950/20 dark:to-blue-950/10 hover:border-indigo-400 transition flex flex-col justify-between group"
+              onClick={(e) => {
+                e.preventDefault();
+                handleDownloadFile(`/api/backup/full-db${queryParams}`, `CGP_CRM_DATABASE_BACKUP_${new Date().toISOString().split('T')[0]}.json`);
+              }}
+              className="p-4 rounded-xl border border-indigo-200 dark:border-indigo-900/40 bg-gradient-to-br from-indigo-50/50 to-blue-50/20 dark:from-indigo-950/20 dark:to-blue-950/10 hover:border-indigo-400 transition flex flex-col justify-between group cursor-pointer"
             >
               <div className="flex items-center justify-between mb-2">
                 <Database className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-                <Download className="h-4 w-4 text-indigo-500 group-hover:translate-y-0.5 transition" />
+                {downloadingFile?.includes('.json') ? (
+                  <RefreshCw className="h-4 w-4 text-indigo-500 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 text-indigo-500 group-hover:translate-y-0.5 transition" />
+                )}
               </div>
               <div>
                 <h4 className="font-bold text-slate-800 dark:text-slate-200">Download DB Backup (.JSON)</h4>
@@ -400,9 +464,18 @@ export const BackupManagerModal: React.FC<BackupManagerModalProps> = ({
                         <td className="px-3.5 py-2 text-right">
                           <a
                             href={`/api/backup/download-file?file=${encodeURIComponent(b.fileName)}${queryParams ? queryParams.replace('?', '&') : ''}`}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[11px] font-bold transition"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleDownloadFile(`/api/backup/download-file?file=${encodeURIComponent(b.fileName)}${queryParams ? queryParams.replace('?', '&') : ''}`, b.fileName);
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[11px] font-bold transition cursor-pointer"
                           >
-                            <Download className="h-3 w-3" /> Download
+                            {downloadingFile === b.fileName ? (
+                              <RefreshCw className="h-3 w-3 animate-spin text-emerald-500" />
+                            ) : (
+                              <Download className="h-3 w-3" />
+                            )}
+                            Download
                           </a>
                         </td>
                       </tr>

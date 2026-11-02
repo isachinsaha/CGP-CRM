@@ -4,12 +4,12 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Lead, LeadStage, StatSummary, Coordinator, WhatsAppTemplate, AppNotification } from './types.ts';
+import { Lead, LeadStage, StatSummary, Coordinator, WhatsAppTemplate } from './types.ts';
 import { 
-  LayoutGrid, Table, BarChart3, Briefcase, ShieldAlert, Sparkles, 
+  LayoutGrid, Table, BarChart3, Briefcase, ShieldAlert, Sparkles, Bot,
   RefreshCw, MessageSquare, Plus, HelpCircle, Layers, Lock, User, Check, X, Shield,
   LogOut, Users, UserCheck, Sun, Moon, PiggyBank, Menu, ChevronRight, Settings, ChevronDown, Download, Trash2, Image,
-  Bell, MailOpen, CheckCheck, Inbox, AlertCircle
+  CheckCheck, AlertCircle, Copy
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -34,6 +34,8 @@ import ErrorBoundary from './components/ErrorBoundary.tsx';
 import { BackupManagerModal } from './components/BackupManagerModal.tsx';
 import RecycleBinModal from './components/RecycleBinModal.tsx';
 import MediaLibrary from './components/MediaLibrary.tsx';
+import { DuplicateManagerModal } from './components/DuplicateManagerModal.tsx';
+import { AiSentinelModal } from './components/AiSentinelModal.tsx';
 
 // Import local assets
 
@@ -82,17 +84,22 @@ export default function App() {
   const [isMetadataManagerOpen, setIsMetadataManagerOpen] = useState(false);
   const [isIncentiveRulesOpen, setIsIncentiveRulesOpen] = useState(false);
   const [isBackupManagerOpen, setIsBackupManagerOpen] = useState(false);
+  const [isDuplicateManagerOpen, setIsDuplicateManagerOpen] = useState(false);
+  const [isSentinelOpen, setIsSentinelOpen] = useState(false);
   const [isRecycleBinOpen, setIsRecycleBinOpen] = useState(false);
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const adminMenuRef = useRef<HTMLDivElement>(null);
+  const lastFetchTimeRef = useRef<number>(0);
+  const lastEtagRef = useRef<string>('');
 
   // Authentication & session state
-  const [currentUser, setCurrentUser] = useState<{ id: string; username: string; displayName: string; role: 'admin' | 'agent' } | null>(() => {
+  const [currentUser, setCurrentUser] = useState<{ id: string; username: string; displayName: string; role: 'admin' | 'agent'; token?: string } | null>(() => {
     const saved = localStorage.getItem('cgp_crm_session');
     return saved ? JSON.parse(saved) : null;
   });
 
-  const userRole = currentUser?.role || 'agent';
+  const isUserAdminName = currentUser?.username?.toLowerCase() === 'admin' || currentUser?.username?.toLowerCase() === 'sachinsaha' || currentUser?.role === 'admin';
+  const userRole: 'admin' | 'agent' = isUserAdminName ? 'admin' : (currentUser?.role || 'agent');
   const currentAgentId = currentUser?.username || 'unassigned';
 
   // Server-side pagination & filter states
@@ -126,54 +133,6 @@ export default function App() {
   const [logoError, setLogoError] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Live Notifications states
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [isNotifOpen, setIsNotifOpen] = useState(false);
-  const [filterNotifCoord, setFilterNotifCoord] = useState<string>('all');
-
-  // Moveable Floating Bell Position & Dragging state
-  const [bellPosition, setBellPosition] = useState<{ x: number; y: number }>(() => {
-    try {
-      const saved = localStorage.getItem('cgp_crm_bell_position');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error(e);
-    }
-    return { x: 0, y: 0 };
-  });
-  const [isBellDragging, setIsBellDragging] = useState(false);
-  const bellDragStart = useRef({ x: 0, y: 0 });
-  const bellPositionStart = useRef({ x: 0, y: 0 });
-  const bellHasMoved = useRef(false);
-
-  const handleBellPointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
-    setIsBellDragging(true);
-    bellHasMoved.current = false;
-    bellDragStart.current = { x: e.clientX, y: e.clientY };
-    bellPositionStart.current = { ...bellPosition };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-
-  const handleBellPointerMove = (e: React.PointerEvent) => {
-    if (!isBellDragging) return;
-    const dx = e.clientX - bellDragStart.current.x;
-    const dy = e.clientY - bellDragStart.current.y;
-    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
-      bellHasMoved.current = true;
-    }
-    const newX = bellPositionStart.current.x + dx;
-    const newY = bellPositionStart.current.y + dy;
-    setBellPosition({ x: newX, y: newY });
-  };
-
-  const handleBellPointerUp = (e: React.PointerEvent) => {
-    if (!isBellDragging) return;
-    setIsBellDragging(false);
-    e.currentTarget.releasePointerCapture(e.pointerId);
-    localStorage.setItem('cgp_crm_bell_position', JSON.stringify(bellPosition));
-  };
-
   // Theme state
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('cgp_crm_theme');
@@ -191,29 +150,6 @@ export default function App() {
       root.classList.remove('light');
     }
   }, [theme]);
-
-  // Filter notifications based on role and coordinator filter
-  const visibleNotifications = useMemo(() => {
-    return notifications.filter(n => {
-      if (userRole === 'admin') {
-        if (filterNotifCoord === 'all') return true;
-        if (filterNotifCoord === 'unassigned') return n.coordinatorName === 'unassigned';
-        return n.coordinatorName === filterNotifCoord;
-      } else {
-        // Coordinator only sees their assigned notifications or unassigned
-        return n.coordinatorName === currentAgentId || n.coordinatorName === 'unassigned';
-      }
-    });
-  }, [notifications, userRole, currentAgentId, filterNotifCoord]);
-
-  const unreadNotifCount = useMemo(() => {
-    // Admin unread count or Coordinator unread count
-    const relevant = notifications.filter(n => {
-      if (userRole === 'admin') return true;
-      return n.coordinatorName === currentAgentId || n.coordinatorName === 'unassigned';
-    });
-    return relevant.filter(n => !n.isRead).length;
-  }, [notifications, userRole, currentAgentId]);
 
   // Auto welcome greeting when user logs in or restores session
   useEffect(() => {
@@ -419,15 +355,15 @@ export default function App() {
         fetch('/api/metadata').catch(() => null)
       ]);
 
-      if (coordsRes && coordsRes.ok) {
+      if (coordsRes && coordsRes.ok && coordsRes.headers.get('content-type')?.includes('application/json')) {
         const coordsData = await coordsRes.json();
         setCoordinatorsList(coordsData);
       }
-      if (healthRes && healthRes.ok) {
+      if (healthRes && healthRes.ok && healthRes.headers.get('content-type')?.includes('application/json')) {
         const healthData = await healthRes.json();
         setApiMode(healthData.aiMode);
       }
-      if (metaRes && metaRes.ok) {
+      if (metaRes && metaRes.ok && metaRes.headers.get('content-type')?.includes('application/json')) {
         const metaData = await metaRes.json();
         if (metaData.countries) setCountries(metaData.countries);
         if (metaData.positions) setPositions(metaData.positions);
@@ -470,22 +406,18 @@ export default function App() {
       });
   }, []);
 
-  // Fetch live alerts & incoming WhatsApp notifications
-  const fetchNotifications = async () => {
-    try {
-      const res = await fetch('/api/notifications');
-      if (res.ok) {
-        const data = await res.json();
-        setNotifications(Array.isArray(data) ? data : []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch notifications:', err);
-    }
-  };
-
   // Synchronize data from Express REST API
   const pullCrmData = async (silent = false, forceRefresh = false) => {
+    const now = Date.now();
+    if (!forceRefresh && (now - lastFetchTimeRef.current < 2500)) {
+      return; // Skip duplicate rapid triggers within 2.5s
+    }
+    lastFetchTimeRef.current = now;
+
     if (!silent) setIsRefreshing(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
     try {
       // 1. Fetch active job leads list with server-side queries & pagination parameters
       const params = new URLSearchParams({
@@ -514,13 +446,28 @@ export default function App() {
         params.append('forceRefresh', 'true');
       }
 
+      const reqHeaders: Record<string, string> = {};
+      if (lastEtagRef.current && !forceRefresh) {
+        reqHeaders['If-None-Match'] = lastEtagRef.current;
+      }
+
       const [leadsRes, statsRes] = await Promise.all([
-        fetch(`/api/leads?${params.toString()}`),
-        fetch('/api/stats').catch(() => null),
-        fetchNotifications().catch(() => null)
+        fetch(`/api/leads?${params.toString()}`, { 
+          signal: controller.signal,
+          headers: reqHeaders
+        }),
+        fetch('/api/stats', { signal: controller.signal }).catch(() => null)
       ]);
 
-      if (leadsRes.ok && leadsRes.headers.get('content-type')?.includes('application/json')) {
+      clearTimeout(timeoutId);
+
+      // Handle HTTP 304 Not Modified: 0 bytes bandwidth, state remains untouched
+      if (leadsRes && leadsRes.status === 304) {
+        // Data is completely unchanged
+      } else if (leadsRes && leadsRes.ok && leadsRes.headers.get('content-type')?.includes('application/json')) {
+        const etag = leadsRes.headers.get('ETag');
+        if (etag) lastEtagRef.current = etag;
+
         const leadsData = await leadsRes.json();
         const leadsArray = Array.isArray(leadsData) ? leadsData : (leadsData.leads || []);
         setLeads(leadsArray);
@@ -552,7 +499,10 @@ export default function App() {
         setStats(statsData);
       }
     } catch (err: any) {
-      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        console.warn('[Sync] API request timed out after 20s, retaining current view state.');
+      } else if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
         console.warn('[Sync] Express REST server offline or restarting, skipping poll sync.');
       } else {
         console.error('Failed to sync placement entries from Express REST routes:', err);
@@ -567,31 +517,65 @@ export default function App() {
     pullCrmData();
   }, [currentPage, filterKey, activeTab]);
 
-  // Set up background polling to fetch new WhatsApp replies or lead modifications every 45 seconds only when tab is active
+  // Set up background polling to fetch new WhatsApp replies or lead modifications every 180 seconds only when tab is active
   useEffect(() => {
     const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        // Pass silent = true, forceRefresh = true to bypass memory cache on the server
-        pullCrmData(true, true);
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        pullCrmData(true, false);
       }
-    }, 45000);
+    }, 180000);
 
     return () => clearInterval(timer);
   }, [currentPage, filterKey, activeTab]);
 
-  // Update lead stage pipeline state
+  // Handle in-place single lead updates without causing full-CRM re-fetching or flashing
+  const handleSingleLeadUpdated = useCallback((updatedLead: Lead) => {
+    if (!updatedLead || !updatedLead.id) return;
+    setLeads(prev => prev.map(l => l.id === updatedLead.id ? { ...l, ...updatedLead } : l));
+    setSelectedLead(prev => (prev && prev.id === updatedLead.id ? { ...prev, ...updatedLead } : prev));
+  }, []);
+
+  // Update lead stage pipeline state with instant optimistic update
   const handleUpdateStage = async (id: string, stage: LeadStage) => {
+    // 1. Instantly update UI state optimistically so stage change is instantaneous and never reverts
+    const prevLead = leads.find(l => l.id === id);
+    const prevStage = prevLead?.stage;
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, stage } : l));
+    if (selectedLead && selectedLead.id === id) {
+      setSelectedLead(prev => prev ? { ...prev, stage } : null);
+    }
+
     try {
       const res = await fetch(`/api/leads/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId
+        },
         body: JSON.stringify({ stage })
       });
       if (res.ok) {
-        pullCrmData(true); // silent sync
+        const updatedLead = await res.json();
+        setLeads(prev => prev.map(l => l.id === id ? updatedLead : l));
+        if (selectedLead && selectedLead.id === id) {
+          setSelectedLead(updatedLead);
+        }
+      } else {
+        if (prevStage) {
+          setLeads(prev => prev.map(l => l.id === id ? { ...l, stage: prevStage } : l));
+          if (selectedLead && selectedLead.id === id) {
+            setSelectedLead(prev => prev ? { ...prev, stage: prevStage } : null);
+          }
+        }
+        const errJson = await res.json().catch(() => ({}));
+        alert(errJson.error || 'Failed to update lead stage. Please try again.');
       }
     } catch (err) {
       console.error('Failed to modify stage metadata', err);
+      if (prevStage) {
+        setLeads(prev => prev.map(l => l.id === id ? { ...l, stage: prevStage } : l));
+      }
     }
   };
 
@@ -632,10 +616,13 @@ export default function App() {
         headers: { 
           'Content-Type': 'application/json',
           'x-user-role': userRole,
-          'x-agent-id': currentAgentId
+          'x-agent-id': currentAgentId,
+          ...(currentUser?.token ? { 'Authorization': `Bearer ${currentUser.token}` } : {})
         },
         body: JSON.stringify({
           ...createFields,
+          userRole,
+          agentId: currentAgentId,
           age: createFields.age !== '' ? (Number(createFields.age) || '') : '',
           importance: Number(createFields.importance) || 3,
           tags: enrollTags
@@ -805,6 +792,22 @@ export default function App() {
 
               {/* Right Profile Actions & Utilities */}
               <div className="flex items-center gap-2 shrink-0">
+                {/* AI Sentinel Copilot button */}
+                <button
+                  onClick={() => setIsSentinelOpen(true)}
+                  className="bg-gradient-to-r from-indigo-950/80 via-slate-900 to-purple-950/80 hover:from-indigo-900 hover:to-purple-900 text-indigo-200 hover:text-white text-xs font-bold px-2.5 py-1.5 rounded-xl border border-indigo-500/40 flex items-center gap-1.5 cursor-pointer transition-all shadow-md group"
+                  title="Open AI Sentinel & Operations Copilot"
+                >
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <Bot className="h-3.5 w-3.5 text-indigo-400 group-hover:scale-110 transition-transform" />
+                  <span className="uppercase text-[10px] font-mono tracking-wider font-extrabold hidden md:inline">
+                    AI SENTINEL
+                  </span>
+                </button>
+
                 {/* AI Inbound Parser button */}
                 <button
                   onClick={() => setApiMode(prev => prev === 'live' ? 'simulation' : 'live')}
@@ -879,6 +882,17 @@ export default function App() {
                         >
                           <Download className="h-4 w-4 text-cyan-500 shrink-0 animate-bounce" />
                           <span>📦 Backup & Restore Center</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setIsDuplicateManagerOpen(true);
+                            setIsAdminMenuOpen(false);
+                          }}
+                          className="w-full px-3.5 py-2 text-xs font-bold text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/20 flex items-center gap-2.5 transition text-left cursor-pointer border-t border-slate-100 dark:border-slate-800"
+                          title="Identify and Merge/Delete Duplicate Leads by Phone Number (+91 country code normalization)"
+                        >
+                          <Copy className="h-4 w-4 text-amber-500 shrink-0" />
+                          <span>👥 Duplicate Leads Manager</span>
                         </button>
                         <button
                           onClick={() => {
@@ -1070,8 +1084,8 @@ export default function App() {
                   positions={positions}
                   onUpdatePositions={handleUpdatePositions}
                   projects={projects}
-                  onRefreshData={() => pullCrmData(true, true)}
-                  onLeadUpdated={async () => { await pullCrmData(true); }}
+                  onRefreshData={() => pullCrmData(true, false)}
+                  onLeadUpdated={handleSingleLeadUpdated}
                   isRefreshing={isRefreshing}
                 />
               </div>
@@ -1122,7 +1136,9 @@ export default function App() {
               <div key="ai-matcher-tab" className="flex-1 flex flex-col min-h-0">
                 <AiProfileMatcher
                   onSelectLead={setSelectedLead}
-                  onUpdateLead={async () => { await pullCrmData(true); }}
+                  onUpdateLead={async (lead) => {
+                    handleSingleLeadUpdated(lead);
+                  }}
                   userRole={userRole}
                 />
               </div>
@@ -1132,14 +1148,8 @@ export default function App() {
               <div key="reactivation-tab" className="flex-1 flex flex-col min-h-0 overflow-y-auto p-4 sm:p-6 bg-slate-950">
                 <CandidateReactivation
                   onSelectLead={setSelectedLead}
-                  onUpdateLead={async (updatedLead) => {
-                    const idx = leads.findIndex(l => l.id === updatedLead.id);
-                    if (idx !== -1) {
-                      const updatedLeads = [...leads];
-                      updatedLeads[idx] = updatedLead;
-                      setLeads(updatedLeads);
-                    }
-                    await pullCrmData(true);
+                  onUpdateLead={async (lead) => {
+                    handleSingleLeadUpdated(lead);
                   }}
                   userRole={userRole}
                 />
@@ -1617,7 +1627,13 @@ export default function App() {
             selectedLeadRef.current = null;
             setSelectedLead(null);
           }}
-          onLeadUpdated={() => pullCrmData(true)}
+          onLeadUpdated={(updated) => {
+            if (updated && updated.id) {
+              handleSingleLeadUpdated(updated);
+            } else {
+              pullCrmData(true, false);
+            }
+          }}
           userRole={userRole}
           currentAgentId={currentAgentId}
           allLeads={leads}
@@ -1711,251 +1727,30 @@ export default function App() {
         />
       )}
 
-      {/* 5. FLOATING LIVE NOTIFICATIONS CENTER (Bell Icon in Bottom-Right) */}
-      <div 
-        className="fixed z-40 flex flex-col items-end"
-        style={{
-          bottom: '24px',
-          right: '24px',
-          transform: `translate(${bellPosition.x}px, ${bellPosition.y}px)`
-        }}
-      >
-        
-        {/* Animated Popover Feed */}
-        {isNotifOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 15, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 15, scale: 0.95 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl mb-4 w-80 sm:w-[420px] max-h-[500px] overflow-hidden flex flex-col text-slate-100 z-50"
-          >
-            {/* Popover Header */}
-            <div className="bg-slate-950 p-4 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <h4 className="font-extrabold text-sm text-slate-100 flex items-center gap-1.5">
-                  <Bell className="h-4 w-4 text-amber-500 fill-current" />
-                  <span>Notification Inbox</span>
-                </h4>
-                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold font-sans mt-0.5">
-                  Live alerts & WhatsApp previews
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={async () => {
-                    try {
-                      await fetch('/api/notifications/mark-all-read', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ coordinatorName: currentAgentId, isAdmin: userRole === 'admin' })
-                      });
-                      fetchNotifications();
-                    } catch (e) {
-                      console.error(e);
-                    }
-                  }}
-                  className="text-[10px] font-black uppercase tracking-wider text-emerald-500 hover:underline bg-emerald-500/10 px-2 py-1 rounded-lg"
-                  title="Mark all notifications as read"
-                >
-                  Mark All Read
-                </button>
-                <button
-                  onClick={async () => {
-                    if (confirm('Are you sure you want to clear your notifications?')) {
-                      try {
-                        await fetch('/api/notifications/clear', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ coordinatorName: currentAgentId, isAdmin: userRole === 'admin' })
-                        });
-                        fetchNotifications();
-                      } catch (e) {
-                        console.error(e);
-                      }
-                    }
-                  }}
-                  className="text-[10px] font-black uppercase tracking-wider text-rose-500 hover:underline bg-rose-500/10 px-2 py-1 rounded-lg"
-                  title="Clear notifications"
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
+      {/* Duplicate Leads Manager & Strict Uniqueness Guard Modal */}
+      {isDuplicateManagerOpen && (
+        <DuplicateManagerModal
+          isOpen={isDuplicateManagerOpen}
+          onClose={() => setIsDuplicateManagerOpen(false)}
+          onRefreshData={() => pullCrmData(true)}
+        />
+      )}
 
-            {/* Coordinator-wise Selector (Only visible for Admin) */}
-            {userRole === 'admin' && (
-              <div className="p-3 bg-slate-950/40 border-b border-slate-800/80 flex items-center justify-between gap-2.5">
-                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 select-none">
-                  Filter by Coordinator:
-                </label>
-                <select
-                  value={filterNotifCoord}
-                  onChange={(e) => setFilterNotifCoord(e.target.value)}
-                  className="text-[11px] font-bold px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="all">All Coordinators</option>
-                  <option value="unassigned">Unassigned Only</option>
-                  {coordinatorsList && coordinatorsList.filter(c => c.role === 'agent').map(coord => (
-                    <option key={coord.id} value={coord.username}>
-                      {coord.displayName} (@{coord.username})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* Popover Content Notifications List */}
-            <div className="flex-1 overflow-y-auto divide-y divide-slate-800/50">
-              {visibleNotifications && visibleNotifications.length > 0 ? (
-                visibleNotifications.map((n) => {
-                  const isRead = n.isRead;
-                  const iconBg = n.type === 'reactivation_reply' 
-                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' 
-                    : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
-                  
-                  return (
-                    <div
-                      key={n.id}
-                      onClick={async () => {
-                        // Mark as read
-                        if (!isRead) {
-                          try {
-                            await fetch(`/api/notifications/${n.id}/read`, { method: 'PUT' });
-                            fetchNotifications();
-                          } catch (e) {
-                            console.error(e);
-                          }
-                        }
-                        
-                        // Select lead and open profile cabinet modal
-                        if (n.leadId) {
-                          const matchedLead = leads.find(l => l.id === n.leadId);
-                          if (matchedLead) {
-                            selectedLeadRef.current = matchedLead;
-                            setSelectedLead(matchedLead);
-                          } else {
-                            // If not found in current leads slice, fetch it directly
-                            try {
-                              const res = await fetch(`/api/leads/${n.leadId}`);
-                              if (res.ok) {
-                                const leadData = await res.json();
-                                selectedLeadRef.current = leadData;
-                                setSelectedLead(leadData);
-                              }
-                            } catch (e) {
-                              console.error('Failed to retrieve target lead:', e);
-                            }
-                          }
-                        }
-                        setIsNotifOpen(false);
-                      }}
-                      className={`p-3.5 text-left transition-colors duration-150 cursor-pointer flex gap-3 relative hover:bg-slate-800/50 ${
-                        isRead ? 'bg-transparent opacity-75' : 'bg-indigo-600/5'
-                      }`}
-                    >
-                      {/* Individual Clear Button */}
-                      <button
-                        type="button"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          try {
-                            await fetch(`/api/notifications/${n.id}`, { method: 'DELETE' });
-                            fetchNotifications();
-                          } catch (err) {
-                            console.error('Failed to delete notification:', err);
-                          }
-                        }}
-                        className="absolute top-3 right-3 p-1 rounded-full text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors duration-150 cursor-pointer z-20 flex items-center justify-center"
-                        title="Clear notification"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-
-                      {/* Icon */}
-                      <div className={`h-8 w-8 rounded-xl border flex items-center justify-center shrink-0 ${iconBg}`}>
-                        {n.type === 'reactivation_reply' ? (
-                          <Sparkles className="h-4 w-4" />
-                        ) : (
-                          <MessageSquare className="h-4 w-4" />
-                        )}
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0 pr-6">
-                        <div className="flex items-center justify-between gap-1.5 mb-1">
-                          <span className="font-extrabold text-[12px] text-slate-200 truncate flex items-center gap-1.5">
-                            {!isRead && (
-                              <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 inline-block animate-pulse shrink-0" />
-                            )}
-                            {n.leadName || 'Candidate Inquiry'}
-                          </span>
-                          <span className="text-[9px] font-medium text-slate-500 shrink-0 font-mono pr-2">
-                            {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
-                          </span>
-                        </div>
-                        
-                        <p className="text-[11.5px] font-bold text-slate-350 leading-tight">
-                          {n.text}
-                        </p>
-
-                        {/* WhatsApp full text preview */}
-                        {n.previewText && (
-                          <div className="mt-1.5 p-2 bg-slate-950/60 rounded-xl border border-slate-800/50 text-[11px] font-sans text-slate-400 italic whitespace-pre-wrap leading-relaxed max-h-24 overflow-y-auto shadow-inner">
-                            "{n.previewText}"
-                          </div>
-                        )}
-
-                        {/* Unboxed Metadata details */}
-                        <div className="mt-2 flex items-center gap-1.5 text-[9.5px] text-slate-500 font-medium select-none">
-                          <span>{n.phone || 'No phone'}</span>
-                          <span aria-hidden="true" className="text-slate-700 font-black">·</span>
-                          <span className="text-indigo-400/90 font-bold uppercase tracking-wider">
-                            @{n.coordinatorName || 'unassigned'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="py-12 text-center text-slate-500 flex flex-col items-center justify-center gap-2">
-                  <Inbox className="h-10 w-10 opacity-20 text-slate-400" />
-                  <p className="text-xs font-bold italic">Your Inbox is quiet and empty.</p>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-
-        {/* Floating Bell Button with Badge */}
-        <button
-          onPointerDown={handleBellPointerDown}
-          onPointerMove={handleBellPointerMove}
-          onPointerUp={handleBellPointerUp}
-          onClick={() => {
-            if (bellHasMoved.current) return; // Prevent clicking while dragging
-            setIsNotifOpen(!isNotifOpen);
-            // Re-fetch fresh notifications on click
-            fetchNotifications();
+      {/* AI Sentinel & Operations Copilot Modal */}
+      {isSentinelOpen && (
+        <AiSentinelModal
+          isOpen={isSentinelOpen}
+          onClose={() => setIsSentinelOpen(false)}
+          userRole={userRole}
+          currentAgentId={currentAgentId}
+          onFilterByStage={(stage) => {
+            setActiveTab('board');
           }}
-          className={`h-14 w-14 rounded-full flex items-center justify-center shadow-premium cursor-move transition-all duration-200 transform hover:scale-105 active:scale-95 border z-50 ${
-            isNotifOpen 
-              ? 'bg-slate-900 border-slate-750 text-indigo-400 hover:bg-slate-850' 
-              : 'bg-indigo-600 hover:bg-indigo-500 text-white border-transparent'
-          }`}
-          title="Open Live Notifications Inbox"
-        >
-          <div className="relative">
-            <Bell className={`h-6 w-6 ${unreadNotifCount > 0 && !isNotifOpen ? 'animate-bounce' : ''}`} />
-            {unreadNotifCount > 0 && (
-              <span className="absolute -top-2.5 -right-2.5 bg-rose-600 text-white text-[9.5px] font-mono font-black h-5.5 w-5.5 rounded-full flex items-center justify-center border-2 border-slate-950 shadow-sm animate-pulse">
-                {unreadNotifCount}
-              </span>
-            )}
-          </div>
-        </button>
-      </div>
+          onNavigateToWhatsApp={() => {
+            setActiveTab('messages');
+          }}
+        />
+      )}
 
     </div>
   );

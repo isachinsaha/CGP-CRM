@@ -4,7 +4,7 @@ import CoordinatorPerformanceReport from './CoordinatorPerformanceReport.tsx';
 import { 
   BarChart3, TrendingUp, Target, Percent, Sparkles, 
   UserCheck, Inbox, Calendar, Users, Award, ShieldAlert, Clock, MapPin, CheckCircle,
-  CheckSquare2, Square, AlertCircle, ListTodo, User, Bell, PieChart as PieIcon, AreaChart as AreaIcon,
+  CheckSquare, CheckSquare2, Square, AlertCircle, ListTodo, User, PieChart as PieIcon, AreaChart as AreaIcon,
   ExternalLink
 } from 'lucide-react';
 import { formatCandidateName } from '../utils';
@@ -80,6 +80,9 @@ export default function CampaignAnalytics({
   const [customEndDate, setCustomEndDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [selectedCoordFilter, setSelectedCoordFilter] = useState<string>('All');
   const [todoCoordFilter, setTodoCoordFilter] = useState<string>('All');
+  const [todoStatusFilter, setTodoStatusFilter] = useState<'active' | 'today' | 'upcoming' | 'overdue' | 'all'>('active');
+  const [isResolvingOverdue, setIsResolvingOverdue] = useState(false);
+  const [resolveOverdueSuccess, setResolveOverdueSuccess] = useState<string | null>(null);
   const [attributionChartType, setAttributionChartType] = useState<'bar' | 'pie'>('bar');
   const [pipelineChartType, setPipelineChartType] = useState<'funnel' | 'pie'>('funnel');
 
@@ -338,6 +341,70 @@ export default function CampaignAnalytics({
     return list.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
   }, [activeLeads, todoCoordFilter]);
 
+  const taskCounts = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    let today = 0;
+    let upcoming = 0;
+    let overdue = 0;
+    pendingTasks.forEach(t => {
+      if (t.dueDate === todayStr) today++;
+      else if (t.dueDate > todayStr) upcoming++;
+      else overdue++;
+    });
+    return { today, upcoming, overdue, active: today + upcoming, all: pendingTasks.length };
+  }, [pendingTasks]);
+
+  const displayedTasks = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (todoStatusFilter === 'today') {
+      return pendingTasks.filter(t => t.dueDate === todayStr);
+    }
+    if (todoStatusFilter === 'upcoming') {
+      return pendingTasks.filter(t => t.dueDate > todayStr);
+    }
+    if (todoStatusFilter === 'overdue') {
+      return pendingTasks.filter(t => t.dueDate < todayStr);
+    }
+    if (todoStatusFilter === 'active') {
+      return pendingTasks.filter(t => t.dueDate >= todayStr);
+    }
+    return pendingTasks;
+  }, [pendingTasks, todoStatusFilter]);
+
+  const handleResolveOverdue = async () => {
+    if (taskCounts.overdue === 0) return;
+    if (!window.confirm(`Mark all ${taskCounts.overdue} overdue follow-up tasks as completed? This will clear the backlog for coordinator follow-ups.`)) {
+      return;
+    }
+    setIsResolvingOverdue(true);
+    setResolveOverdueSuccess(null);
+    try {
+      const res = await fetch('/api/tasks/resolve-overdue', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': userRole || 'admin'
+        },
+        body: JSON.stringify({
+          beforeDate: new Date().toISOString().split('T')[0],
+          coordinator: todoCoordFilter
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setResolveOverdueSuccess(data.message || 'Successfully resolved all overdue tasks!');
+        setTimeout(() => setResolveOverdueSuccess(null), 4000);
+        if (onRefreshData) onRefreshData();
+      } else {
+        alert(data.error || 'Failed to resolve overdue tasks.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error resolving overdue tasks.');
+    } finally {
+      setIsResolvingOverdue(false);
+    }
+  };
+
   const handleCompleteTask = async (leadId: string, taskId: string) => {
     const lead = activeLeads.find(l => l.id === leadId);
     if (!lead) return;
@@ -364,10 +431,6 @@ export default function CampaignAnalytics({
       }
     ];
 
-    // Auto-disable reminder bell if all tasks are completed
-    const hasPending = updatedTasks.some(t => !t.completed);
-    const updatedReminderEnabled = hasPending ? lead.reminderEnabled : false;
-
     try {
       const res = await fetch(`/api/leads/${leadId}`, {
         method: 'PUT',
@@ -378,8 +441,7 @@ export default function CampaignAnalytics({
         },
         body: JSON.stringify({
           tasks: updatedTasks,
-          timeline: updatedTimeline,
-          reminderEnabled: updatedReminderEnabled
+          timeline: updatedTimeline
         })
       });
       if (res.ok) {
@@ -389,37 +451,6 @@ export default function CampaignAnalytics({
       }
     } catch (err) {
       console.error('Failed to update task state on the dashboard', err);
-    }
-  };
-
-  // Extract all leads with active reminders (ensuring they actually have pending tasks)
-  const reminderLeads = useMemo(() => {
-    let filtered = activeLeads.filter(l => l.reminderEnabled && l.tasks && l.tasks.some(t => !t.completed));
-    if (todoCoordFilter !== 'All') {
-      filtered = filtered.filter(l => todoCoordFilter === 'Unassigned'
-        ? (!l.assignedTo || l.assignedTo.trim() === '' || l.assignedTo === 'Unassigned')
-        : (l.assignedTo?.toLowerCase() === todoCoordFilter.toLowerCase() || l.assignedTo === todoCoordFilter)
-      );
-    }
-    return filtered;
-  }, [activeLeads, todoCoordFilter]);
-
-  const handleToggleReminder = async (leadId: string, currentVal?: boolean) => {
-    try {
-      const res = await fetch(`/api/leads/${leadId}`, {
-        method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': userRole || 'admin',
-          'x-agent-id': currentAgentId || ''
-        },
-        body: JSON.stringify({ reminderEnabled: !currentVal })
-      });
-      if (res.ok && onRefreshData) {
-        onRefreshData();
-      }
-    } catch (err) {
-      console.error('Failed to toggle reminder on report', err);
     }
   };
 
@@ -1284,7 +1315,7 @@ export default function CampaignAnalytics({
             Actionable Follow-up Filters
           </h3>
           <p className="text-xs text-slate-400 font-medium">
-            Filter the priority reminder cards and real-time checklist below by coordinator.
+            Filter the real-time follow-up checklist below by coordinator.
           </p>
         </div>
 
@@ -1310,93 +1341,124 @@ export default function CampaignAnalytics({
         )}
       </div>
 
-      {/* CANDIDATES MARKED FOR REMINDER (🔔) */}
-      <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 text-left">
-        <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4 select-none">
-          <div>
-            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <Bell className="h-4.5 w-4.5 text-rose-500 fill-rose-950/40 animate-pulse" />
-              Candidates Marked with Reminders
-            </h3>
-            <p className="text-xs text-slate-400 font-medium font-sans">These files have an active reminder bell enabled for priority tracking and follow-up.</p>
-          </div>
-          <span className="text-[10px] bg-rose-950/40 text-rose-400 px-2.5 py-1 rounded-full font-black uppercase border border-rose-900/30">
-            🔔 {reminderLeads.length} Flagged
-          </span>
-        </div>
-
-        {reminderLeads.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 max-h-[300px] overflow-y-auto pr-1">
-            {reminderLeads.map((lead) => (
-              <div key={lead.id} className="p-2.5 bg-slate-850 rounded-xl border border-slate-750 flex gap-2 items-start group hover:bg-slate-900/50 transition-all shadow-xs">
-                <button
-                  type="button"
-                  onClick={() => handleToggleReminder(lead.id, lead.reminderEnabled)}
-                  className="mt-0.5 text-rose-500 hover:text-slate-400 transition-colors shrink-0 cursor-pointer"
-                  title="Click to Turn Off Reminder"
-                >
-                  <Bell className="h-4.5 w-4.5 text-rose-500 fill-rose-500 hover:scale-110 transition-transform animate-bounce" />
-                </button>
-                <div className="space-y-2 flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-1.5">
-                    <p 
-                      onClick={() => onSelectLead?.(lead)}
-                      className="text-xs font-black text-slate-100 leading-tight group-hover:text-accent-purple transition-colors cursor-pointer hover:underline break-words uppercase"
-                    >
-                      {formatCandidateName(lead.name)}
-                    </p>
-                    <span className="text-[9px] bg-slate-900 border border-slate-800 px-1.5 py-0.2 rounded text-slate-300 font-mono font-bold uppercase shrink-0">
-                      ✈️ {lead.country || 'QATAR'}
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold">
-                      <span className="text-[9px] bg-slate-900 border border-slate-800 px-1 py-0.2 rounded text-slate-300 font-medium capitalize">
-                        Stage: {lead.stage}
-                      </span>
-                      {lead.phone && (
-                        <span className="text-slate-400 font-mono text-[9px]">{lead.phone}</span>
-                      )}
-                    </div>
-                    <div className="text-[9px] text-slate-400">
-                      Assigned to: <span className="font-extrabold text-accent-emerald">{lead.assignedTo || 'Unassigned'}</span>
-                    </div>
-                    {lead.remarks2 && (
-                      <p className="text-[10px] text-slate-300 italic border-l-2 border-accent-purple pl-2 mt-1 truncate" title={lead.remarks2}>
-                        "{lead.remarks2}"
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="py-8 text-center text-xs text-slate-400 border border-dashed border-slate-750 rounded-xl bg-slate-850/20 space-y-1">
-            <p className="font-semibold">🔔 No active reminder flags</p>
-            <p className="text-[10px]">Toggle the bell icon in the Candidate List spreadsheet to flag urgent files here.</p>
-          </div>
-        )}
-      </div>
-
+      {/* CALLER FOLLOW-UPS & DAILY TO-DO LIST REMINDERS */}
       {/* CALLER FOLLOW-UPS & DAILY TO-DO LIST REMINDERS */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 text-left shadow-2xs">
-        <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800 pb-3 mb-4 select-none">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 dark:border-slate-800 pb-3 mb-4 gap-3 select-none">
           <div>
             <h3 className="text-sm font-black text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <ListTodo className="h-4.5 w-4.5 text-purple-600 dark:text-accent-purple" />
-              Real-time Follow-up To-Do List & Reminders
+              Real-time Follow-up To-Do List
             </h3>
             <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">Daily interactive action items scheduled for candidates by callers.</p>
           </div>
-          <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400 border border-slate-300 dark:border-slate-700 px-2.5 py-1 rounded-full font-black uppercase">
-            ⏳ {pendingTasks.length} Pending
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {taskCounts.overdue > 0 && (
+              <button
+                type="button"
+                onClick={handleResolveOverdue}
+                disabled={isResolvingOverdue}
+                className="px-2.5 py-1 text-[11px] font-black uppercase tracking-wider rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                title="Mark all overdue follow-up tasks completed if calls were already conducted"
+              >
+                <CheckSquare className="h-3.5 w-3.5" />
+                <span>{isResolvingOverdue ? 'Resolving...' : `Resolve Overdue (${taskCounts.overdue})`}</span>
+              </button>
+            )}
+            <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400 border border-slate-300 dark:border-slate-700 px-2.5 py-1 rounded-full font-black uppercase">
+              ⏳ {pendingTasks.length} Pending
+            </span>
+          </div>
         </div>
 
-        {pendingTasks.length > 0 ? (
+        {/* Task View Sub-Filter Tabs */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-3 mb-3 border-b border-slate-100 dark:border-slate-800/60 text-xs">
+          <button
+            type="button"
+            onClick={() => setTodoStatusFilter('active')}
+            className={`px-3 py-1.5 rounded-lg font-black uppercase tracking-wider text-[11px] transition cursor-pointer flex items-center gap-1.5 ${
+              todoStatusFilter === 'active'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <span>🔥 Today & Upcoming</span>
+            <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-white/20 dark:bg-black/30 font-mono">
+              {taskCounts.active}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTodoStatusFilter('today')}
+            className={`px-3 py-1.5 rounded-lg font-black uppercase tracking-wider text-[11px] transition cursor-pointer flex items-center gap-1.5 ${
+              todoStatusFilter === 'today'
+                ? 'bg-amber-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <span>Due Today</span>
+            <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-white/20 dark:bg-black/30 font-mono">
+              {taskCounts.today}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTodoStatusFilter('upcoming')}
+            className={`px-3 py-1.5 rounded-lg font-black uppercase tracking-wider text-[11px] transition cursor-pointer flex items-center gap-1.5 ${
+              todoStatusFilter === 'upcoming'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <span>Upcoming</span>
+            <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-white/20 dark:bg-black/30 font-mono">
+              {taskCounts.upcoming}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTodoStatusFilter('overdue')}
+            className={`px-3 py-1.5 rounded-lg font-black uppercase tracking-wider text-[11px] transition cursor-pointer flex items-center gap-1.5 ${
+              todoStatusFilter === 'overdue'
+                ? 'bg-rose-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <span>⚠️ Overdue</span>
+            <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono ${taskCounts.overdue > 0 ? 'bg-rose-950 text-rose-300 font-bold' : 'bg-white/20'}`}>
+              {taskCounts.overdue}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTodoStatusFilter('all')}
+            className={`px-3 py-1.5 rounded-lg font-black uppercase tracking-wider text-[11px] transition cursor-pointer flex items-center gap-1.5 ${
+              todoStatusFilter === 'all'
+                ? 'bg-slate-700 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <span>All Tasks</span>
+            <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-white/20 dark:bg-black/30 font-mono">
+              {taskCounts.all}
+            </span>
+          </button>
+        </div>
+
+        {resolveOverdueSuccess && (
+          <div className="mb-3 p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-400 font-bold flex items-center gap-2">
+            <CheckSquare className="h-4 w-4 shrink-0" />
+            <span>{resolveOverdueSuccess}</span>
+          </div>
+        )}
+
+        {displayedTasks.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 max-h-[300px] overflow-y-auto pr-1">
-            {pendingTasks.map((task) => {
+            {displayedTasks.map((task) => {
               const taskDate = new Date(task.dueDate);
               const today = new Date();
               today.setHours(0,0,0,0);
@@ -1465,7 +1527,7 @@ export default function CampaignAnalytics({
         ) : (
           <div className="py-12 text-center text-xs text-slate-600 dark:text-slate-400 border border-dashed border-slate-300 dark:border-slate-750 rounded-xl bg-slate-50 dark:bg-slate-850/20 space-y-1.5">
             <p className="font-semibold text-slate-900 dark:text-slate-300">🎉 All follow-up tasks completed!</p>
-            <p className="text-[10px] text-slate-600 dark:text-slate-400">When agents log action items on any candidate profile, they will appear here as daily checklist reminders.</p>
+            <p className="text-[10px] text-slate-600 dark:text-slate-400">When agents log action items on any candidate profile, they will appear here as daily checklist tasks.</p>
           </div>
         )}
       </div>

@@ -3,7 +3,7 @@ import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
 import { 
   X, Info, Sparkles, CheckCircle2, RefreshCw, AlertTriangle, 
   Calendar, Clipboard, Check, Star, ListTodo, History, 
-  Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Bell, Plus, PhoneCall, PhoneOff, Search, Copy
+  Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Plus, PhoneCall, PhoneOff, Search, Copy, FileText, Ban, ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getCountryFlagUrl, formatCandidateName, isDefaultExperience, extractExperienceFromRemarks, getEffectiveExperience, getEffectiveIntake } from '../utils';
@@ -13,7 +13,7 @@ import LeadWhatsAppChat from './LeadWhatsAppChat.tsx';
 interface LeadModalProps {
   lead: Lead;
   onClose: () => void;
-  onLeadUpdated: () => void;
+  onLeadUpdated: (updated?: Lead) => void;
   userRole: 'admin' | 'agent';
   currentAgentId: string;
   allLeads?: Lead[];
@@ -144,6 +144,80 @@ export default function LeadModal({
   const [tags, setTags] = useState<string[]>(initialLead.tags || []);
   const [tagInputVal, setTagInputVal] = useState('');
   const [tagError, setTagError] = useState<string | null>(null);
+
+  // Block Candidate States & Handlers
+  const [isBlockModalOpen, setIsBlockModalOpen] = useState(false);
+  const [blockReasonOption, setBlockReasonOption] = useState('No passport / Not eligible');
+  const [customBlockReason, setCustomBlockReason] = useState('');
+  const [isBlocking, setIsBlocking] = useState(false);
+
+  const handleBlockCandidate = async () => {
+    try {
+      setIsBlocking(true);
+      const finalReason = blockReasonOption === 'Custom' 
+        ? (customBlockReason.trim() || 'Blocked by Coordinator') 
+        : blockReasonOption;
+
+      const res = await fetch(`/api/leads/${lead.id}/block`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId
+        },
+        body: JSON.stringify({ reason: finalReason })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setIsBlockModalOpen(false);
+        setCustomBlockReason('');
+        if (data.lead) {
+          setLead(data.lead);
+          onLeadUpdated(data.lead);
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Failed to block candidate');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error blocking candidate');
+    } finally {
+      setIsBlocking(false);
+    }
+  };
+
+  const handleUnblockCandidate = async () => {
+    if (!confirm(`Are you sure you want to UNBLOCK ${lead.name || 'this candidate'}? Incoming messages will be re-enabled.`)) {
+      return;
+    }
+    try {
+      setIsBlocking(true);
+      const res = await fetch(`/api/leads/${lead.id}/unblock`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId
+        }
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.lead) {
+          setLead(data.lead);
+          onLeadUpdated(data.lead);
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Failed to unblock candidate');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error unblocking candidate');
+    } finally {
+      setIsBlocking(false);
+    }
+  };
 
   // Collect all unique existing tags dynamically from all current leads + bootstrap defaults (case-insensitive deduplicated)
   const allExistingTags = useMemo(() => {
@@ -282,6 +356,7 @@ export default function LeadModal({
   const [resumeUploading, setResumeUploading] = useState(false);
   const [passportError, setPassportError] = useState<string | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
+  const [isGeneratingCv, setIsGeneratingCv] = useState(false);
   
   // Call connection verification popup state variables
   const [showConnectionCheckModal, setShowConnectionCheckModal] = useState(false);
@@ -484,6 +559,32 @@ export default function LeadModal({
     }
   };
 
+  const handleGenerateDigitalCv = async () => {
+    setIsGeneratingCv(true);
+    setResumeError(null);
+    try {
+      const res = await fetch(`/api/leads/${lead.id}/generate-cv`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setFormFields(prev => ({
+          ...prev,
+          resumeUrl: data.resumeUrl,
+          resumeName: data.resumeName,
+          docResume: true
+        }));
+        onLeadUpdated();
+      } else {
+        setResumeError(data.error || 'Failed to generate digital CV');
+      }
+    } catch (err) {
+      setResumeError('Network connection failed. Could not generate CV.');
+    } finally {
+      setIsGeneratingCv(false);
+    }
+  };
+
   // Securely backups a document to candidate's deletedDocuments Recycle Bin before removing active pointers
   const deleteDocumentSecurely = (type: 'passport' | 'resume') => {
     const docUrl = type === 'passport' ? formFields.passportCopyUrl : formFields.resumeUrl;
@@ -598,6 +699,18 @@ export default function LeadModal({
       }
       if (customTasks) {
         payload.tasks = customTasks;
+      } else if (payload.callConnected === 'connected' && Array.isArray(lead.tasks)) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const hasPastTasks = lead.tasks.some(t => !t.completed && t.dueDate <= todayStr);
+        if (hasPastTasks) {
+          const resolvedTasks = lead.tasks.map(t => {
+            if (!t.completed && t.dueDate <= todayStr) {
+              return { ...t, completed: true };
+            }
+            return t;
+          });
+          payload.tasks = resolvedTasks;
+        }
       }
       if (customTimeline) {
         payload.timeline = customTimeline;
@@ -612,7 +725,7 @@ export default function LeadModal({
         },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setLead(data);
         setFormFields(prev => ({
@@ -623,9 +736,12 @@ export default function LeadModal({
         onLeadUpdated();
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 2500);
+      } else {
+        alert(data.error || 'Failed to update lead details. Please try again.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to update lead fields', err);
+      alert(err?.message || 'Network error while saving lead. Please try again.');
     } finally {
       setSavingForm(false);
     }
@@ -723,10 +839,6 @@ export default function LeadModal({
       }
     ];
 
-    // Auto-sync reminder bell with task completion status
-    const hasPending = updatedTasks.some(t => !t.completed);
-    const updatedReminderEnabled = hasPending;
-
     try {
       const res = await fetch(`/api/leads/${lead.id}`, {
         method: 'PUT',
@@ -737,14 +849,12 @@ export default function LeadModal({
         },
         body: JSON.stringify({ 
           tasks: updatedTasks, 
-          timeline: updatedTimeline,
-          reminderEnabled: updatedReminderEnabled
+          timeline: updatedTimeline
         })
       });
       const data = await res.json();
       if (res.ok) {
         setLead(data);
-        setFormFields(prev => ({ ...prev, reminderEnabled: updatedReminderEnabled }));
         onLeadUpdated();
       }
     } catch (err) {
@@ -769,10 +879,6 @@ export default function LeadModal({
       }
     ];
 
-    // Auto-disable reminder bell if all remaining tasks are completed
-    const hasPending = updatedTasks.some(t => !t.completed);
-    const updatedReminderEnabled = hasPending;
-
     try {
       const res = await fetch(`/api/leads/${lead.id}`, {
         method: 'PUT',
@@ -783,14 +889,12 @@ export default function LeadModal({
         },
         body: JSON.stringify({ 
           tasks: updatedTasks, 
-          timeline: updatedTimeline,
-          reminderEnabled: updatedReminderEnabled
+          timeline: updatedTimeline
         })
       });
       const data = await res.json();
       if (res.ok) {
         setLead(data);
-        setFormFields(prev => ({ ...prev, reminderEnabled: updatedReminderEnabled }));
         onLeadUpdated();
       }
     } catch (err) {
@@ -840,6 +944,12 @@ export default function LeadModal({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-black text-slate-100 dark:text-white text-xl tracking-tight uppercase">{formatCandidateName(lead.name)}</h3>
+                {lead.isBlocked && (
+                  <span className="text-xs bg-red-600 text-white font-black px-3 py-0.5 rounded-full uppercase flex items-center gap-1 shadow-sm tracking-wider">
+                    <Ban className="h-3.5 w-3.5 stroke-[2.5]" />
+                    BLOCKED
+                  </span>
+                )}
                 <span className={`text-xs font-black px-3 py-0.5 rounded-full uppercase border ${getFitStyle(lead.fitScore)}`}>
                   {lead.fitScore} Fit
                 </span>
@@ -955,45 +1065,30 @@ export default function LeadModal({
               </select>
             </div>
 
-            {/* Smaller Reminder Button matching Stage selection style but smaller */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-950 py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs shrink-0">
-              <span className="text-xs uppercase font-extrabold text-slate-500 dark:text-slate-400 font-mono tracking-wider flex items-center gap-1">
-                <Bell className={`h-3.5 w-3.5 ${formFields.reminderEnabled ? 'text-indigo-600 dark:text-indigo-400 fill-indigo-600' : 'text-slate-400'}`} />
-                <span>REMINDER:</span>
-              </span>
+            {/* Block / Unblock Action Button */}
+            {lead.isBlocked ? (
               <button
                 type="button"
-                onClick={async () => {
-                  const newVal = !formFields.reminderEnabled;
-                  setFormFields(prev => ({ ...prev, reminderEnabled: newVal }));
-                  try {
-                    const actorRole = userRole;
-                    const actorId = currentAgentId;
-                    const res = await fetch(`/api/leads/${lead.id}`, {
-                      method: 'PUT',
-                      headers: { 
-                        'Content-Type': 'application/json',
-                        'x-user-role': actorRole,
-                        'x-agent-id': actorId
-                      },
-                      body: JSON.stringify({ ...formFields, reminderEnabled: newVal })
-                    });
-                    if (res.ok) {
-                      const updatedLead = await res.json();
-                      setLead(updatedLead);
-                      onLeadUpdated();
-                    }
-                  } catch (err) {
-                    console.error(err);
-                  }
-                }}
-                className={`text-xs sm:text-[13px] font-black focus:outline-none cursor-pointer font-sans transition-all whitespace-nowrap ${
-                  formFields.reminderEnabled ? 'text-indigo-600 dark:text-indigo-400 font-extrabold' : 'text-slate-500'
-                }`}
+                onClick={handleUnblockCandidate}
+                disabled={isBlocking}
+                className="flex items-center justify-center gap-1.5 py-2 px-3.5 rounded-xl border border-red-500/60 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 font-black text-xs uppercase tracking-wider transition-all duration-200 select-none shrink-0 cursor-pointer"
+                title="Unblock candidate to allow incoming messages"
               >
-                {formFields.reminderEnabled ? 'ON' : 'OFF'}
+                <Ban className="h-4 w-4" />
+                <span>UNBLOCK</span>
               </button>
-            </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsBlockModalOpen(true)}
+                disabled={isBlocking}
+                className="flex items-center justify-center gap-1.5 py-2 px-3.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:border-red-500 bg-slate-100 hover:bg-red-50 dark:bg-slate-800 dark:hover:bg-red-950/30 text-slate-700 hover:text-red-600 dark:text-slate-300 dark:hover:text-red-400 font-black text-xs uppercase tracking-wider transition-all duration-200 select-none shrink-0 cursor-pointer"
+                title="Block candidate from sending incoming WhatsApp messages"
+              >
+                <Ban className="h-4 w-4" />
+                <span>BLOCK</span>
+              </button>
+            )}
 
             {/* Top-Right Save Changes Button */}
             <button
@@ -1037,6 +1132,32 @@ export default function LeadModal({
             </button>
           </div>
         </div>
+
+        {/* Prominent Blocked Banner */}
+        {lead.isBlocked && (
+          <div className="bg-red-500/15 border-b border-red-500/30 px-6 py-2.5 flex items-center justify-between gap-3 text-red-700 dark:text-red-300 shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <ShieldAlert className="h-5 w-5 text-red-500 shrink-0" />
+              <div className="text-xs">
+                <span className="font-black uppercase tracking-wider text-red-600 dark:text-red-400">Candidate is Blocked: </span>
+                <span className="font-medium text-slate-800 dark:text-slate-200">{lead.blockedReason || 'Blocked by Coordinator'}</span>
+                {lead.blockedAt && (
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 ml-2">
+                    ({new Date(lead.blockedAt).toLocaleDateString()})
+                  </span>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleUnblockCandidate}
+              disabled={isBlocking}
+              className="text-xs font-black uppercase tracking-wider text-red-700 dark:text-red-300 bg-red-100 hover:bg-red-200 dark:bg-red-950/80 dark:hover:bg-red-900 border border-red-300 dark:border-red-800 px-3 py-1 rounded-lg transition shrink-0 cursor-pointer"
+            >
+              Unblock Candidate
+            </button>
+          </div>
+        )}
 
         {/* Double Column Area */}
         <div className="flex-1 flex overflow-hidden">
@@ -1591,28 +1712,50 @@ export default function LeadModal({
                                   )}
                                 </div>
                               ) : (
-                                <label className="flex flex-col items-center justify-center py-4 bg-white dark:bg-slate-900 hover:bg-slate-100/50 dark:hover:bg-slate-800/40 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl cursor-pointer transition-all">
-                                  {resumeUploading ? (
-                                    <div className="flex flex-col items-center gap-1.5 text-slate-500">
-                                      <RefreshCw className="h-4 w-4 animate-spin text-indigo-500" />
-                                      <span className="text-[10px] font-bold uppercase tracking-wider">Uploading...</span>
-                                    </div>
-                                  ) : (
-                                    <div className="flex flex-col items-center gap-1 text-center px-2">
-                                      <span className="text-indigo-600 dark:text-indigo-400 font-extrabold text-[10px] uppercase tracking-wider">
-                                        Select Resume/CV
-                                      </span>
-                                      <span className="text-[9px] text-slate-400 font-medium">PDF, Word, Images up to 3MB</span>
-                                    </div>
-                                  )}
-                                  <input
-                                    type="file"
-                                    accept=".pdf,.doc,.docx,image/*"
-                                    className="hidden"
-                                    disabled={resumeUploading}
-                                    onChange={(e) => handleFileUpload(e, 'resume')}
-                                  />
-                                </label>
+                                <div className="space-y-2">
+                                  <label className="flex flex-col items-center justify-center py-3 bg-white dark:bg-slate-900 hover:bg-slate-100/50 dark:hover:bg-slate-800/40 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl cursor-pointer transition-all">
+                                    {resumeUploading ? (
+                                      <div className="flex flex-col items-center gap-1.5 text-slate-500">
+                                        <RefreshCw className="h-4 w-4 animate-spin text-indigo-500" />
+                                        <span className="text-[10px] font-bold uppercase tracking-wider">Uploading...</span>
+                                      </div>
+                                    ) : (
+                                      <div className="flex flex-col items-center gap-1 text-center px-2">
+                                        <span className="text-indigo-600 dark:text-indigo-400 font-extrabold text-[10px] uppercase tracking-wider">
+                                          Select Resume/CV File
+                                        </span>
+                                        <span className="text-[9px] text-slate-400 font-medium">PDF, Word, Images up to 3MB</span>
+                                      </div>
+                                    )}
+                                    <input
+                                      type="file"
+                                      accept=".pdf,.doc,.docx,image/*"
+                                      className="hidden"
+                                      disabled={resumeUploading || isGeneratingCv}
+                                      onChange={(e) => handleFileUpload(e, 'resume')}
+                                    />
+                                  </label>
+
+                                  <button
+                                    type="button"
+                                    onClick={handleGenerateDigitalCv}
+                                    disabled={resumeUploading || isGeneratingCv}
+                                    className="w-full py-2 px-3 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 rounded-xl text-[10px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-3xs disabled:opacity-50"
+                                    title="Generate an official CGP Candidate CV PDF from this candidate's credentials"
+                                  >
+                                    {isGeneratingCv ? (
+                                      <>
+                                        <RefreshCw className="h-3 w-3 animate-spin text-indigo-500" />
+                                        <span>Synthesizing Official CV PDF...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Sparkles className="h-3 w-3 text-indigo-500 shrink-0" />
+                                        <span>Generate Digital CV from Profile</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
                               )}
 
                               {resumeError && (
@@ -2270,8 +2413,8 @@ export default function LeadModal({
                     ) : (
                       <div className="text-center py-10 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-400 space-y-1.5 shadow-2xs">
                         <ListTodo className="h-8 w-8 text-slate-400 dark:text-slate-600 mx-auto stroke-[1.5]" />
-                        <p className="text-xs font-black text-slate-900 dark:text-slate-300">No active follow-up reminders scheduled.</p>
-                        <p className="text-[10px] text-slate-600 dark:text-slate-400 font-semibold">Add tasks above to remind your telecaller of client updates.</p>
+                        <p className="text-xs font-black text-slate-900 dark:text-slate-300">No active follow-up tasks scheduled.</p>
+                        <p className="text-[10px] text-slate-600 dark:text-slate-400 font-semibold">Add tasks above to assign action items for this candidate.</p>
                       </div>
                     )}
                   </div>
@@ -2789,6 +2932,94 @@ export default function LeadModal({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Block Candidate Confirmation Modal */}
+      {isBlockModalOpen && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center z-[120] p-4 text-left">
+          <div className="bg-white dark:bg-[#111b21] rounded-2xl shadow-2xl border border-red-200 dark:border-red-950/80 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-5 py-4 bg-red-500/10 border-b border-red-500/20 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                <Ban className="h-5 w-5" />
+                <h3 className="text-base font-black uppercase tracking-tight">Block Candidate</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBlockModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                Blocking <strong className="text-slate-900 dark:text-white uppercase font-bold">{lead.name || 'this candidate'}</strong> ({lead.phone}) will mark them as <strong className="text-red-600">BLOCKED</strong> across the CRM. All future incoming WhatsApp messages will be automatically rejected and dropped.
+              </p>
+
+              <div className="space-y-2">
+                <label className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Select Reason for Blocking:
+                </label>
+                {[
+                  'No passport / Not interested in making passport',
+                  'Harassment / Abusive messages',
+                  'Spam / Repeated irrelevant inquiries',
+                  'Disqualified criteria (Over-age / Medical / ECR)',
+                  'Custom'
+                ].map((opt) => (
+                  <label
+                    key={opt}
+                    className={`flex items-center gap-2.5 p-2 rounded-xl border text-xs cursor-pointer transition ${
+                      blockReasonOption === opt
+                        ? 'border-red-500 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 font-bold'
+                        : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="lead_modal_block_reason"
+                      checked={blockReasonOption === opt}
+                      onChange={() => setBlockReasonOption(opt)}
+                      className="text-red-600 focus:ring-red-500"
+                    />
+                    <span>{opt}</span>
+                  </label>
+                ))}
+
+                {blockReasonOption === 'Custom' && (
+                  <input
+                    type="text"
+                    value={customBlockReason}
+                    onChange={(e) => setCustomBlockReason(e.target.value)}
+                    placeholder="Enter specific block reason..."
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-red-500"
+                    autoFocus
+                  />
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsBlockModalOpen(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBlockCandidate}
+                  disabled={isBlocking}
+                  className="px-5 py-2 text-xs font-black text-white bg-red-600 hover:bg-red-700 rounded-xl transition shadow-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isBlocking ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
+                  <span>Confirm & Block</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }

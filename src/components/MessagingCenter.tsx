@@ -6,7 +6,7 @@ import {
   ExternalLink, Sparkles, Send, CheckCircle2, ChevronRight, 
   ArrowLeft, Clock, Briefcase, RefreshCw, Layers, CheckCheck,
   UserCheck, Plus, AlertCircle, Save, ArrowRightLeft, Shield,
-  GraduationCap, Globe, Wrench, FileText, Check, Tag
+  GraduationCap, Globe, Wrench, FileText, Check, Tag, Ban
 } from 'lucide-react';
 import LeadWhatsAppChat from './LeadWhatsAppChat.tsx';
 import { getCountryFlagUrl, formatCandidateName } from '../utils.ts';
@@ -64,6 +64,7 @@ export default function MessagingCenter({
   const [showLeadDetailsPanel, setShowLeadDetailsPanel] = useState(userRole === 'admin');
   const [isSavingLead, setIsSavingLead] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+  const [saveErrorMsg, setSaveErrorMsg] = useState<string | null>(null);
   const [tagAddedToast, setTagAddedToast] = useState<string | null>(null);
   const [showSimulatorModal, setShowSimulatorModal] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -437,29 +438,6 @@ export default function MessagingCenter({
     }
   }, [currentChatLead?.id]);
 
-  // Mark as read when active lead changes in MessagingCenter
-  useEffect(() => {
-    if (selectedLeadId) {
-      const activeLead = leads.find(l => l.id === selectedLeadId);
-      const hasUnread = activeLead && (activeLead.messages || []).some(m => m.sender === 'lead' && m.status !== 'read');
-      
-      if (hasUnread) {
-        fetch(`/api/leads/${selectedLeadId}/read`, { method: 'POST' })
-          .then(async (res) => {
-            if (res.ok) {
-              const updatedLeadRes = await fetch(`/api/leads/${selectedLeadId}`);
-              if (updatedLeadRes.ok) {
-                const updatedLead = await updatedLeadRes.json();
-                if (onLeadUpdated) {
-                  onLeadUpdated(updatedLead);
-                }
-              }
-            }
-          })
-          .catch(err => console.error('Error marking as read in MessagingCenter:', err));
-      }
-    }
-  }, [selectedLeadId, leads, onLeadUpdated]);
 
   // Handle lead item click in list
   const handleSelectChat = (lead: Lead) => {
@@ -522,9 +500,6 @@ export default function MessagingCenter({
           onLeadUpdated(updatedLead);
         }
       }
-      if (onRefreshData) {
-        onRefreshData();
-      }
     } catch (err) {
       console.error('Error refreshing active chat:', err);
     } finally {
@@ -537,6 +512,7 @@ export default function MessagingCenter({
     if (!currentChatLead) return;
     setIsSavingLead(true);
     setSaveSuccessMsg(null);
+    setSaveErrorMsg(null);
 
     const coordToAssign = targetCoordinator || leadFormData.assignedTo;
 
@@ -566,29 +542,33 @@ export default function MessagingCenter({
 
       const res = await fetch(`/api/leads/${currentChatLead.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId,
+          'x-assigned-from': 'whatsapp_chat_menu'
+        },
         body: JSON.stringify(updatedPayload)
       });
 
       if (!res.ok) {
-        throw new Error('Failed to update lead information');
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to update lead information. Server returned an error.');
       }
 
       const savedLead = await res.json();
 
-      // Trigger callbacks
+      // Trigger instant in-place state update
       if (onLeadUpdated) {
         onLeadUpdated(savedLead);
-      }
-      if (onRefreshData) {
-        onRefreshData();
       }
 
       setSaveSuccessMsg(`Lead successfully updated & transferred to ${coordToAssign || 'Coordinator'}!`);
       setTimeout(() => setSaveSuccessMsg(null), 4000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving lead from messaging:', err);
-      alert('Error updating lead. Please try again.');
+      setSaveErrorMsg(err?.message || 'Error updating lead. Please try again.');
+      setTimeout(() => setSaveErrorMsg(null), 6000);
     } finally {
       setIsSavingLead(false);
     }
@@ -939,9 +919,20 @@ export default function MessagingCenter({
                     {/* Chat Thread Details */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1 mb-0.5">
-                        <h4 className="text-xs font-black text-slate-100 dark:text-slate-100 truncate uppercase tracking-tight">
-                          {formatCandidateName(lead.name)}
-                        </h4>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <h4 className="text-xs font-black text-slate-100 dark:text-slate-100 truncate uppercase tracking-tight">
+                            {formatCandidateName(lead.name)}
+                          </h4>
+                          {lead.isBlocked && (
+                            <span 
+                              className="shrink-0 text-[8.5px] font-black text-white bg-red-600 px-1.5 py-0.2 rounded-full flex items-center gap-0.5 shadow-xs uppercase tracking-wider"
+                              title={`BLOCKED: ${lead.blockedReason || 'Blocked candidate'}`}
+                            >
+                              <Ban className="h-2 w-2 stroke-[2.5]" />
+                              BLOCKED
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[9.5px] font-mono text-slate-500 dark:text-slate-400 shrink-0 font-medium">
                           {formatTime(latestMsg?.timestamp)}
                         </span>
@@ -1163,10 +1154,10 @@ export default function MessagingCenter({
                 {/* Chat Feed */}
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <LeadWhatsAppChat
+                    key={currentChatLead.id}
                     lead={currentChatLead}
                     onLeadUpdated={(updated) => {
                       if (onLeadUpdated) onLeadUpdated(updated);
-                      if (onRefreshData) onRefreshData();
                     }}
                     userRole={userRole}
                     currentAgentId={currentAgentId}
@@ -1222,6 +1213,14 @@ export default function MessagingCenter({
                       <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/80 border-b border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center gap-2">
                         <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
                         <span className="text-[11px] leading-tight">{saveSuccessMsg}</span>
+                      </div>
+                    )}
+
+                    {/* Error Alert Banner for Save */}
+                    {saveErrorMsg && (
+                      <div className="p-2.5 bg-rose-50 dark:bg-rose-950/80 border-b border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300 text-xs font-bold flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                        <span className="text-[11px] leading-tight">{saveErrorMsg}</span>
                       </div>
                     )}
 

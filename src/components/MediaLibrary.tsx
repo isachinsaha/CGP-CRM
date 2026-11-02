@@ -47,11 +47,15 @@ export default function MediaLibrary({ currentUser, onSelect, isModal = false }:
       setLoading(true);
       setError(null);
       const res = await fetch('/api/media');
-      const data = await res.json();
-      if (data.success) {
-        setItems(data.items || []);
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+        const data = await res.json();
+        if (data.success) {
+          setItems(data.items || []);
+        } else {
+          throw new Error(data.error || 'Failed to fetch media');
+        }
       } else {
-        throw new Error(data.error || 'Failed to fetch media');
+        console.warn('[MediaLibrary] Server is booting or offline, skipping media load');
       }
     } catch (err: any) {
       console.error('Error fetching media:', err);

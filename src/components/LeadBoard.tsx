@@ -18,7 +18,9 @@ import {
   Search,
   Zap,
   Snowflake,
-  CheckCircle2
+  CheckCircle2,
+  ExternalLink,
+  Ban
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { getCountryFlagUrl, formatCandidateName, getEffectiveIntake } from '../utils';
@@ -661,14 +663,48 @@ export default function LeadBoard({
 
           <div className="flex items-center gap-1.5 shrink-0">
             {lead.docResume && (
-              <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/30 border border-emerald-900/40 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs">
-                CV ✓
-              </span>
+              lead.resumeUrl ? (
+                <a
+                  href={lead.resumeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  title={`View ${formatCandidateName(String(lead.name || 'Candidate'))}'s CV`}
+                  className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-800/60 hover:border-emerald-700 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  <span>CV ✓</span>
+                  <ExternalLink className="h-2.5 w-2.5 opacity-80" />
+                </a>
+              ) : (
+                <span 
+                  title="Resume marked as received offline (Click card to view details or generate CV)"
+                  className="text-[11px] font-bold text-emerald-400/80 bg-emerald-950/30 border border-emerald-900/40 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs"
+                >
+                  CV ✓
+                </span>
+              )
             )}
             {lead.docPassportCopy && (
-              <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/30 border border-emerald-900/40 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs">
-                Passport ✓
-              </span>
+              lead.passportCopyUrl ? (
+                <a
+                  href={lead.passportCopyUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  title={`View passport for ${formatCandidateName(String(lead.name || 'Candidate'))}`}
+                  className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-800/60 hover:border-emerald-700 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Passport ✓</span>
+                  <ExternalLink className="h-2.5 w-2.5 opacity-80" />
+                </a>
+              ) : (
+                <span 
+                  title="Passport marked as received offline"
+                  className="text-[11px] font-bold text-emerald-400/80 bg-emerald-950/30 border border-emerald-900/40 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs"
+                >
+                  Passport ✓
+                </span>
+              )
             )}
           </div>
         </div>
@@ -676,9 +712,20 @@ export default function LeadBoard({
         {/* Name, Stars & Message Count Section */}
         <div className="flex items-start justify-between gap-1.5 mb-1.5">
           <div className="min-w-0 flex-1">
-            <h4 className="font-extrabold text-slate-100 text-[15px] sm:text-[16px] leading-tight tracking-wide uppercase font-poppins truncate" title={lead.name}>
-              {formatCandidateName(String(lead.name || 'Candidate'))}
-            </h4>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <h4 className="font-extrabold text-slate-100 text-[15px] sm:text-[16px] leading-tight tracking-wide uppercase font-poppins truncate" title={lead.name}>
+                {formatCandidateName(String(lead.name || 'Candidate'))}
+              </h4>
+              {lead.isBlocked && (
+                <span 
+                  className="shrink-0 text-[9px] font-black text-white bg-red-600 px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs uppercase tracking-wider"
+                  title={`BLOCKED: ${lead.blockedReason || 'Blocked candidate'}`}
+                >
+                  <Ban className="h-2.5 w-2.5 stroke-[2.5]" />
+                  BLOCKED
+                </span>
+              )}
+            </div>
           </div>
           
           <div className="flex items-center gap-1.5 shrink-0">

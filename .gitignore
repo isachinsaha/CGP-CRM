@@ -1,8 +1,37 @@
+# Dependencies
 node_modules/
+/.pnp
+.pnp.js
+
+# Testing and coverage
+coverage/
+
+# Production build artifacts
 build/
 dist/
-coverage/
-.DS_Store
-*.log
+
+# Environment files
 .env*
 !.env.example
+
+# Dynamic runtime data, database dumps, backups, and user uploads
+data/
+uploads/
+*.bak
+*.json.bak
+*.xlsx
+*.jsonl
+
+# Temporary assets, studio artifacts, and chat attachments
+public/assets/aistudio/
+.aistudio/
+assets/
+bun.lock
+
+# Logs and OS files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db

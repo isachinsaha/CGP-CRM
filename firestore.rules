@@ -59,6 +59,16 @@ service cloud.firestore {
       allow write: if isValidId(id);
     }
 
+    // Wallet backups & point-in-time snapshots
+    match /wallet_backups/{id} {
+      allow read, write: if isValidId(id);
+    }
+
+    // Wallet immutable audit ledger
+    match /wallet_ledger/{id} {
+      allow read, write: if isValidId(id);
+    }
+
     // Incentive rules collection
     match /incentive_rules/{id} {
       allow read: if true;
@@ -75,13 +85,19 @@ service cloud.firestore {
       allow delete: if true; // Allow deleting templates
     }
 
+    function isValidFileName(id) {
+      return id is string && id.size() <= 256;
+    }
+
     // File backups & chunks
     match /file_backups/{id} {
-      allow read, write: if isValidId(id);
+      allow read: if true;
+      allow write: if isValidFileName(id);
     }
 
     match /file_backups/{fileName}/file_chunks/{id} {
-      allow read, write: if isValidId(fileName) && isValidId(id);
+      allow read: if true;
+      allow write: if isValidFileName(fileName) && isValidFileName(id);
     }
 
     // Media library collection
@@ -98,6 +114,11 @@ service cloud.firestore {
 
     // Metadata collection
     match /metadata/{id} {
+      allow read, write: if isValidId(id);
+    }
+
+    // Settings collection (e.g. WhatsApp auto-reply, system configurations)
+    match /settings/{id} {
       allow read, write: if isValidId(id);
     }
   }

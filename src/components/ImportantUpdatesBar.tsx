@@ -69,13 +69,13 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
     };
   }, []);
 
-  // Poll for updates every 90 seconds only when tab is visible
+  // Poll for updates every 10 minutes only when tab is visible (instant sync is handled via events)
   useEffect(() => {
     const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         fetchUpdates();
       }
-    }, 90000);
+    }, 600000);
     return () => clearInterval(interval);
   }, []);
 

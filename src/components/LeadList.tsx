@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
-import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Bell, Download, Sparkles, TrendingUp, X, UploadCloud, MessageSquare } from 'lucide-react';
+import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Download, Sparkles, TrendingUp, X, UploadCloud, MessageSquare, FileText, Ban } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { getCountryFlagUrl, formatCandidateName, getEffectiveIntake } from '../utils';
 import { SearchableSelect } from './SearchableSelect';
@@ -217,13 +217,28 @@ export default function LeadList({
           throw new Error("No valid candidate rows found. Ensure columns like 'Applicant Name' and 'Phone' are present.");
         }
 
+        const savedSession = (() => {
+          try {
+            const s = localStorage.getItem('cgp_crm_session');
+            return s ? JSON.parse(s) : null;
+          } catch {
+            return null;
+          }
+        })();
+
         const response = await fetch('/api/leads/bulk', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'x-user-role': userRole
+            'x-user-role': userRole,
+            'x-agent-id': savedSession?.username || 'admin',
+            ...(savedSession?.token ? { 'Authorization': `Bearer ${savedSession.token}` } : {})
           },
-          body: JSON.stringify({ leads: parsedLeads })
+          body: JSON.stringify({ 
+            leads: parsedLeads,
+            userRole,
+            agentId: savedSession?.username || 'admin'
+          })
         });
 
         if (!response.ok) {
@@ -413,8 +428,50 @@ export default function LeadList({
   };
 
   // Whole Backup Master XLSX Download - Downloads 100% of the entire database with all sheets
-  const handleDownloadWholeBackupXLSX = () => {
-    window.location.href = '/api/backup/full-xlsx';
+  const handleDownloadWholeBackupXLSX = async () => {
+    try {
+      const sessionStr = localStorage.getItem('cgp_crm_session');
+      let sessionUser: any = null;
+      try { if (sessionStr) sessionUser = JSON.parse(sessionStr); } catch {}
+      const role = sessionUser?.role || userRole || 'admin';
+      const agent = sessionUser?.username || currentAgentId || 'admin';
+      const url = `/api/backup/full-xlsx?role=${encodeURIComponent(role)}&agentId=${encodeURIComponent(agent)}${sessionUser?.token ? `&token=${encodeURIComponent(sessionUser.token)}` : ''}`;
+
+      const res = await fetch(url, {
+        headers: {
+          'x-user-role': role,
+          'x-agent-id': agent
+        }
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Download failed with HTTP status ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const contentDisposition = res.headers.get('content-disposition');
+      let finalName = `CGP_CRM_COMPLETE_MASTER_BACKUP_${new Date().toISOString().split('T')[0]}.xlsx`;
+      if (contentDisposition && contentDisposition.includes('filename=')) {
+        const match = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) {
+          finalName = match[1];
+        }
+      }
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = finalName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err: any) {
+      console.error('Master XLSX download failed:', err);
+      // Fallback
+      window.location.href = `/api/backup/full-xlsx?role=admin&agentId=admin`;
+    }
   };
 
   const handleGenerateAIReport = async () => {
@@ -708,8 +765,8 @@ export default function LeadList({
     }
     return leads.filter(lead => {
       // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
-      // OR leads that have not been intaken yet
-      if (!getEffectiveIntake(lead)) {
+      // OR leads that have not been intaken yet, unless actively searching
+      if (!searchQuery && !getEffectiveIntake(lead)) {
         return false;
       }
 
@@ -849,7 +906,7 @@ export default function LeadList({
     return filteredLeads.slice(startIndex, startIndex + itemsPerPage);
   }, [filteredLeads, currentPage, onPageChange, leads]);
 
-  // Bulk Re-assignment API Caller
+  // Bulk Re-assignment API Caller (High-performance single atomic batch call)
   const handleBulkReassign = async () => {
     if (!bulkCoordinator) {
       alert('Please select a coordinator to assign to.');
@@ -862,26 +919,32 @@ export default function LeadList({
     
     setIsBulkUpdating(true);
     try {
-      await Promise.all(
-        selectedLeadIds.map(async (id) => {
-          await fetch(`/api/leads/${id}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-user-role': userRole,
-              'x-agent-id': currentAgentId
-            },
-            body: JSON.stringify({ assignedTo: bulkCoordinator })
-          });
+      const res = await fetch('/api/leads/bulk-assign', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId
+        },
+        body: JSON.stringify({
+          leadIds: selectedLeadIds,
+          assignedTo: bulkCoordinator
         })
-      );
-      
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to re-assign selected leads');
+      }
+
+      const count = selectedLeadIds.length;
       setSelectedLeadIds([]);
       setBulkCoordinator('');
       onRefreshData();
-    } catch (err) {
-      console.error(err);
-      alert('Failed to re-assign some selected leads.');
+      console.log(`[Bulk Re-assignment] Successfully assigned ${count} leads.`);
+    } catch (err: any) {
+      console.error('[Bulk Re-assignment] Error:', err);
+      alert(err.message || 'Failed to re-assign selected leads. Please try again.');
     } finally {
       setIsBulkUpdating(false);
     }
@@ -901,8 +964,10 @@ export default function LeadList({
         body: JSON.stringify(fields)
       });
       if (res.ok) {
-        // Trigger silent state updates inside parent
-        onUpdateStage(id, leads.find(l => l.id === id)?.stage || 'new');
+        onRefreshData();
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        console.error('Spreadsheet inline update rejected:', errJson);
       }
     } catch (err) {
       console.error('Spreadsheet inline update failed', err);
@@ -1506,7 +1571,7 @@ export default function LeadList({
               disabled={isBulkUpdating || !bulkCoordinator}
               className="px-4 py-1.5 bg-accent-purple hover:bg-purple-600 disabled:bg-slate-800 disabled:text-slate-500 text-white font-extrabold text-xs rounded-lg shadow-sm transition-all cursor-pointer"
             >
-              {isBulkUpdating ? 'Updating...' : 'Apply Re-assignment'}
+              {isBulkUpdating ? 'Assigning...' : `Assign ${selectedLeadIds.length} Candidate${selectedLeadIds.length > 1 ? 's' : ''}`}
             </button>
             <button
               type="button"
@@ -1617,6 +1682,15 @@ export default function LeadList({
                         <div>
                           <div className={`font-extrabold text-emerald-800 dark:text-emerald-400 uppercase tracking-normal truncate ${!isInlineEdit && 'group-hover:text-accent-emerald transition-colors'} flex items-center gap-1.5 font-sans`}>
                             <span className="truncate">{formatCandidateName(lead.name)}</span>
+                            {lead.isBlocked && (
+                              <span 
+                                className="shrink-0 text-[9px] font-black text-white bg-red-600 px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow-xs tracking-wider"
+                                title={`BLOCKED: ${lead.blockedReason || 'Blocked candidate'}`}
+                              >
+                                <Ban className="h-2.5 w-2.5 stroke-[2.5]" />
+                                BLOCKED
+                              </span>
+                            )}
                             {(() => {
                               const inboundCount = (lead.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
                               if (inboundCount > 0) {
@@ -1632,20 +1706,6 @@ export default function LeadList({
                               }
                               return null;
                             })()}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleInlineUpdate(lead.id, { reminderEnabled: !lead.reminderEnabled });
-                              }}
-                              className={`p-1 rounded-full transition-all shrink-0 ${
-                                lead.reminderEnabled 
-                                  ? 'text-accent-purple bg-purple-950/40 hover:bg-purple-900/40 scale-110' 
-                                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-850'
-                              }`}
-                              title={lead.reminderEnabled ? "Active Follow-up Reminder ON (Click to Turn Off)" : "Turn On Follow-up Reminder"}
-                            >
-                              <Bell className={`h-3 w-3 ${lead.reminderEnabled ? 'fill-accent-purple animate-bounce' : ''}`} />
-                            </button>
                           </div>
                           <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-mono font-bold mt-0.5">{lead.phone}</div>
 
@@ -1858,6 +1918,19 @@ export default function LeadList({
                           {isSavingThis && (
                             <RefreshCw className="h-3 w-3 text-accent-emerald animate-spin mr-1 shrink-0" />
                           )}
+                          
+                          {lead.resumeUrl ? (
+                            <a
+                              href={lead.resumeUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="p-1 px-1.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/50 rounded transition-colors cursor-pointer"
+                              title={`View ${formatCandidateName(String(lead.name || 'Candidate'))}'s CV`}
+                            >
+                              <FileText className="h-4 w-4" />
+                            </a>
+                          ) : null}
                           
                           <button
                             type="button"

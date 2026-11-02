@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { SearchableSelect } from './SearchableSelect';
+import { MultiSearchableSelect } from './MultiSearchableSelect';
 import { 
   Sparkles, 
   Send, 
@@ -23,7 +24,13 @@ import {
   Sliders,
   ChevronRight,
   HelpCircle,
-  FileText
+  FileText,
+  Wand2,
+  Tag,
+  Layers,
+  X,
+  SlidersHorizontal,
+  Bot
 } from 'lucide-react';
 import { Lead, Job } from '../types';
 
@@ -84,14 +91,21 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
   const [countryFilter, setCountryFilter] = useState('All');
   const [coordinatorFilter, setCoordinatorFilter] = useState('All');
   const [projectFilter, setProjectFilter] = useState('All');
-  const [positionFilter, setPositionFilter] = useState('All');
-  const [tagFilter, setTagFilter] = useState('All');
+  // Multiple tags & positions for targeted bulk messaging
+  const [selectedPositions, setSelectedPositions] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [fitScoreFilter, setFitScoreFilter] = useState('All');
   const [genderFilter, setGenderFilter] = useState('All');
   const [remarksFilter, setRemarksFilter] = useState('All');
   const [dateFilter, setDateFilter] = useState('All');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+
+  // Smart AI Vacancy Configuration States
+  const [isAiSuggestingVacancy, setIsAiSuggestingVacancy] = useState(false);
+  const [aiVacancySuggestion, setAiVacancySuggestion] = useState<any | null>(null);
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [useDynamicCandidatePosition, setUseDynamicCandidatePosition] = useState(true);
 
   // Loaded metadata & coordinators list
   const [allCoordinators, setAllCoordinators] = useState<any[]>([]);
@@ -270,21 +284,31 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
     }))
   ], [targetProjectsList]);
 
-  const positionOptions = useMemo(() => [
-    { value: 'All', label: 'All Target Positions' },
-    ...targetPositionsList.filter(p => p !== 'All').map(pos => ({
-      value: pos,
-      label: `💼 ${pos.toUpperCase()}`
-    }))
-  ], [targetPositionsList]);
+  const positionMultiOptions = useMemo(() => {
+    return targetPositionsList
+      .filter(p => p !== 'All')
+      .map(pos => {
+        const count = matchedCandidates.filter(l => l.position && l.position.trim().toLowerCase() === pos.trim().toLowerCase()).length;
+        return {
+          value: pos,
+          label: `💼 ${pos.toUpperCase()}`,
+          count
+        };
+      });
+  }, [targetPositionsList, matchedCandidates]);
 
-  const tagOptions = useMemo(() => [
-    { value: 'All', label: 'All Tags' },
-    ...availableTagsList.filter(t => t !== 'All').map(tag => ({
-      value: tag,
-      label: `🏷️ ${tag}`
-    }))
-  ], [availableTagsList]);
+  const tagMultiOptions = useMemo(() => {
+    return availableTagsList
+      .filter(t => t !== 'All')
+      .map(tag => {
+        const count = matchedCandidates.filter(l => l.tags && l.tags.some(t => t.trim().toLowerCase() === tag.trim().toLowerCase())).length;
+        return {
+          value: tag,
+          label: `🏷️ ${tag}`,
+          count
+        };
+      });
+  }, [availableTagsList, matchedCandidates]);
 
   const fitScoreOptions = useMemo(() => [
     { value: 'All', label: 'All AI Quality Fit' },
@@ -332,17 +356,17 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
       const matchesProject = projectFilter === 'All' || 
         (lead.project && lead.project.trim().toLowerCase() === projectFilter.trim().toLowerCase());
 
-      // 3. Target Job Position filter
-      const matchesPosition = positionFilter === 'All' || 
-        (lead.position && lead.position.trim().toLowerCase() === positionFilter.trim().toLowerCase());
+      // 3. Target Job Position filter (Multiple positions supported)
+      const matchesPosition = selectedPositions.length === 0 || 
+        (lead.position && selectedPositions.some(p => p.trim().toLowerCase() === lead.position.trim().toLowerCase()));
 
       // 4. Inbound Quality Fit score filter
       const matchesFit = fitScoreFilter === 'All' || 
         (lead.fitScore && lead.fitScore.trim().toLowerCase() === fitScoreFilter.trim().toLowerCase());
 
-      // 5. Dynamic Tags filter
-      const matchesTag = tagFilter === 'All' || 
-        (lead.tags && lead.tags.some(t => t.trim().toLowerCase() === tagFilter.trim().toLowerCase()));
+      // 5. Dynamic Tags filter (Multiple tags supported)
+      const matchesTag = selectedTags.length === 0 || 
+        (lead.tags && lead.tags.some(t => selectedTags.some(st => st.trim().toLowerCase() === t.trim().toLowerCase())));
 
       // 6. Date Wise Filter
       let matchesDate = true;
@@ -427,7 +451,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
 
       return matchesCountry && matchesProject && matchesPosition && matchesFit && matchesTag && matchesDate && matchesCoordinator && matchesGender && matchesRemarks;
     });
-  }, [matchedCandidates, countryFilter, projectFilter, positionFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, coordinatorFilter, remarksFilter]);
+  }, [matchedCandidates, countryFilter, projectFilter, selectedPositions, genderFilter, fitScoreFilter, selectedTags, dateFilter, customStartDate, customEndDate, userRole, coordinatorFilter, remarksFilter]);
 
   const fetchActiveJobs = () => {
     fetch('/api/jobs')
@@ -447,7 +471,9 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
       const v = vName.trim().toLowerCase();
       const nameVal = cand.name ? cand.name.split(' ')[0] : 'Candidate';
       const countryVal = jobCountry || 'Gulf / Overseas';
-      const positionVal = jobTitle || cand.position || 'Openings';
+      // When dynamic candidate position is enabled, prioritize candidate's own position/interest
+      const candSpecificPosition = cand.position || jobTitle || 'Openings';
+      const positionVal = useDynamicCandidatePosition ? candSpecificPosition : (jobTitle || cand.position || 'Openings');
       const phoneVal = cand.phone || '';
       const serialNoVal = cand.serialNo || 'N/A';
       
@@ -461,6 +487,11 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
       if (v === 'name') return nameVal;
       if (v === 'country') return countryVal;
       if (v === 'position') return positionVal;
+      if (v === 'candidate_position' || v === 'cand_position' || v === 'trade' || v === 'interest') return candSpecificPosition;
+      if (v === 'vacancy_position' || v === 'job_title') return jobTitle || 'Openings';
+      if (v === 'tags') return (cand.tags && cand.tags.length > 0) ? cand.tags.join(', ') : '';
+      if (v === 'salary') return jobSalary || 'competitive salary';
+      if (v === 'experience') return jobExperience || cand.experience || '2+ years';
       if (v === 'phone') return phoneVal;
       if (v === 'serialno') return serialNoVal;
       if (v === 'coordinator') return coordinatorVal;
@@ -597,6 +628,86 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
       setJobExperience(selected.requirement.match(/\d+\s*(?:years?|yrs?)/gi)?.[0] || '2-3 years');
       setJobRequirements(selected.requirement);
     }
+  };
+
+  // Smart AI to Auto-Fill Vacancy Details Configuration based on candidate interests
+  const handleSmartAiFillVacancy = async () => {
+    setIsAiSuggestingVacancy(true);
+    try {
+      const targetPool = filteredCandidates.length > 0 ? filteredCandidates : matchedCandidates;
+      const res = await fetch('/api/reactivation/ai-suggest-vacancy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectedTags,
+          selectedPositions,
+          targetCountry: countryFilter,
+          candidateIds: targetPool.slice(0, 40).map(c => c.id)
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      const data = await res.json();
+      setAiVacancySuggestion(data);
+      setShowAiModal(true);
+    } catch (err: any) {
+      console.error('Failed to get AI vacancy suggestion:', err);
+      alert(`AI Suggestion error: ${err.message || err}`);
+    } finally {
+      setIsAiSuggestingVacancy(false);
+    }
+  };
+
+  const handleApplyAiVacancy = (suggestion: any) => {
+    if (!suggestion) return;
+    if (suggestion.jobTitle) setJobTitle(suggestion.jobTitle);
+    if (suggestion.jobCountry) setJobCountry(suggestion.jobCountry);
+    if (suggestion.jobSalary) setJobSalary(suggestion.jobSalary);
+    if (suggestion.jobExperience) setJobExperience(suggestion.jobExperience);
+    if (suggestion.jobGender) setJobGender(suggestion.jobGender);
+    if (suggestion.jobRequirements) setJobRequirements(suggestion.jobRequirements);
+    setShowAiModal(false);
+  };
+
+  const handleApplyAiVacancyAndPersonalizeHooks = (suggestion: any) => {
+    handleApplyAiVacancy(suggestion);
+
+    // Also update customMessage for all matched candidates according to their specific position & area of interest
+    const activeTpl = templates.find(t => t.id === selectedTemplateId);
+    setMatchedCandidates(prev =>
+      prev.map(c => {
+        const targetRole = c.position || suggestion.jobTitle || 'Openings';
+        let msg = `Hi ${c.name.split(' ')[0]}, we have exciting opportunities for ${targetRole} in ${suggestion.jobCountry || jobCountry || 'Dubai'}. Salary ${suggestion.jobSalary || jobSalary || 'attractive package'}. Would you like details?`;
+        
+        if (activeTpl && activeTpl.text) {
+          msg = renderClientTemplate(activeTpl.text, selectedTemplateId, { ...c, position: targetRole });
+        }
+        return {
+          ...c,
+          customMessage: msg
+        };
+      })
+    );
+  };
+
+  const handlePersonalizeAllHooksByPosition = () => {
+    const activeTpl = templates.find(t => t.id === selectedTemplateId);
+    setMatchedCandidates(prev =>
+      prev.map(c => {
+        const targetRole = c.position || jobTitle || 'Openings';
+        let msg = `Hi ${c.name.split(' ')[0]}, we have exciting opportunities for ${targetRole} in ${jobCountry || 'Dubai'}. Salary ${jobSalary || 'competitive'}/month. Would you like details?`;
+        if (activeTpl && activeTpl.text) {
+          msg = renderClientTemplate(activeTpl.text, selectedTemplateId, { ...c, position: targetRole });
+        }
+        return {
+          ...c,
+          customMessage: msg
+        };
+      })
+    );
   };
 
   // Run AI Search on Old Database
@@ -793,12 +904,14 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
     countryFilter === 'All' &&
     coordinatorFilter === 'All' &&
     projectFilter === 'All' &&
-    positionFilter === 'All' &&
-    tagFilter === 'All' &&
+    selectedPositions.length === 0 &&
+    selectedTags.length === 0 &&
     fitScoreFilter === 'All' &&
     genderFilter === 'All' &&
     remarksFilter === 'All' &&
-    dateFilter === 'All';
+    dateFilter === 'All' &&
+    !customStartDate &&
+    !customEndDate;
 
   return (
     <div className="space-y-6 text-slate-100" id="candidate-reactivation-view">
@@ -814,7 +927,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
               Broadcast Hub (AI Outreach)
             </h2>
             <p className="text-[11px] text-slate-400 font-bold mt-1">
-              Automatically identify stale, inactive placement candidates from your archives, match them against new active vacancies, and engage them on WhatsApp.
+              Filter candidates across multiple tags & target positions, auto-generate vacancy configurations via smart AI, and dispatch targeted bulk WhatsApp messaging.
             </p>
           </div>
           <span className="text-[10px] bg-indigo-950/40 border border-indigo-900/30 px-3 py-1.5 rounded-full font-black text-indigo-400 uppercase tracking-wider font-mono">
@@ -843,15 +956,15 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
                 </button>
               )}
 
-              {(countryFilter !== 'All' || coordinatorFilter !== 'All' || projectFilter !== 'All' || positionFilter !== 'All' || tagFilter !== 'All' || fitScoreFilter !== 'All' || genderFilter !== 'All' || remarksFilter !== 'All' || dateFilter !== 'All') && (
+              {(countryFilter !== 'All' || coordinatorFilter !== 'All' || projectFilter !== 'All' || selectedPositions.length > 0 || selectedTags.length > 0 || fitScoreFilter !== 'All' || genderFilter !== 'All' || remarksFilter !== 'All' || dateFilter !== 'All') && (
                 <button
                   type="button"
                   onClick={() => {
                     setCountryFilter('All');
                     setCoordinatorFilter('All');
                     setProjectFilter('All');
-                    setPositionFilter('All');
-                    setTagFilter('All');
+                    setSelectedPositions([]);
+                    setSelectedTags([]);
                     setFitScoreFilter('All');
                     setGenderFilter('All');
                     setRemarksFilter('All');
@@ -903,24 +1016,56 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
               />
             </div>
 
-            {/* Target Job Position Filter */}
+            {/* Target Job Position Multi-Select */}
             <div className="w-full">
-              <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Position</label>
-              <SearchableSelect
-                value={positionFilter}
-                onChange={setPositionFilter}
-                options={positionOptions}
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider font-mono">
+                  Positions ({selectedPositions.length === 0 ? 'All' : selectedPositions.length})
+                </label>
+                {selectedPositions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPositions([])}
+                    className="text-[8px] font-bold text-slate-400 hover:text-rose-400 cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+              <MultiSearchableSelect
+                values={selectedPositions}
+                onChange={setSelectedPositions}
+                options={positionMultiOptions}
+                placeholder="Select Positions..."
+                allLabel="All Positions"
+                badgeColor="bg-indigo-600"
                 className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
               />
             </div>
 
-            {/* Tags Filter Dropdown */}
+            {/* Tags Multi-Select Dropdown */}
             <div className="w-full">
-              <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 font-mono">Tag</label>
-              <SearchableSelect
-                value={tagFilter}
-                onChange={setTagFilter}
-                options={tagOptions}
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[8px] font-extrabold text-slate-400 uppercase tracking-wider font-mono">
+                  Tags ({selectedTags.length === 0 ? 'All' : selectedTags.length})
+                </label>
+                {selectedTags.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTags([])}
+                    className="text-[8px] font-bold text-slate-400 hover:text-rose-400 cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+              <MultiSearchableSelect
+                values={selectedTags}
+                onChange={setSelectedTags}
+                options={tagMultiOptions}
+                placeholder="Select Tags..."
+                allLabel="All Tags"
+                badgeColor="bg-emerald-600"
                 className="w-full text-[10px] px-2 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer uppercase font-mono"
               />
             </div>
@@ -990,6 +1135,63 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
               />
             </div>
           )}
+
+          {/* Active Targeted Tags & Positions Banner */}
+          {(selectedPositions.length > 0 || selectedTags.length > 0) && (
+            <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 animate-fadeIn mt-2">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <span className="text-[10px] font-black uppercase text-indigo-300 font-mono flex items-center gap-1 mr-1">
+                  <Tag className="h-3.5 w-3.5 text-indigo-400" /> Targeted Group:
+                </span>
+                {selectedPositions.map(pos => (
+                  <span key={pos} className="inline-flex items-center gap-1 bg-indigo-900/70 text-indigo-200 border border-indigo-500/40 px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono shadow-xs">
+                    💼 {pos}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPositions(selectedPositions.filter(p => p !== pos))}
+                      className="hover:text-white hover:bg-indigo-800 rounded p-0.5 cursor-pointer"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </span>
+                ))}
+                {selectedTags.map(tag => (
+                  <span key={tag} className="inline-flex items-center gap-1 bg-emerald-950/70 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono shadow-xs">
+                    🏷️ {tag}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTags(selectedTags.filter(t => t !== tag))}
+                      className="hover:text-white hover:bg-emerald-800 rounded p-0.5 cursor-pointer"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </span>
+                ))}
+                <span className="text-[10px] font-mono font-bold text-slate-400 ml-1">
+                  ({filteredCandidates.length} candidate{filteredCandidates.length !== 1 ? 's' : ''} targeted)
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSmartAiFillVacancy}
+                disabled={isAiSuggestingVacancy}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white text-[10.5px] font-black px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md transition active:scale-95 disabled:opacity-50 cursor-pointer font-mono"
+              >
+                {isAiSuggestingVacancy ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>AI Analyzing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-3 w-3 text-amber-300 animate-pulse" />
+                    <span>Smart AI Fill Vacancy for these Targets</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* STEP 2: JOB VACANCY & SCAN PARAMETERS PANEL */}
@@ -1057,8 +1259,38 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
             </div>
 
             {/* Custom Vacancy details */}
-            <div className="border border-slate-800/60 bg-slate-950/40 rounded-2xl p-4 space-y-3.5">
-              <h3 className="text-[10px] font-black uppercase text-indigo-400 tracking-wider">Vacancy Details Configuration</h3>
+            <div className="border border-slate-800/60 bg-slate-950/40 rounded-2xl p-4 space-y-3.5 relative overflow-hidden">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-800/70">
+                <div>
+                  <h3 className="text-[10px] font-black uppercase text-indigo-400 tracking-wider flex items-center gap-1.5 font-mono">
+                    <Briefcase className="h-3.5 w-3.5 text-indigo-400" />
+                    Vacancy Details Configuration
+                  </h3>
+                  <p className="text-[9.5px] text-slate-400 mt-0.5">
+                    Job terms for broadcast outreach. Fill manually or let AI analyze candidates' area of interest.
+                  </p>
+                </div>
+                
+                <button
+                  type="button"
+                  onClick={handleSmartAiFillVacancy}
+                  disabled={isAiSuggestingVacancy}
+                  className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white text-[10.5px] font-black px-3.5 py-1.5 rounded-xl shadow-lg shadow-indigo-950/40 border border-indigo-400/30 flex items-center gap-1.5 cursor-pointer transition active:scale-95 disabled:opacity-50 shrink-0 font-mono"
+                  title="Smart AI Auto-Fill based on candidate's area of interest & tags"
+                >
+                  {isAiSuggestingVacancy ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>AI Analyzing Interests...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3.5 w-3.5 text-amber-300 animate-pulse" />
+                      <span>Smart AI Auto-Fill Vacancy</span>
+                    </>
+                  )}
+                </button>
+              </div>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
@@ -1241,23 +1473,65 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
                 </p>
               </div>
 
-              <button
-                onClick={handleSyncTemplates}
-                disabled={isSyncingTemplates}
-                className="text-[10px] bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                {isSyncingTemplates ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-400" />
-                    <span>Syncing Meta...</span>
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-3.5 w-3.5 text-indigo-400" />
-                    <span>Sync from Meta</span>
-                  </>
-                )}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextVal = !useDynamicCandidatePosition;
+                    setUseDynamicCandidatePosition(nextVal);
+                    // Also trigger re-render of templates with new setting
+                    const activeTpl = templates.find(t => t.id === selectedTemplateId);
+                    if (activeTpl && activeTpl.text) {
+                      setMatchedCandidates(prev =>
+                        prev.map(c => {
+                          const candPos = nextVal ? (c.position || jobTitle || 'Openings') : (jobTitle || c.position || 'Openings');
+                          return {
+                            ...c,
+                            customMessage: renderClientTemplate(activeTpl.text, selectedTemplateId, { ...c, position: candPos })
+                          };
+                        })
+                      );
+                    }
+                  }}
+                  className={`text-[10px] font-bold px-2.5 py-1.5 rounded-lg border transition flex items-center gap-1.5 cursor-pointer font-mono ${
+                    useDynamicCandidatePosition
+                      ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/60'
+                      : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                  }`}
+                  title="When active, broadcast messaging automatically adapts to each candidate's exact profile position / trade"
+                >
+                  <Bot className="h-3 w-3 text-emerald-400" />
+                  <span>{useDynamicCandidatePosition ? 'Position Mode: Candidate-Specific' : 'Position Mode: Fixed Vacancy'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePersonalizeAllHooksByPosition}
+                  className="text-[10px] bg-indigo-950/50 hover:bg-indigo-900/60 border border-indigo-500/30 text-indigo-300 font-bold px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 cursor-pointer font-mono"
+                  title="Re-apply candidate's trade/position to all personalized hooks"
+                >
+                  <Wand2 className="h-3 w-3 text-indigo-400" />
+                  <span>Tailor Hooks by Position</span>
+                </button>
+
+                <button
+                  onClick={handleSyncTemplates}
+                  disabled={isSyncingTemplates}
+                  className="text-[10px] bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 font-bold px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-50 font-mono"
+                >
+                  {isSyncingTemplates ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin text-indigo-400" />
+                      <span>Syncing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-3 w-3 text-indigo-400" />
+                      <span>Sync Meta</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1645,6 +1919,11 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
                                     </span>
                                     <span className="text-[10px] text-slate-400">({cand.phone})</span>
                                     {responseBadge}
+                                    {cand.assignedTo && cand.assignedTo !== 'unassigned' && (
+                                      <span className="text-[9.5px] bg-indigo-950/40 border border-indigo-900/35 text-indigo-300 font-extrabold px-2.5 py-0.5 rounded-lg flex items-center gap-1 shadow-sm font-mono uppercase tracking-wide">
+                                        coordinator @{cand.assignedTo}
+                                      </span>
+                                    )}
                                   </div>
                                   
                                   {cand.tags && cand.tags.length > 0 && (
@@ -1702,6 +1981,143 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
           </div>
         )}
       </div>
+
+      {/* Smart AI Vacancy Configuration Modal */}
+      {showAiModal && aiVacancySuggestion && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-2xl w-full p-6 text-left shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                  <Sparkles className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider font-mono">
+                    Smart AI Vacancy Configuration
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Formulated by Gemini 3.8 based on candidate interests, background, and tags
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAiModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* AI Strategic Rationale Card */}
+            <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-2xl p-3.5 space-y-1.5">
+              <span className="text-[10px] font-black uppercase text-indigo-400 tracking-wider font-mono flex items-center gap-1.5">
+                <Bot className="h-3.5 w-3.5" /> AI Campaign Strategy & Rationale
+              </span>
+              <p className="text-xs text-slate-200 leading-relaxed font-sans">
+                {aiVacancySuggestion.rationale}
+              </p>
+              {aiVacancySuggestion.coveredPositions && aiVacancySuggestion.coveredPositions.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[9.5px] text-slate-400 font-bold font-mono">Positions Targeted:</span>
+                  {aiVacancySuggestion.coveredPositions.map((pos: string, idx: number) => (
+                    <span key={idx} className="bg-indigo-900/60 text-indigo-300 text-[9.5px] font-bold px-2 py-0.5 rounded-md border border-indigo-500/30">
+                      💼 {pos}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Vacancy Configuration Fields Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80">
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">
+                  Suggested Position / Title:
+                </span>
+                <span className="font-extrabold text-white text-xs block">
+                  {aiVacancySuggestion.jobTitle}
+                </span>
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">
+                  Destination Country:
+                </span>
+                <span className="font-extrabold text-emerald-400 text-xs block">
+                  ✈️ {aiVacancySuggestion.jobCountry}
+                </span>
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">
+                  Monthly Salary Offered:
+                </span>
+                <span className="font-extrabold text-amber-400 text-xs block">
+                  💰 {aiVacancySuggestion.jobSalary}
+                </span>
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">
+                  Experience & Gender:
+                </span>
+                <span className="font-bold text-slate-200 text-xs block">
+                  ⏳ {aiVacancySuggestion.jobExperience} • 👤 {aiVacancySuggestion.jobGender}
+                </span>
+              </div>
+
+              <div className="md:col-span-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">
+                  Key Requirements / Skill Tags:
+                </span>
+                <span className="text-slate-300 text-xs block">
+                  {aiVacancySuggestion.jobRequirements}
+                </span>
+              </div>
+            </div>
+
+            {/* Smart Outreach Hook Preview */}
+            {aiVacancySuggestion.targetHooks && (
+              <div className="bg-slate-950/40 border border-slate-800 p-3.5 rounded-2xl space-y-1">
+                <span className="text-[10px] font-black uppercase text-indigo-400 tracking-wider font-mono block">
+                  💬 Tailored WhatsApp Hook Preview
+                </span>
+                <p className="text-[11px] text-slate-300 italic font-mono bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+                  "{aiVacancySuggestion.targetHooks}"
+                </p>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowAiModal(false)}
+                className="w-full sm:w-auto px-4 py-2 rounded-xl border border-slate-800 hover:bg-slate-800 text-slate-300 font-bold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApplyAiVacancy(aiVacancySuggestion)}
+                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-black text-xs cursor-pointer border border-slate-700"
+              >
+                Apply to Vacancy Details Only
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApplyAiVacancyAndPersonalizeHooks(aiVacancySuggestion)}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer"
+              >
+                <Sparkles className="h-4 w-4" />
+                <span>Apply & Personalize Hooks for Candidates</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

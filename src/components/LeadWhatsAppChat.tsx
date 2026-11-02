@@ -4,7 +4,7 @@ import {
   Send, MessageSquare, ExternalLink, Sparkles, Check, CheckCheck, 
   Clock, RefreshCw, FileText, Calendar, Phone, PhoneCall, Copy, 
   ChevronDown, ChevronUp, Bot, UserCheck, AlertCircle, Info, Plus, Paperclip, Zap,
-  CornerUpLeft, Smile, X, Image, Download
+  CornerUpLeft, Smile, X, Image, Download, Ban, ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatPhoneForWhatsApp, replaceTemplatePlaceholders, resolveTemplateVariable } from '../server/whatsapp.ts';
@@ -25,6 +25,9 @@ const getDisplayUrl = (url: string | undefined) => {
   return url;
 };
 
+let cachedConfig: { mode: string; provider: string; hasApiKey: boolean; costModel?: string } | null = null;
+let cachedTemplates: WhatsAppTemplate[] | null = null;
+
 export default function LeadWhatsAppChat({
   lead,
   onLeadUpdated,
@@ -37,11 +40,11 @@ export default function LeadWhatsAppChat({
   const [showTemplates, setShowTemplates] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
+  const [templates, setTemplates] = useState<WhatsAppTemplate[]>(() => cachedTemplates || []);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [simulatingReply, setSimulatingReply] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [config, setConfig] = useState<{ mode: string; provider: string; hasApiKey: boolean; costModel?: string }>({
+  const [config, setConfig] = useState<{ mode: string; provider: string; hasApiKey: boolean; costModel?: string }>(() => cachedConfig || {
     mode: 'sandbox_simulation',
     provider: 'Direct Meta Cloud API',
     hasApiKey: false,
@@ -69,6 +72,78 @@ export default function LeadWhatsAppChat({
   const [selectedTemplateIdHistory, setSelectedTemplateIdHistory] = useState('');
   const [historyPreviewText, setHistoryPreviewText] = useState('');
   const [syncingMeta, setSyncingMeta] = useState(false);
+
+  // Block Candidate States
+  const [isBlockModalOpen, setIsBlockModalOpen] = useState(false);
+  const [blockReasonOption, setBlockReasonOption] = useState('No passport / Not eligible');
+  const [customBlockReason, setCustomBlockReason] = useState('');
+  const [isBlocking, setIsBlocking] = useState(false);
+
+  const handleBlockCandidate = async () => {
+    try {
+      setIsBlocking(true);
+      const finalReason = blockReasonOption === 'Custom' 
+        ? (customBlockReason.trim() || 'Blocked by Coordinator') 
+        : blockReasonOption;
+
+      const res = await fetch(`/api/leads/${lead.id}/block`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId
+        },
+        body: JSON.stringify({ reason: finalReason })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setIsBlockModalOpen(false);
+        setCustomBlockReason('');
+        if (data.lead) {
+          onLeadUpdated(data.lead);
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Failed to block candidate');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error blocking candidate');
+    } finally {
+      setIsBlocking(false);
+    }
+  };
+
+  const handleUnblockCandidate = async () => {
+    if (!confirm(`Are you sure you want to UNBLOCK ${lead.name || 'this candidate'}? Incoming messages will be re-enabled.`)) {
+      return;
+    }
+    try {
+      setIsBlocking(true);
+      const res = await fetch(`/api/leads/${lead.id}/unblock`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId
+        }
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.lead) {
+          onLeadUpdated(data.lead);
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Failed to unblock candidate');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error unblocking candidate');
+    } finally {
+      setIsBlocking(false);
+    }
+  };
 
   // Parameter Customizer States
   const [historyParamValues, setHistoryParamValues] = useState<Record<string, string>>({});
@@ -278,35 +353,15 @@ export default function LeadWhatsAppChat({
     lastMessagesLengthRef.current = currentLength;
 
     if (isInitialLoad) {
-      // Force instant bottom alignment
+      // Force instant bottom alignment without stuttering
       el.scrollTop = el.scrollHeight;
       chatBottomRef.current?.scrollIntoView({ behavior: 'auto' });
-
-      const timer1 = setTimeout(() => {
+      const timer = setTimeout(() => {
         if (scrollContainerRef.current) {
           scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
         }
-        chatBottomRef.current?.scrollIntoView({ behavior: 'auto' });
-      }, 40);
-
-      const timer2 = setTimeout(() => {
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-        }
-        chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 150);
-
-      const timer3 = setTimeout(() => {
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-        }
-      }, 350);
-
-      return () => {
-        clearTimeout(timer1);
-        clearTimeout(timer2);
-        clearTimeout(timer3);
-      };
+      }, 50);
+      return () => clearTimeout(timer);
     } else if (isNewMessageFromSelf) {
       // Scroll unconditionally when sending a message ourselves
       el.scrollTop = el.scrollHeight;
@@ -316,7 +371,6 @@ export default function LeadWhatsAppChat({
         if (scrollContainerRef.current) {
           scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
         }
-        chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 50);
       return () => clearTimeout(timer);
     } else if (hasNewMessage) {
@@ -329,7 +383,6 @@ export default function LeadWhatsAppChat({
           if (scrollContainerRef.current) {
             scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
           }
-          chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
         }, 50);
         return () => clearTimeout(timer);
       }
@@ -341,56 +394,67 @@ export default function LeadWhatsAppChat({
     fetchConfigAndTemplates();
   }, []);
 
-  // Poll for new messages every 5 seconds
+  // Fetch full messages history on mount for this candidate
+  useEffect(() => {
+    let isCancelled = false;
+    fetch(`/api/leads/${lead.id}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(fullLead => {
+        if (!isCancelled && fullLead && Array.isArray(fullLead.messages)) {
+          setMessages(fullLead.messages);
+        }
+      })
+      .catch(() => {});
+    return () => { isCancelled = true; };
+  }, [lead.id]);
+
+  // Poll for new incoming messages smoothly without causing screen blinking or full-state thrashing
   useEffect(() => {
     const interval = setInterval(async () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
         const res = await fetch(`/api/leads/${lead.id}`);
         if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
           const updatedLead = await res.json();
-          if (JSON.stringify(updatedLead.messages) !== JSON.stringify(messagesRef.current)) {
+          const prevLen = messagesRef.current.length;
+          const newLen = (updatedLead.messages || []).length;
+          if (newLen !== prevLen || JSON.stringify(updatedLead.messages) !== JSON.stringify(messagesRef.current)) {
             setMessages(updatedLead.messages || []);
-            onLeadUpdated(updatedLead);
-          }
-        }
-      } catch (err: any) {
-        if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
-          // Gracefully suppress logs during local dev server restarts / cold boots
-          console.warn('[Chat Poll] Connection skipped (backend is starting up or offline)');
-        } else {
-          console.error('Error polling for new messages:', err);
-        }
-      }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [lead.id, onLeadUpdated]);
-
-  // Mark messages as read when viewing this active chat
-  useEffect(() => {
-    const hasUnread = (messages || []).some(m => m.sender === 'lead' && m.status !== 'read');
-    if (hasUnread) {
-      fetch(`/api/leads/${lead.id}/read`, { method: 'POST' })
-        .then(async (res) => {
-          if (res.ok) {
-            const updatedRes = await fetch(`/api/leads/${lead.id}`);
-            if (updatedRes.ok && updatedRes.headers.get('content-type')?.includes('application/json')) {
-              const updatedLead = await updatedRes.json();
-              setMessages(updatedLead.messages || []);
+            // Only notify parent if a new message was actually received
+            if (newLen > prevLen && onLeadUpdated) {
               onLeadUpdated(updatedLead);
             }
           }
-        })
+        }
+      } catch (err: any) {
+        if (!(err instanceof TypeError && err.message.includes('Failed to fetch'))) {
+          console.warn('[Chat Poll] Poll skipped:', err?.message || err);
+        }
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [lead.id]);
+
+  // Mark messages as read when viewing this active chat without causing parent re-sort flicker
+  useEffect(() => {
+    const hasUnread = (messages || []).some(m => m.sender === 'lead' && m.status !== 'read');
+    if (hasUnread) {
+      // Optimistically update local message statuses immediately
+      setMessages(prev => prev.map(m => m.sender === 'lead' && m.status !== 'read' ? { ...m, status: 'read' } : m));
+      
+      fetch(`/api/leads/${lead.id}/read`, { method: 'POST' })
         .catch(err => {
-          if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
-            console.warn('[Chat Read] Connection skipped (backend offline)');
-          } else {
-            console.error('Error marking as read in LeadWhatsAppChat:', err);
+          if (!(err instanceof TypeError && err.message.includes('Failed to fetch'))) {
+            console.warn('[Chat Read] Read mark notification skipped:', err);
           }
         });
     }
-  }, [lead.id, messages, onLeadUpdated]);
+  }, [lead.id]);
 
   const fetchConfigAndTemplates = async () => {
+    if (cachedConfig && cachedTemplates && cachedTemplates.length > 0) {
+      return; // Reuse in-memory cache, 0 network requests
+    }
     try {
       setLoadingTemplates(true);
       const [configRes, tplRes] = await Promise.all([
@@ -400,12 +464,14 @@ export default function LeadWhatsAppChat({
 
       if (configRes && configRes.ok && configRes.headers.get('content-type')?.includes('application/json')) {
         const configData = await configRes.json();
+        cachedConfig = configData;
         setConfig(configData);
       }
 
       if (tplRes && tplRes.ok && tplRes.headers.get('content-type')?.includes('application/json')) {
         const tplData = await tplRes.json();
         if (Array.isArray(tplData.templates)) {
+          cachedTemplates = tplData.templates;
           setTemplates(tplData.templates);
         }
       }
@@ -1156,15 +1222,50 @@ export default function LeadWhatsAppChat({
             {lead.name?.charAt(0) || 'C'}
           </div>
           <div className="min-w-0">
-            <h4 className="text-[14.5px] font-bold text-[#111b21] dark:text-[#e9edef] leading-tight truncate">
-              {lead.name || 'Candidate Chat'}
-            </h4>
-            <p className="text-[11.5px] text-[#667781] dark:text-[#8696a0] font-mono leading-none mt-0.5">
-              {lead.phone} • {lead.country || 'N/A'}
+            <div className="flex items-center gap-2 flex-wrap">
+              <h4 className="text-[14.5px] font-bold text-[#111b21] dark:text-[#e9edef] leading-tight truncate">
+                {lead.name || 'Candidate Chat'}
+              </h4>
+              {lead.isBlocked && (
+                <span 
+                  className="inline-flex items-center gap-1 bg-red-600 text-white text-[9.5px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider shadow-xs animate-pulse"
+                  title={lead.blockedReason ? `Reason: ${lead.blockedReason}` : 'Blocked'}
+                >
+                  <Ban className="h-2.5 w-2.5" />
+                  BLOCKED
+                </span>
+              )}
+            </div>
+            <p className="text-[11.5px] text-[#667781] dark:text-[#8696a0] font-mono leading-none mt-0.5 truncate">
+              {lead.phone} • {lead.country || 'N/A'} {lead.isBlocked && lead.blockedReason && <span className="text-red-500 font-sans font-bold">({lead.blockedReason})</span>}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {lead.isBlocked ? (
+            <button
+              type="button"
+              onClick={handleUnblockCandidate}
+              disabled={isBlocking}
+              className="px-2.5 py-1 bg-red-600/20 hover:bg-red-600 text-red-600 hover:text-white border border-red-500/50 rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer uppercase tracking-wider shadow-2xs"
+              title="Click to unblock candidate and allow messages"
+            >
+              <ShieldAlert className="h-3.5 w-3.5" />
+              <span>Unblock</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsBlockModalOpen(true)}
+              disabled={isBlocking}
+              className="px-2.5 py-1 bg-slate-200 dark:bg-slate-700/60 hover:bg-red-600 text-slate-700 dark:text-slate-300 hover:text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer uppercase tracking-wider shadow-2xs"
+              title="Block candidate and reject incoming messages"
+            >
+              <Ban className="h-3.5 w-3.5 text-red-500 hover:text-white" />
+              <span>Block</span>
+            </button>
+          )}
+
           {lead.assignedTo && lead.assignedTo.toLowerCase() !== 'unassigned' && (
             <span className="hidden sm:inline-flex items-center bg-[#e1f5fe] dark:bg-[#182229] text-[#0288d1] dark:text-sky-400 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
               👤 Assigned: {lead.assignedTo}
@@ -1947,95 +2048,129 @@ export default function LeadWhatsAppChat({
               </div>
             )}
 
-            {/* Main Composer Row */}
-            <div className="flex items-center gap-2.5">
-              {/* Hidden File Input */}
-              <input
-                type="file"
-                ref={fileInputRef}
-                className="hidden"
-                onChange={handleFileChange}
-                accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
-              />
-
-              {/* Left Accessory Icon Actions */}
-              <div className="flex items-center gap-1.5">
-                {/* Emoji Trigger Button */}
+            {/* Blocked Candidate Shield Notice OR Main Composer Row */}
+            {lead.isBlocked ? (
+              <div className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left shadow-2xs">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-10 w-10 rounded-full bg-red-600/20 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                    <Ban className="h-5.5 w-5.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-black text-red-600 dark:text-red-400 uppercase tracking-wide flex items-center gap-1">
+                        <span>🚫</span> CANDIDATE IS BLOCKED
+                      </span>
+                      {lead.blockedReason && (
+                        <span className="text-[11.5px] text-slate-700 dark:text-slate-300 font-bold truncate">
+                          ({lead.blockedReason})
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      All incoming WhatsApp messages are rejected. Outgoing messaging is locked.
+                    </p>
+                  </div>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                  className={`p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 ${
-                    showEmojiPicker
-                      ? 'text-[#00a884]'
-                      : 'text-[#54656f] dark:text-[#8696a0]'
-                  }`}
-                  title="Emoji"
+                  onClick={handleUnblockCandidate}
+                  disabled={isBlocking}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer shrink-0 uppercase tracking-wider flex items-center gap-1.5"
                 >
-                  <Smile className="h-6 w-6" />
-                </button>
-
-                {/* Attachment Button */}
-                <button
-                  type="button"
-                  onClick={handleFileUploadClick}
-                  disabled={uploading || sending}
-                  className="p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#8696a0]"
-                  title="Attach Document or Media"
-                >
-                  {uploading ? (
-                    <RefreshCw className="h-5.5 w-5.5 animate-spin text-[#00a884]" />
-                  ) : (
-                    <Paperclip className="h-5.5 w-5.5 rotate-45" />
-                  )}
-                </button>
-
-                {/* Creative Media Library */}
-                <button
-                  type="button"
-                  onClick={() => setIsMediaLibraryOpen(true)}
-                  className="p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#8696a0]"
-                  title="Creative Media Library"
-                >
-                  <Image className="h-5.5 w-5.5" />
+                  <ShieldAlert className="h-3.5 w-3.5" />
+                  <span>Unblock Candidate</span>
                 </button>
               </div>
+            ) : (
+              <div className="flex items-center gap-2.5">
+                {/* Hidden File Input */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  onChange={handleFileChange}
+                  accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
+                />
 
-              {/* Textarea Input Field */}
-              <textarea
-                ref={textareaRef}
-                rows={1}
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-                placeholder="Type a message"
-                className="flex-1 text-[14.5px] py-2.5 px-4 rounded-lg bg-white dark:bg-[#2a3942] border-none focus:outline-none focus:ring-0 text-[#111b21] dark:text-[#e9edef] placeholder-[#667781] dark:placeholder-[#8696a0] font-normal leading-normal max-h-36 min-h-[42px] resize-none overflow-y-auto"
-                style={{ height: '42px' }}
-              />
+                {/* Left Accessory Icon Actions */}
+                <div className="flex items-center gap-1.5">
+                  {/* Emoji Trigger Button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    className={`p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 ${
+                      showEmojiPicker
+                        ? 'text-[#00a884]'
+                        : 'text-[#54656f] dark:text-[#8696a0]'
+                    }`}
+                    title="Emoji"
+                  >
+                    <Smile className="h-6 w-6" />
+                  </button>
 
-              {/* Send Button - Rounded Circle style like true WhatsApp Web */}
-              <button
-                type="button"
-                onClick={() => handleSendMessage()}
-                disabled={(!inputText.trim() && !sending) || sending}
-                className={`h-11 w-11 rounded-full flex items-center justify-center shadow-md transition-all shrink-0 cursor-pointer ${
-                  inputText.trim() 
-                    ? 'bg-[#00a884] hover:bg-[#008f72] text-white active:scale-95' 
-                    : 'bg-black/5 dark:bg-white/5 text-[#54656f] dark:text-[#8696a0] opacity-40 cursor-not-allowed'
-                }`}
-                title="Send message"
-              >
-                {sending ? (
-                  <RefreshCw className="h-5 w-5 animate-spin text-white" />
-                ) : (
-                  <Send className="h-5 w-5 text-white ml-0.5 fill-current" />
-                )}
-              </button>
-            </div>
+                  {/* Attachment Button */}
+                  <button
+                    type="button"
+                    onClick={handleFileUploadClick}
+                    disabled={uploading || sending}
+                    className="p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#8696a0]"
+                    title="Attach Document or Media"
+                  >
+                    {uploading ? (
+                      <RefreshCw className="h-5.5 w-5.5 animate-spin text-[#00a884]" />
+                    ) : (
+                      <Paperclip className="h-5.5 w-5.5 rotate-45" />
+                    )}
+                  </button>
+
+                  {/* Creative Media Library */}
+                  <button
+                    type="button"
+                    onClick={() => setIsMediaLibraryOpen(true)}
+                    className="p-2.5 rounded-full transition-all cursor-pointer flex items-center justify-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#8696a0]"
+                    title="Creative Media Library"
+                  >
+                    <Image className="h-5.5 w-5.5" />
+                  </button>
+                </div>
+
+                {/* Textarea Input Field */}
+                <textarea
+                  ref={textareaRef}
+                  rows={1}
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                  placeholder="Type a message"
+                  className="flex-1 text-[14.5px] py-2.5 px-4 rounded-lg bg-white dark:bg-[#2a3942] border-none focus:outline-none focus:ring-0 text-[#111b21] dark:text-[#e9edef] placeholder-[#667781] dark:placeholder-[#8696a0] font-normal leading-normal max-h-36 min-h-[42px] resize-none overflow-y-auto"
+                  style={{ height: '42px' }}
+                />
+
+                {/* Send Button - Rounded Circle style like true WhatsApp Web */}
+                <button
+                  type="button"
+                  onClick={() => handleSendMessage()}
+                  disabled={(!inputText.trim() && !sending) || sending}
+                  className={`h-11 w-11 rounded-full flex items-center justify-center shadow-md transition-all shrink-0 cursor-pointer ${
+                    inputText.trim() 
+                      ? 'bg-[#00a884] hover:bg-[#008f72] text-white active:scale-95' 
+                      : 'bg-black/5 dark:bg-white/5 text-[#54656f] dark:text-[#8696a0] opacity-40 cursor-not-allowed'
+                  }`}
+                  title="Send message"
+                >
+                  {sending ? (
+                    <RefreshCw className="h-5 w-5 animate-spin text-white" />
+                  ) : (
+                    <Send className="h-5 w-5 text-white ml-0.5 fill-current" />
+                  )}
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -2086,6 +2221,94 @@ export default function LeadWhatsAppChat({
                   setIsMediaLibraryOpen(false);
                 }}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Block Candidate Confirmation Modal */}
+      {isBlockModalOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-[110] p-4 text-left">
+          <div className="bg-white dark:bg-[#111b21] rounded-2xl shadow-2xl border border-red-200 dark:border-red-950/80 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-5 py-4 bg-red-500/10 border-b border-red-500/20 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                <Ban className="h-5 w-5" />
+                <h3 className="text-base font-black uppercase tracking-tight">Block Candidate</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBlockModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                Blocking <strong className="text-slate-900 dark:text-white uppercase font-bold">{lead.name || 'this candidate'}</strong> ({lead.phone}) will mark them as <strong className="text-red-600">BLOCKED</strong> across the CRM. All future incoming WhatsApp messages will be automatically rejected and dropped.
+              </p>
+
+              <div className="space-y-2">
+                <label className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Select Reason for Blocking:
+                </label>
+                {[
+                  'No passport / Not interested in making passport',
+                  'Harassment / Abusive messages',
+                  'Spam / Repeated irrelevant inquiries',
+                  'Disqualified criteria (Over-age / Medical / ECR)',
+                  'Custom'
+                ].map((opt) => (
+                  <label
+                    key={opt}
+                    className={`flex items-center gap-2.5 p-2 rounded-xl border text-xs cursor-pointer transition ${
+                      blockReasonOption === opt
+                        ? 'border-red-500 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 font-bold'
+                        : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="block_reason"
+                      checked={blockReasonOption === opt}
+                      onChange={() => setBlockReasonOption(opt)}
+                      className="text-red-600 focus:ring-red-500"
+                    />
+                    <span>{opt}</span>
+                  </label>
+                ))}
+
+                {blockReasonOption === 'Custom' && (
+                  <input
+                    type="text"
+                    value={customBlockReason}
+                    onChange={(e) => setCustomBlockReason(e.target.value)}
+                    placeholder="Enter specific block reason..."
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:border-red-500"
+                    autoFocus
+                  />
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsBlockModalOpen(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBlockCandidate}
+                  disabled={isBlocking}
+                  className="px-5 py-2 text-xs font-black text-white bg-red-600 hover:bg-red-700 rounded-xl transition shadow-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isBlocking ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
+                  <span>Confirm & Block</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
