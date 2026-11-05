@@ -23,7 +23,7 @@ import {
   Ban
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { getCountryFlagUrl, formatCandidateName, getEffectiveIntake } from '../utils';
+import { getCountryFlagUrl, formatCandidateName, getEffectiveIntake, isCoordinatorMatch } from '../utils';
 import { SearchableSelect } from './SearchableSelect.tsx';
 
 interface LeadBoardProps {
@@ -154,13 +154,9 @@ export default function LeadBoard({
     let lifetimeScopeLeads: Lead[] = leads;
 
     if (userRole === 'agent') {
-      lifetimeScopeLeads = leads.filter(l => l.assignedTo && l.assignedTo.toLowerCase() === currentAgentId.toLowerCase());
+      lifetimeScopeLeads = leads.filter(l => isCoordinatorMatch(l.assignedTo, currentAgentId, coordinators));
     } else if (coordinatorFilter !== 'All') {
-      if (coordinatorFilter === 'Unassigned') {
-        lifetimeScopeLeads = leads.filter(l => !l.assignedTo);
-      } else {
-        lifetimeScopeLeads = leads.filter(l => l.assignedTo && l.assignedTo.toLowerCase() === coordinatorFilter.toLowerCase());
-      }
+      lifetimeScopeLeads = leads.filter(l => isCoordinatorMatch(l.assignedTo, coordinatorFilter, coordinators));
     }
 
     const totalAssignedLifetime = lifetimeScopeLeads.length;
@@ -218,7 +214,7 @@ export default function LeadBoard({
       headerColor,
       textColor,
     };
-  }, [leads, userRole, currentAgentId, coordinatorFilter]);
+  }, [leads, userRole, currentAgentId, coordinatorFilter, coordinators]);
 
   const COLUMNS: Column[] = [
     { id: 'new', title: '1. New Inbound', color: 'border-sky-900/40 bg-sky-950/15', headerColor: 'text-sky-400 bg-sky-950/40 font-medium' },
@@ -282,16 +278,12 @@ export default function LeadBoard({
 
     // Agent bucket filter
     if (userRole === 'agent') {
-      filtered = filtered.filter(lead => lead.assignedTo?.toLowerCase() === currentAgentId.toLowerCase());
+      filtered = filtered.filter(lead => isCoordinatorMatch(lead.assignedTo, currentAgentId, coordinators));
     }
 
     // Coordinator Filter (only in Admin view)
     if (userRole === 'admin' && coordinatorFilter !== 'All') {
-      if (coordinatorFilter === 'Unassigned') {
-        filtered = filtered.filter(lead => !lead.assignedTo);
-      } else {
-        filtered = filtered.filter(lead => lead.assignedTo?.toLowerCase() === coordinatorFilter.toLowerCase() || lead.assignedTo === coordinatorFilter);
-      }
+      filtered = filtered.filter(lead => isCoordinatorMatch(lead.assignedTo, coordinatorFilter, coordinators));
     }
 
     // Date range filter
@@ -357,7 +349,7 @@ export default function LeadBoard({
     }
 
     return filtered;
-  }, [leads, searchQuery, userRole, currentAgentId, coordinatorFilter, pipelineDateFilter, filterStartDate, filterEndDate, remarksFilter]);
+  }, [leads, searchQuery, userRole, currentAgentId, coordinatorFilter, pipelineDateFilter, filterStartDate, filterEndDate, remarksFilter, coordinators]);
 
   // Helper to sort leads such that candidates with unread messages (replies) come first
   const sortLeadsByUnreadAndDate = (leadsList: Lead[]) => {

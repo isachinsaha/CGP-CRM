@@ -7,7 +7,7 @@ import {
   CheckSquare, CheckSquare2, Square, AlertCircle, ListTodo, User, PieChart as PieIcon, AreaChart as AreaIcon,
   ExternalLink
 } from 'lucide-react';
-import { formatCandidateName } from '../utils';
+import { formatCandidateName, isCoordinatorMatch } from '../utils';
 import {
   ResponsiveContainer,
   PieChart,
@@ -127,9 +127,7 @@ export default function CampaignAnalytics({
     // Filter leads for the chosen coordinator (or all active leads if 'All' is selected)
     const filteredLeadsForCharts = selectedCoordinatorName === 'All'
       ? leads
-      : selectedCoordinatorName === 'Unassigned'
-        ? leads.filter(l => !l.assignedTo || l.assignedTo.trim() === '' || l.assignedTo === 'Unassigned')
-        : leads.filter(l => l.assignedTo?.toLowerCase() === selectedCoordinatorName.toLowerCase() || l.assignedTo === selectedCoordinatorName);
+      : leads.filter(l => isCoordinatorMatch(l.assignedTo, selectedCoordinatorName, coordinators));
 
     // 1. Compute Pipeline Funnel Stages
     const pipelineStages: Record<string, number> = {
@@ -965,9 +963,7 @@ export default function CampaignAnalytics({
 
     // Compute stats for each coordinator
     const agentLeaderboard = coordinatorsList.map(name => {
-      const agentLeads = name === 'Unassigned'
-        ? activeLeads.filter(l => !l.assignedTo || l.assignedTo.trim() === '' || l.assignedTo === 'Unassigned')
-        : activeLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase() || l.assignedTo === name);
+      const agentLeads = activeLeads.filter(l => isCoordinatorMatch(l.assignedTo, name, coordinators));
       const total = agentLeads.length;
       const won = agentLeads.filter(l => l.stage === 'won').length;
       const progress = agentLeads.filter(l => ['negotiating', 'proposal'].includes(l.stage)).length;
@@ -1057,9 +1053,7 @@ export default function CampaignAnalytics({
     const coordinatorsList = [...baseCoordinatorsList, 'Unassigned'];
 
     const agentLeaderboard = coordinatorsList.map(name => {
-      const agentLeads = name === 'Unassigned'
-        ? customLeads.filter(l => !l.assignedTo || l.assignedTo.trim() === '' || l.assignedTo === 'Unassigned')
-        : customLeads.filter(l => l.assignedTo?.toLowerCase() === name.toLowerCase() || l.assignedTo === name);
+      const agentLeads = customLeads.filter(l => isCoordinatorMatch(l.assignedTo, name, coordinators));
       const total = agentLeads.length;
       const won = agentLeads.filter(l => l.stage === 'won').length;
       const progress = agentLeads.filter(l => ['in_discussion', 'negotiating', 'strong_opportunity', 'office_visited', 'proposal'].includes(l.stage)).length;

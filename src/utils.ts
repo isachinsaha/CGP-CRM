@@ -414,5 +414,93 @@ export const getEffectiveIntake = (lead: {
   return lead.intake === true;
 };
 
+/**
+ * Normalizes any coordinator identifier (username, displayName, or alias)
+ * to a canonical coordinator username.
+ */
+export function normalizeCoordinatorUsername(
+  nameOrIdOrUsername: string | null | undefined,
+  coordinators?: import('./types').Coordinator[]
+): string {
+  if (!nameOrIdOrUsername) return '';
+  const clean = String(nameOrIdOrUsername).trim().toLowerCase();
+  if (!clean || clean === 'unassigned' || clean === 'all') return '';
+
+  // Check in coordinators array if provided
+  if (coordinators && coordinators.length > 0) {
+    const found = coordinators.find(c => 
+      (c.username && c.username.toLowerCase() === clean) ||
+      (c.displayName && c.displayName.toLowerCase() === clean) ||
+      (c.id && c.id.toLowerCase() === clean)
+    );
+    if (found && found.username) {
+      return found.username.toLowerCase();
+    }
+  }
+
+  // Known team member aliases & names
+  if (clean === 'bishwo' || clean.includes('bishwo')) return 'bishwo';
+  if (clean === 'eden' || clean === 'edenla' || clean.includes('eden')) return 'edenla';
+  if (clean === 'sachin' || clean === 'sachinsaha' || clean.includes('sachin')) return 'sachinsaha';
+  if (clean === 'joyce' || clean.includes('joyce')) return 'joyce';
+  if (clean === 'maryada' || clean.includes('maryada')) return 'maryada';
+  if (clean === 'sarina' || clean.includes('sarina')) return 'sarina';
+  if (clean === 'shreya' || clean.includes('shreya')) return 'shreya';
+  if (clean === 'priya' || clean.includes('priya')) return 'priya';
+  if (clean === 'nishant' || clean.includes('nishant')) return 'nishant';
+  if (clean === 'admin' || clean.includes('admin')) return 'admin';
+  if (clean === 'test') return 'test';
+
+  return clean;
+}
+
+/**
+ * Robustly checks if a lead's assignedTo field matches a target coordinator filter,
+ * taking into account usernames ('bishwo'), display names ('Bishwo Rai'),
+ * aliases ('eden' vs 'edenla'), and case variations.
+ */
+export function isCoordinatorMatch(
+  assignedTo: string | null | undefined,
+  targetFilter: string | null | undefined,
+  coordinators?: import('./types').Coordinator[]
+): boolean {
+  if (!targetFilter || targetFilter === 'All' || targetFilter === 'all' || targetFilter === '') {
+    return true;
+  }
+
+  const assignedClean = String(assignedTo || '').trim().toLowerCase();
+  const isLeadUnassigned = !assignedClean || assignedClean === 'unassigned' || assignedClean === 'all';
+
+  if (targetFilter.toLowerCase() === 'unassigned') {
+    return isLeadUnassigned;
+  }
+
+  if (isLeadUnassigned) {
+    return false;
+  }
+
+  const filterClean = String(targetFilter).trim().toLowerCase();
+  
+  // Exact string match
+  if (assignedClean === filterClean) {
+    return true;
+  }
+
+  // Canonical normalized key match
+  const normAssigned = normalizeCoordinatorUsername(assignedTo, coordinators);
+  const normFilter = normalizeCoordinatorUsername(targetFilter, coordinators);
+  if (normAssigned && normFilter && normAssigned === normFilter) {
+    return true;
+  }
+
+  // Substring matching (e.g. "Bishwo" in "Bishwo Rai" or vice-versa)
+  if (assignedClean.includes(filterClean) || filterClean.includes(assignedClean)) {
+    return true;
+  }
+
+  return false;
+}
+
+
 
 

@@ -9,7 +9,7 @@ import {
   GraduationCap, Globe, Wrench, FileText, Check, Tag, Ban
 } from 'lucide-react';
 import LeadWhatsAppChat from './LeadWhatsAppChat.tsx';
-import { getCountryFlagUrl, formatCandidateName } from '../utils.ts';
+import { getCountryFlagUrl, formatCandidateName, isCoordinatorMatch } from '../utils.ts';
 
 interface MessagingCenterProps {
   leads: Lead[];
@@ -229,10 +229,7 @@ export default function MessagingCenter({
 
   // Helper to match coordinator assignment
   const isAssignedToAgent = (lead: Lead, agentId: string) => {
-    if (!lead.assignedTo) return false;
-    const assigned = lead.assignedTo.trim().toLowerCase();
-    const target = (agentId || '').trim().toLowerCase();
-    return assigned === target || assigned === target.replace(/_/g, ' ') || assigned === target.replace(/\s+/g, '_');
+    return isCoordinatorMatch(lead.assignedTo, agentId, coordinators);
   };
 
   // Admin Counts

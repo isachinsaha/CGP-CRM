@@ -69,7 +69,7 @@ import {
 } from './src/server/db.ts';
 import type { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem, AppNotification } from './src/types.ts';
 import type { FullDatabaseBackup } from './src/server/db.ts';
-import { isDefaultExperience, getEffectiveExperience, getEffectiveIntake } from './src/utils.ts';
+import { isDefaultExperience, getEffectiveExperience, getEffectiveIntake, isCoordinatorMatch } from './src/utils.ts';
 import { DEFAULT_WHATSAPP_TEMPLATES, sendWhatsAppMessage, replaceTemplatePlaceholders, formatPhoneForWhatsApp, fetchMetaWhatsAppTemplates } from './src/server/whatsapp.ts';
 import { generateCandidateCvPdf, autoGenerateAndPersistCandidateCv } from './src/server/cvGenerator.ts';
 import { computeSentinelOverview, askAiCopilot, getLeadSpecificAiSuggestions } from './src/server/aiSentinel.ts';
@@ -783,7 +783,10 @@ app.get('/api/leads', async (req, res) => {
       return res.status(304).end();
     }
 
-    const rawLeads = await getLeads(forceRefresh);
+    const [rawLeads, coordinators] = await Promise.all([
+      getLeads(forceRefresh),
+      getCoordinators()
+    ]);
     rawLeads.forEach(lead => backfillLeadHistory(lead));
 
     // 1. Compute dynamic metadata from all unfiltered active leads (excluding soft-deleted)
@@ -886,12 +889,8 @@ app.get('/api/leads', async (req, res) => {
 
       // A. Bucket / Agent filter
       if (userRole === 'agent' || bucket === 'my') {
-        const agentUsername = String(agentId || '').trim().toLowerCase();
-        if (agentUsername) {
-          const assignedUsername = String(lead.assignedTo || '').trim().toLowerCase();
-          if (assignedUsername !== agentUsername) {
-            return false;
-          }
+        if (!isCoordinatorMatch(lead.assignedTo, agentId, coordinators)) {
+          return false;
         }
       }
 
@@ -941,13 +940,7 @@ app.get('/api/leads', async (req, res) => {
 
       // G. Coordinator / Telecaller filter
       if (coordinator && coordinator !== 'All') {
-        if (coordinator === 'Unassigned') {
-          if (lead.assignedTo) return false;
-        } else {
-          const leadCoord = String(lead.assignedTo || '').trim().toLowerCase();
-          const filterCoord = String(coordinator).trim().toLowerCase();
-          if (leadCoord !== filterCoord) return false;
-        }
+        if (!isCoordinatorMatch(lead.assignedTo, coordinator, coordinators)) return false;
       }
 
       // H. Pipeline Stage filter
@@ -1896,7 +1889,7 @@ app.post('/api/tasks/resolve-overdue', async (req, res) => {
 
     leads.forEach(lead => {
       if (targetCoordinator && targetCoordinator !== 'All') {
-        const matchesCoord = lead.assignedTo?.toLowerCase() === targetCoordinator.toLowerCase() || lead.assignedTo === targetCoordinator;
+        const matchesCoord = isCoordinatorMatch(lead.assignedTo, targetCoordinator);
         if (!matchesCoord) return;
       }
       if (lead.tasks && Array.isArray(lead.tasks)) {
