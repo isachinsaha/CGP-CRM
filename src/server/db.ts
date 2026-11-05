@@ -19,7 +19,7 @@ import {
   writeBatch,
   setLogLevel
 } from 'firebase/firestore';
-import type { Lead, Message, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem, AppNotification } from '../types.ts';
+import type { Lead, Message, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem, AppNotification, MonthlyTargetSettings, MonthlyTargetProgress } from '../types.ts';
 import { getEffectiveIntake } from '../utils.ts';
 
 // Configure Firebase SDK to only log errors, suppressing gRPC connection warnings
@@ -37,6 +37,7 @@ const UPDATES_FILE = path.join(DATA_DIR, 'updates.json');
 const METADATA_FILE = path.join(DATA_DIR, 'metadata.json');
 const WALLETS_FILE = path.join(DATA_DIR, 'wallets.json');
 const INCENTIVE_RULES_FILE = path.join(DATA_DIR, 'incentive_rules.json');
+const MONTHLY_TARGET_FILE = path.join(DATA_DIR, 'monthly_target_settings.json');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'whatsapp_templates.json');
 const AUTOREPLY_FILE = path.join(DATA_DIR, 'whatsapp_autoreply.json');
 const MEDIA_FILE = path.join(DATA_DIR, 'media_library.json');
@@ -449,7 +450,7 @@ interface CacheEntry<T> {
   timestamp: number;
 }
 
-const CACHE_TTL_MS = 300000; // 5 minutes Cache TTL (300s). Dramatically reduces Firestore read quota usage!
+const CACHE_TTL_MS = 20000; // 20s Cache TTL for near-instant synchronization between live and dev environments
 
 const dbCache = {
   leads: null as CacheEntry<Lead[]> | null,
@@ -463,6 +464,7 @@ const dbCache = {
   auto_reply: null as CacheEntry<WhatsAppAutoReplySettings> | null,
   media: null as CacheEntry<MediaItem[]> | null,
   notifications: null as CacheEntry<AppNotification[]> | null,
+  monthly_target: null as CacheEntry<MonthlyTargetSettings> | null,
 };
 
 // Immediate cache warmup from local storage so zero API requests ever stall
@@ -950,24 +952,59 @@ async function initializeDatabase() {
   ];
 
   let localLeads = safeReadJsonSync<Lead[]>(DATA_FILE, []);
-  if (localLeads.length < 50 && checkCloudStatus()) {
+  if (checkCloudStatus()) {
     try {
-      console.log(`[Firestore Client] Local database has ${localLeads.length} leads. Pulling full dataset from Firestore...`);
-      const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
-      const snapshot = await runWithTimeout(getDocs(q), 25000);
-      if (!snapshot.empty) {
-        const cloudLeads: Lead[] = [];
-        snapshot.forEach(docSnap => {
-          cloudLeads.push(docSnap.data() as Lead);
-        });
-        console.log(`[Firestore Client] Initialized local cache with ${cloudLeads.length} leads from Firestore.`);
-        localLeads = normalizeLeadsMediaUrls(cloudLeads);
-        safeWriteJsonSync(DATA_FILE, localLeads);
-        safeWriteJsonSync(DATA_FILE_SYNCED, localLeads);
-        dbCache.leads = { data: localLeads, timestamp: Date.now() };
+      if (localLeads.length < 50) {
+        console.log(`[Firestore Client] Local database has ${localLeads.length} leads. Pulling full dataset from Firestore...`);
+        const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
+        const snapshot = await runWithTimeout(getDocs(q), 25000);
+        if (!snapshot.empty) {
+          const cloudLeads: Lead[] = [];
+          snapshot.forEach(docSnap => {
+            cloudLeads.push(docSnap.data() as Lead);
+          });
+          console.log(`[Firestore Client] Initialized local cache with ${cloudLeads.length} leads from Firestore.`);
+          localLeads = normalizeLeadsMediaUrls(cloudLeads);
+          safeWriteJsonSync(DATA_FILE, localLeads);
+          safeWriteJsonSync(DATA_FILE_SYNCED, localLeads);
+          dbCache.leads = { data: localLeads, timestamp: Date.now() };
+        }
+      } else {
+        // Fast delta pull of 300 most recently updated leads on startup so dev mode immediately reflects live mode changes
+        console.log(`[Firestore Client] Syncing recent Firestore updates (${localLeads.length} local leads present)...`);
+        const q = query(collection(db, 'leads'), orderBy('updatedAt', 'desc'), limit(300));
+        const snapshot = await runWithTimeout(getDocs(q), 15000);
+        if (!snapshot.empty) {
+          const localMap = new Map<string, Lead>();
+          localLeads.forEach(l => { if (l && l.id) localMap.set(l.id, l); });
+          let deltaUpdatedCount = 0;
+          snapshot.forEach(docSnap => {
+            const cloudLead = docSnap.data() as Lead;
+            const existing = localMap.get(cloudLead.id);
+            if (!existing) {
+              localLeads.push(cloudLead);
+              localMap.set(cloudLead.id, cloudLead);
+              deltaUpdatedCount++;
+            } else {
+              const cloudTime = new Date(cloudLead.updatedAt || 0).getTime();
+              const localTime = new Date(existing.updatedAt || 0).getTime();
+              if (cloudTime >= localTime) {
+                Object.assign(existing, cloudLead);
+                deltaUpdatedCount++;
+              }
+            }
+          });
+          if (deltaUpdatedCount > 0) {
+            console.log(`[Firestore Client] Startup sync merged ${deltaUpdatedCount} updated leads from cloud.`);
+            localLeads = normalizeLeadsMediaUrls(localLeads);
+            safeWriteJsonSync(DATA_FILE, localLeads);
+            safeWriteJsonSync(DATA_FILE_SYNCED, localLeads);
+            dbCache.leads = { data: localLeads, timestamp: Date.now() };
+          }
+        }
       }
     } catch (err: any) {
-      console.error('[Firestore Client] Failed to fetch leads from Firestore on init:', err?.message || err);
+      console.warn('[Firestore Client] Notice: Initial Firestore sync deferred:', err?.message || err);
     }
   }
 
@@ -1304,8 +1341,8 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
     const normalized = normalizeLeadsMediaUrls(localLeads);
     dbCache.leads = { data: normalized, timestamp: Date.now() };
 
-    // Trigger non-blocking background sync if > 15 mins since last sync
-    if (checkCloudStatus() && (Date.now() - lastFullLeadsSyncTime > 15 * 60 * 1000)) {
+    // Trigger non-blocking background sync if > 30 seconds since last sync
+    if (checkCloudStatus() && (Date.now() - lastFullLeadsSyncTime > 30 * 1000)) {
       setTimeout(() => {
         triggerBackgroundCloudSync().catch(err => {
           console.warn('[Cloud Sync Queue] Background sync trigger deferred:', err?.message || err);
@@ -1400,23 +1437,22 @@ async function runCloudSyncInternal(forceFull = false): Promise<void> {
       cloudLeads.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       lastFullLeadsSyncTime = nowTime;
     } else {
-      // Delta sync! Find latest updatedAt timestamp
-      let maxUpdatedAt = 0;
-      const refLeads = lastSyncedLeads.length > 0 ? lastSyncedLeads : localLeads;
-      refLeads.forEach(l => {
-        if (l) {
-          const upTime = new Date(l.updatedAt || l.createdAt || 0).getTime();
-          if (upTime > maxUpdatedAt) maxUpdatedAt = upTime;
-        }
-      });
+      // 🛡️ Firestore Quota Shield: Check single metadata/sync document (1 document read)
+      const syncDocRef = doc(db, 'metadata', 'sync');
+      const syncSnap = await runWithTimeout(getDoc(syncDocRef), 8000).catch(() => null);
+      const cloudSyncTimestamp = syncSnap && syncSnap.exists() ? (syncSnap.data()?.leads || syncSnap.data()?.lastUpdatedAt || '') : '';
 
-      const lastSyncThreshold = maxUpdatedAt > 0 
-        ? new Date(maxUpdatedAt - 5 * 60 * 1000).toISOString() 
-        : '1970-01-01T00:00:00.000Z';
+      // If cloud timestamp has not changed since our last read and we already have synced leads, skip query!
+      if (!forceFull && cloudSyncTimestamp && cloudSyncTimestamp === lastReadLeadsTimestamp && lastSyncedLeads.length > 0) {
+        lastFullLeadsSyncTime = nowTime;
+        return;
+      }
 
+      // Only query recently updated leads when metadata/sync has changed
       const q = query(
         collection(db, 'leads'),
-        where('updatedAt', '>=', lastSyncThreshold)
+        orderBy('updatedAt', 'desc'),
+        limit(300)
       );
       const snapshot = await runWithTimeout(getDocs(q), 15000);
       const deltaLeads: Lead[] = [];
@@ -1428,10 +1464,16 @@ async function runCloudSyncInternal(forceFull = false): Promise<void> {
       lastSyncedLeads.forEach(l => {
         if (l && l.id) reconstructedMap.set(l.id, l);
       });
+      localLeads.forEach(l => {
+        if (l && l.id) reconstructedMap.set(l.id, l);
+      });
       deltaLeads.forEach(c => {
         if (c && c.id) reconstructedMap.set(c.id, c);
       });
       cloudLeads = Array.from(reconstructedMap.values());
+      if (cloudSyncTimestamp) {
+        lastReadLeadsTimestamp = cloudSyncTimestamp;
+      }
     }
 
     if (cloudLeads.length > 0) {
@@ -2334,6 +2376,24 @@ export async function saveMetadata(metadata: CgpMetadata): Promise<void> {
 
 // --- WALLET DATABASE FUNCTIONS ---
 
+export const TEAM_ROLES = {
+  TELECALLERS: ['joyce', 'maryada', 'sarina'],
+  MANAGEMENT_SENIORS: ['shreya', 'edenla', 'priya', 'bishwo'],
+  TL: 'shreya',
+  MANAGER_EDEN: 'edenla',
+  MANAGER_PRIYA: 'priya',
+  BDM: 'bishwo',
+  DIGITAL_MARKETER: 'sachinsaha'
+};
+
+export function normalizeCoordUsername(name: string): string {
+  const clean = String(name || '').trim().toLowerCase();
+  if (clean === 'eden' || clean === 'edenla') return 'edenla';
+  if (clean === 'sachin' || clean === 'sachinsaha') return 'sachinsaha';
+  if (clean === 'bishwo' || clean.includes('bishwo')) return 'bishwo';
+  return clean;
+}
+
 export async function reconcileWalletsFromLeads(): Promise<Wallet[]> {
   const leads = await getLeads();
   const rules = await getIncentiveRules();
@@ -2388,62 +2448,166 @@ export async function reconcileWalletsFromLeads(): Promise<Wallet[]> {
 
     // 1. Closed Won
     if (lead.stage === 'won') {
-      let incentiveAmount = 400;
-      const cName = String(lead.country || '').trim().toLowerCase();
-      const pName = String(lead.project || '').trim().toLowerCase();
-
-      if (['japan', 'albania', 'europe', 'malta', 'greece'].includes(cName)) {
-        incentiveAmount = 1000;
-      } else if (['kuwait', 'dubai', 'qatar', 'u.a.e', 'oman'].includes(cName)) {
-        incentiveAmount = 400;
-      }
-
-      const matchedRules = rules.filter(r => {
-        const rProject = (r.projectName || '').trim().toLowerCase();
-        const rCountry = (r.country || '').trim().toLowerCase();
-        const projectMatches = rProject === 'all' || rProject === 'any' || rProject === '' || rProject === pName;
-        const countryMatches = rCountry === 'all' || rCountry === 'any' || rCountry === '' || rCountry === 'all countries' || rCountry === cName;
-        return projectMatches && countryMatches;
-      });
-
-      if (matchedRules.length > 0) {
-        matchedRules.sort((a, b) => {
-          const aProj = !['all', 'any', ''].includes((a.projectName || '').trim().toLowerCase());
-          const aCtry = !['all', 'any', '', 'all countries'].includes((a.country || '').trim().toLowerCase());
-          const bProj = !['all', 'any', ''].includes((b.projectName || '').trim().toLowerCase());
-          const bCtry = !['all', 'any', '', 'all countries'].includes((b.country || '').trim().toLowerCase());
-          return (bProj ? 1 : 0) + (bCtry ? 2 : 0) - ((aProj ? 1 : 0) + (aCtry ? 2 : 0));
-        });
-        const best = matchedRules[0];
-        const isSpecific = !['all', 'any', '', 'all countries'].includes((best.country || '').trim().toLowerCase());
-        if (isSpecific) incentiveAmount = best.amount;
-      }
-
       const stageEvent = (lead.timeline || []).find(t => t.text && t.text.includes('Closed Won'));
       const stageHistEvent = (lead.stageHistory || []).find(s => s.newStage === 'won');
       const wonDate = stageHistEvent?.changedAt || stageEvent?.timestamp || lead.updatedAt || lead.createdAt || new Date().toISOString();
+      const isNewPolicy = new Date(wonDate).getTime() >= new Date('2026-11-04T00:00:00.000Z').getTime();
 
-      wallet.transactions.push({
-        id: `tx_${Date.now()}_won_${lead.id}`,
-        type: 'credit',
-        amount: incentiveAmount,
-        reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
-        timestamp: wonDate,
-        leadId: lead.id
-      });
+      if (isNewPolicy) {
+        const normalizedCoord = normalizeCoordUsername(coordKey);
+        // Case A: Telecaller lead (Joyce, Maryada, Sarina)
+        if (TEAM_ROLES.TELECALLERS.includes(normalizedCoord)) {
+          // Assigned Telecaller gets INR 400 CR
+          wallet.transactions.push({
+            id: `tx_${Date.now()}_won_${lead.id}`,
+            type: 'credit',
+            amount: 400,
+            reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
+            timestamp: wonDate,
+            leadId: lead.id
+          });
+          // Shreya (TL) gets INR 200 CR
+          const shreyaW = walletsMap.get('shreya');
+          if (shreyaW) {
+            shreyaW.transactions.push({
+              id: `tx_${Date.now()}_shreya_share_${lead.id}`,
+              type: 'credit',
+              amount: 200,
+              reason: `TL Closed Won Share (Telecaller sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
+              timestamp: wonDate,
+              leadId: lead.id
+            });
+          }
+          // Eden (Manager) gets INR 200 CR
+          const edenW = walletsMap.get('edenla');
+          if (edenW) {
+            edenW.transactions.push({
+              id: `tx_${Date.now()}_eden_share_${lead.id}`,
+              type: 'credit',
+              amount: 200,
+              reason: `Manager Closed Won Share (Telecaller sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
+              timestamp: wonDate,
+              leadId: lead.id
+            });
+          }
+          // Sachin (Digital Marketer) gets INR 200 CR
+          const sachinW = walletsMap.get('sachinsaha');
+          if (sachinW) {
+            sachinW.transactions.push({
+              id: `tx_${Date.now()}_sachin_share_${lead.id}`,
+              type: 'credit',
+              amount: 200,
+              reason: `Digital Marketer Closed Won Share (Telecaller sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
+              timestamp: wonDate,
+              leadId: lead.id
+            });
+          }
+        } 
+        // Case B: Management / Senior (Shreya, Eden, Priya, Bishwo)
+        else if (TEAM_ROLES.MANAGEMENT_SENIORS.includes(normalizedCoord)) {
+          // Assigned coordinator gets INR 400 CR
+          wallet.transactions.push({
+            id: `tx_${Date.now()}_won_${lead.id}`,
+            type: 'credit',
+            amount: 400,
+            reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
+            timestamp: wonDate,
+            leadId: lead.id
+          });
+          // Sachin (Digital Marketer) still gets INR 200 CR
+          if (normalizedCoord !== 'sachinsaha') {
+            const sachinW = walletsMap.get('sachinsaha');
+            if (sachinW) {
+              sachinW.transactions.push({
+                id: `tx_${Date.now()}_sachin_share_${lead.id}`,
+                type: 'credit',
+                amount: 200,
+                reason: `Digital Marketer Closed Won Share (Sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
+                timestamp: wonDate,
+                leadId: lead.id
+              });
+            }
+          }
+        }
+        // Case C: Any other coordinator
+        else {
+          wallet.transactions.push({
+            id: `tx_${Date.now()}_won_${lead.id}`,
+            type: 'credit',
+            amount: 400,
+            reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
+            timestamp: wonDate,
+            leadId: lead.id
+          });
+          if (normalizedCoord !== 'sachinsaha') {
+            const sachinW = walletsMap.get('sachinsaha');
+            if (sachinW) {
+              sachinW.transactions.push({
+                id: `tx_${Date.now()}_sachin_share_${lead.id}`,
+                type: 'credit',
+                amount: 200,
+                reason: `Digital Marketer Closed Won Share (Sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
+                timestamp: wonDate,
+                leadId: lead.id
+              });
+            }
+          }
+        }
+      } else {
+        // Historical baseline rules preserved for leads won before 04 Nov 2026
+        let incentiveAmount = 400;
+        const cName = String(lead.country || '').trim().toLowerCase();
+        const pName = String(lead.project || '').trim().toLowerCase();
 
-      // Sachin Saha Override Bonus
-      if (incentiveAmount === 400 || incentiveAmount === 1000) {
-        const sachinBonus = incentiveAmount === 400 ? 100 : 200;
-        const sachinWallet = walletsMap.get('sachinsaha')!;
-        sachinWallet.transactions.push({
-          id: `tx_${Date.now()}_sachin_${lead.id}`,
+        if (['japan', 'albania', 'europe', 'malta', 'greece'].includes(cName)) {
+          incentiveAmount = 1000;
+        } else if (['kuwait', 'dubai', 'qatar', 'u.a.e', 'oman'].includes(cName)) {
+          incentiveAmount = 400;
+        }
+
+        const matchedRules = rules.filter(r => {
+          const rProject = (r.projectName || '').trim().toLowerCase();
+          const rCountry = (r.country || '').trim().toLowerCase();
+          const projectMatches = rProject === 'all' || rProject === 'any' || rProject === '' || rProject === pName;
+          const countryMatches = rCountry === 'all' || rCountry === 'any' || rCountry === '' || rCountry === 'all countries' || rCountry === cName;
+          return projectMatches && countryMatches;
+        });
+
+        if (matchedRules.length > 0) {
+          matchedRules.sort((a, b) => {
+            const aProj = !['all', 'any', ''].includes((a.projectName || '').trim().toLowerCase());
+            const aCtry = !['all', 'any', '', 'all countries'].includes((a.country || '').trim().toLowerCase());
+            const bProj = !['all', 'any', ''].includes((b.projectName || '').trim().toLowerCase());
+            const bCtry = !['all', 'any', '', 'all countries'].includes((b.country || '').trim().toLowerCase());
+            return (bProj ? 1 : 0) + (bCtry ? 2 : 0) - ((aProj ? 1 : 0) + (aCtry ? 2 : 0));
+          });
+          const best = matchedRules[0];
+          const isSpecific = !['all', 'any', '', 'all countries'].includes((best.country || '').trim().toLowerCase());
+          if (isSpecific) incentiveAmount = best.amount;
+        }
+
+        wallet.transactions.push({
+          id: `tx_${Date.now()}_won_${lead.id}`,
           type: 'credit',
-          amount: sachinBonus,
-          reason: `Sachin Saha Override Bonus (Sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
+          amount: incentiveAmount,
+          reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
           timestamp: wonDate,
           leadId: lead.id
         });
+
+        // Sachin Saha Override Bonus
+        if (incentiveAmount === 400 || incentiveAmount === 1000) {
+          const sachinBonus = incentiveAmount === 400 ? 100 : 200;
+          const sachinWallet = walletsMap.get('sachinsaha')!;
+          sachinWallet.transactions.push({
+            id: `tx_${Date.now()}_sachin_${lead.id}`,
+            type: 'credit',
+            amount: sachinBonus,
+            reason: `Sachin Saha Override Bonus (Sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
+            timestamp: wonDate,
+            leadId: lead.id
+          });
+        }
       }
     }
 
@@ -2560,8 +2724,11 @@ export async function reconcileWalletsFromLeads(): Promise<Wallet[]> {
     const targetW = walletsMap.get(u);
     if (targetW && Array.isArray(ew.transactions)) {
       ew.transactions.forEach(et => {
-        // INVARIANT GUARD: Priya has NEVER taken any debit!
-        if (u === 'priya' && et.type === 'debit') return;
+        // INVARIANT GUARD: Priya has NEVER taken any payout debit! (Allow system reversal/rollback debits)
+        if (u === 'priya' && et.type === 'debit') {
+          const isReversal = et.reason?.toLowerCase().includes('reversal') || et.reason?.toLowerCase().includes('rollback');
+          if (!isReversal) return;
+        }
 
         const alreadyExists = targetW.transactions.some(t => t.id === et.id);
         if (!alreadyExists) {
@@ -2573,9 +2740,9 @@ export async function reconcileWalletsFromLeads(): Promise<Wallet[]> {
 
   const finalWallets = Array.from(walletsMap.values());
   finalWallets.forEach(w => {
-    // Enforce Invariant: Priya MUST NOT have any debit entries
+    // Enforce Invariant: Priya MUST NOT have any payout debit entries (reversals/rollbacks permitted)
     if (w.username.toLowerCase() === 'priya') {
-      w.transactions = (w.transactions || []).filter(t => t.type !== 'debit');
+      w.transactions = (w.transactions || []).filter(t => t.type !== 'debit' || t.reason?.toLowerCase().includes('reversal') || t.reason?.toLowerCase().includes('rollback'));
     }
     const totalCredits = (w.transactions || []).filter(t => t.type === 'credit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
     const totalDebits = (w.transactions || []).filter(t => t.type === 'debit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
@@ -3075,7 +3242,7 @@ export async function getWallets(): Promise<Wallet[]> {
       // 3. Sort transactions descending and recompute accurate balances
       effectiveWallets.forEach(w => {
         if (w.username.toLowerCase() === 'priya') {
-          w.transactions = (w.transactions || []).filter(t => t.type !== 'debit');
+          w.transactions = (w.transactions || []).filter(t => t.type !== 'debit' || t.reason?.toLowerCase().includes('reversal') || t.reason?.toLowerCase().includes('rollback'));
         }
         w.transactions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         const cr = w.transactions.filter(t => t.type === 'credit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
@@ -3107,12 +3274,13 @@ export async function getWallets(): Promise<Wallet[]> {
 
   let wallets = safeReadJsonSync<Wallet[]>(WALLETS_FILE, []);
   
-  // Invariant: Ensure Priya has 0 debits
+  // Invariant: Ensure Priya has 0 unauthorized payout debits (reversals/rollbacks permitted)
   wallets.forEach(w => {
     if (w.username.toLowerCase() === 'priya') {
-      w.transactions = (w.transactions || []).filter(t => t.type !== 'debit');
-      const cr = w.transactions.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-      w.balance = cr;
+      w.transactions = (w.transactions || []).filter(t => t.type !== 'debit' || t.reason?.toLowerCase().includes('reversal') || t.reason?.toLowerCase().includes('rollback'));
+      const cr = w.transactions.filter(t => t.type === 'credit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+      const dr = w.transactions.filter(t => t.type === 'debit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+      w.balance = Math.max(0, cr - dr);
     }
   });
 
@@ -3123,12 +3291,13 @@ export async function getWallets(): Promise<Wallet[]> {
 async function saveWalletsInternal(wallets: Wallet[], snapshotReason = 'Automatic state sync'): Promise<void> {
   await initializeWalletsDatabase();
 
-  // Safety Invariant: Priya MUST NEVER have any debits! (Sachin Saha withdrawals are enabled)
+  // Safety Invariant: Priya MUST NEVER have unauthorized payout debits! (Reversals/rollbacks permitted, Sachin Saha withdrawals enabled)
   wallets.forEach(w => {
     if (w.username.toLowerCase() === 'priya') {
-      w.transactions = (w.transactions || []).filter(t => t.type !== 'debit');
-      const cr = w.transactions.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-      w.balance = cr;
+      w.transactions = (w.transactions || []).filter(t => t.type !== 'debit' || t.reason?.toLowerCase().includes('reversal') || t.reason?.toLowerCase().includes('rollback'));
+      const cr = w.transactions.filter(t => t.type === 'credit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+      const dr = w.transactions.filter(t => t.type === 'debit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+      w.balance = Math.max(0, cr - dr);
     }
   });
 
@@ -3196,7 +3365,10 @@ export async function addWalletTransaction(
   return dbMutex.run(async () => {
     const cleanUser = String(username).trim().toLowerCase();
     if (cleanUser === 'priya' && type === 'debit') {
-      throw new Error(`Transaction rejected: Debits (DR) are strictly prohibited for ${username}. This coordinator has never taken out any debits.`);
+      const isReversal = reason.toLowerCase().includes('reversal') || reason.toLowerCase().includes('rollback');
+      if (!isReversal) {
+        throw new Error(`Transaction rejected: Debits (DR) are strictly prohibited for ${username}. Payout withdrawals are not permitted for this coordinator.`);
+      }
     }
 
     const wallet = await getWalletByUsername(cleanUser);
@@ -3401,6 +3573,247 @@ export async function getIncentiveRules(): Promise<IncentiveRule[]> {
 
 export async function saveIncentiveRules(rules: IncentiveRule[]): Promise<void> {
   return dbMutex.run(() => saveIncentiveRulesInternal(rules));
+}
+
+// ==========================================
+// MONTHLY WON TARGET & INCENTIVE MILESTONE (Coord Bishwo & Priya)
+// ==========================================
+
+export async function getMonthlyTargetSettings(): Promise<MonthlyTargetSettings> {
+  const defaultSettings: MonthlyTargetSettings = {
+    targetWonCount: 15,
+    tier1Rate: 300,
+    tier2Rate: 150,
+    targetCoordinators: ['bishwo', 'priya'],
+    updatedAt: new Date().toISOString()
+  };
+
+  if (dbCache.monthly_target && (Date.now() - dbCache.monthly_target.timestamp < CACHE_TTL_MS)) {
+    return dbCache.monthly_target.data;
+  }
+
+  if (checkCloudStatus()) {
+    try {
+      const docSnap = await runWithTimeout(getDoc(doc(db, 'settings', 'monthly_target')), 10000);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const settings: MonthlyTargetSettings = {
+          targetWonCount: Number(data.targetWonCount) || 15,
+          tier1Rate: Number(data.tier1Rate) || 300,
+          tier2Rate: Number(data.tier2Rate) || 150,
+          targetCoordinators: Array.isArray(data.targetCoordinators) ? data.targetCoordinators : ['bishwo', 'priya'],
+          updatedAt: data.updatedAt || new Date().toISOString()
+        };
+        dbCache.monthly_target = { data: settings, timestamp: Date.now() };
+        safeWriteJsonSync(MONTHLY_TARGET_FILE, settings);
+        return settings;
+      }
+    } catch (err: any) {
+      console.warn('[Firestore] Error reading monthly target settings, using local:', err?.message || err);
+    }
+  }
+
+  const settings = safeReadJsonSync<MonthlyTargetSettings>(MONTHLY_TARGET_FILE, defaultSettings);
+  dbCache.monthly_target = { data: settings, timestamp: Date.now() };
+  return settings;
+}
+
+export async function saveMonthlyTargetSettings(settings: Partial<MonthlyTargetSettings>): Promise<MonthlyTargetSettings> {
+  return dbMutex.run(async () => {
+    const current = await getMonthlyTargetSettings();
+    const updated: MonthlyTargetSettings = {
+      targetWonCount: Number(settings.targetWonCount) > 0 ? Number(settings.targetWonCount) : current.targetWonCount,
+      tier1Rate: Number(settings.tier1Rate) >= 0 ? Number(settings.tier1Rate) : current.tier1Rate,
+      tier2Rate: Number(settings.tier2Rate) >= 0 ? Number(settings.tier2Rate) : current.tier2Rate,
+      targetCoordinators: Array.isArray(settings.targetCoordinators) && settings.targetCoordinators.length > 0 
+        ? settings.targetCoordinators.map(c => normalizeCoordUsername(c)) 
+        : current.targetCoordinators,
+      updatedAt: new Date().toISOString()
+    };
+
+    dbCache.monthly_target = { data: updated, timestamp: Date.now() };
+    safeWriteJsonSync(MONTHLY_TARGET_FILE, updated);
+
+    if (checkCloudStatus()) {
+      try {
+        await runWithTimeout(setDoc(doc(db, 'settings', 'monthly_target'), cleanForFirestore(updated)), 10000);
+      } catch (err: any) {
+        console.warn('[Firestore] Error saving monthly target settings to cloud:', err?.message || err);
+      }
+    }
+
+    return updated;
+  });
+}
+
+export async function getMonthlyTargetProgress(monthKey?: string): Promise<MonthlyTargetProgress> {
+  const settings = await getMonthlyTargetSettings();
+  const leads = await getLeads();
+  const coordinators = await getCoordinators();
+  const wallets = await getWallets();
+
+  // If monthKey not provided, default to current month in YYYY-MM
+  const now = new Date();
+  const defaultMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const effectiveMonthKey = (monthKey && /^\d{4}-\d{2}$/.test(monthKey)) ? monthKey : defaultMonthKey;
+
+  const [yStr, mStr] = effectiveMonthKey.split('-');
+  const year = parseInt(yStr, 10);
+  const monthIdx = parseInt(mStr, 10) - 1;
+  const monthDate = new Date(year, monthIdx, 1);
+  const monthLabel = monthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+  // Filter won leads that were won in this month
+  const wonLeads: Array<{
+    id: string;
+    name: string;
+    phone: string;
+    wonDate: string;
+    assignedTo: string;
+    country?: string;
+    project?: string;
+  }> = [];
+
+  leads.forEach(l => {
+    if (l.isDeleted || l.stage !== 'won') return;
+    const stageHist = (l.stageHistory || []).find(s => s.newStage === 'won');
+    const wonDate = stageHist?.changedAt || l.updatedAt || l.createdAt || '';
+    if (wonDate.startsWith(effectiveMonthKey)) {
+      wonLeads.push({
+        id: l.id,
+        name: l.name,
+        phone: l.phone,
+        wonDate,
+        assignedTo: l.assignedTo || 'Unassigned',
+        country: l.country,
+        project: l.project
+      });
+    }
+  });
+
+  const wonCount = wonLeads.length;
+  const isTargetAchieved = wonCount >= settings.targetWonCount;
+  const applicableRate = isTargetAchieved ? settings.tier1Rate : settings.tier2Rate;
+  const projectedPayoutPerCoord = wonCount * applicableRate;
+  const totalProjectedPayout = projectedPayoutPerCoord * settings.targetCoordinators.length;
+  const progressPercent = settings.targetWonCount > 0 
+    ? Math.min(100, Math.round((wonCount / settings.targetWonCount) * 100))
+    : 100;
+
+  // Check settlement status across target coordinators' wallets
+  const settlementKey = `monthly_won_${effectiveMonthKey}`;
+  let isSettledForMonth = false;
+  let settledAt: string | null = null;
+
+  for (const coordName of settings.targetCoordinators) {
+    const w = wallets.find(wall => wall.username.toLowerCase() === coordName.toLowerCase());
+    if (w && Array.isArray(w.transactions)) {
+      const tx = w.transactions.find(t => 
+        t.type === 'credit' && (
+          t.leadId === settlementKey ||
+          (t.reason.includes('Monthly Won Target Payout') && t.reason.includes(effectiveMonthKey))
+        )
+      );
+      if (tx) {
+        isSettledForMonth = true;
+        settledAt = tx.timestamp;
+        break;
+      }
+    }
+  }
+
+  // Get coordinators information with roles
+  const coordinatorsInfo = settings.targetCoordinators.map(username => {
+    const cleanU = normalizeCoordUsername(username);
+    const coordObj = coordinators.find(c => c.username.toLowerCase() === cleanU);
+    let role = 'Coordinator';
+    if (cleanU === 'bishwo') role = 'BDM';
+    else if (cleanU === 'priya') role = 'Manager';
+    else if (cleanU === 'edenla') role = 'Manager';
+    else if (cleanU === 'shreya') role = 'TL';
+    else if (cleanU === 'sachinsaha') role = 'Digital Marketer';
+    else if (TEAM_ROLES.TELECALLERS.includes(cleanU)) role = 'Telecaller';
+
+    return {
+      username: cleanU,
+      displayName: coordObj?.displayName || username,
+      role
+    };
+  });
+
+  return {
+    monthKey: effectiveMonthKey,
+    monthLabel,
+    targetWonCount: settings.targetWonCount,
+    tier1Rate: settings.tier1Rate,
+    tier2Rate: settings.tier2Rate,
+    targetCoordinators: settings.targetCoordinators,
+    coordinatorsInfo,
+    wonCount,
+    progressPercent,
+    isTargetAchieved,
+    applicableRate,
+    projectedPayoutPerCoord,
+    totalProjectedPayout,
+    isSettledForMonth,
+    settledAt,
+    wonLeads
+  };
+}
+
+export async function settleMonthlyTargetPayout(monthKey?: string, note?: string): Promise<{
+  success: boolean;
+  monthKey: string;
+  monthLabel: string;
+  wonCount: number;
+  applicableRate: number;
+  amountPerCoord: number;
+  creditedCoordinators: string[];
+  message: string;
+}> {
+  return dbMutex.run(async () => {
+    const progress = await getMonthlyTargetProgress(monthKey);
+    const amount = progress.projectedPayoutPerCoord;
+    const settlementKey = `monthly_won_${progress.monthKey}`;
+    const credited: string[] = [];
+
+    for (const coord of progress.targetCoordinators) {
+      const cleanUser = normalizeCoordUsername(coord);
+      const wallet = await getWalletByUsername(cleanUser);
+      
+      const alreadySettled = (wallet.transactions || []).some(t => 
+        t.type === 'credit' && (
+          t.leadId === settlementKey ||
+          (t.reason.includes('Monthly Won Target Payout') && t.reason.includes(progress.monthKey))
+        )
+      );
+
+      if (!alreadySettled && amount > 0) {
+        const reason = `Monthly Won Target Payout (${progress.monthLabel}): ${progress.wonCount} won candidates @ INR ${progress.applicableRate}/candidate (Target: ${progress.targetWonCount} won)${note ? ` - Note: ${note}` : ''}`;
+        await addWalletTransaction(
+          cleanUser,
+          'credit',
+          amount,
+          reason,
+          settlementKey
+        );
+        credited.push(cleanUser);
+      }
+    }
+
+    return {
+      success: true,
+      monthKey: progress.monthKey,
+      monthLabel: progress.monthLabel,
+      wonCount: progress.wonCount,
+      applicableRate: progress.applicableRate,
+      amountPerCoord: amount,
+      creditedCoordinators: credited,
+      message: credited.length > 0 
+        ? `Successfully credited INR ${amount} to ${credited.join(' & ')} for ${progress.monthLabel}.`
+        : `Payout already settled previously for ${progress.monthLabel}.`
+    };
+  });
 }
 
 // ==========================================

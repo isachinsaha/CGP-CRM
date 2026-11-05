@@ -439,7 +439,8 @@ export default function App() {
         all: activeTab !== 'list' ? 'true' : 'false',
         activeTab: activeTab,
         gender: filters.gender || 'All',
-        remarksFilter: filters.remarksFilter || 'All'
+        remarksFilter: filters.remarksFilter || 'All',
+        stage: filters.stage || 'All'
       });
 
       if (forceRefresh) {
@@ -517,13 +518,14 @@ export default function App() {
     pullCrmData();
   }, [currentPage, filterKey, activeTab]);
 
-  // Set up background polling to fetch new WhatsApp replies or lead modifications every 180 seconds only when tab is active
+  // Set up background polling to fetch new WhatsApp replies or lead modifications every 15 seconds (5s on messages tab) when tab is active
   useEffect(() => {
+    const pollIntervalMs = activeTab === 'messages' ? 5000 : 15000;
     const timer = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         pullCrmData(true, false);
       }
-    }, 180000);
+    }, pollIntervalMs);
 
     return () => clearInterval(timer);
   }, [currentPage, filterKey, activeTab]);

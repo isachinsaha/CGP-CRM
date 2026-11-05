@@ -58,6 +58,7 @@ export default function MessagingCenter({
   const [filterType, setFilterType] = useState<'requesting' | 'active' | 'history'>(
     userRole === 'admin' ? 'requesting' : 'active'
   );
+  const [replyFilter, setReplyFilter] = useState<'all' | 'pending'>('all');
   const [selectedCoordinatorFilter, setSelectedCoordinatorFilter] = useState<string>('');
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
@@ -97,6 +98,18 @@ export default function MessagingCenter({
       setSelectedTemplateId('');
     }
   }, [showStartChatModal]);
+
+  // Automatically refresh WhatsApp chats and incoming messages every 5s while Messaging Center is active
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        if (onRefreshData) {
+          onRefreshData();
+        }
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [onRefreshData]);
 
   // Dynamically update the initial message when template, name, position, country, or phone changes
   useEffect(() => {
@@ -229,7 +242,7 @@ export default function MessagingCenter({
         l.assignedTo.toLowerCase() === 'unassigned' || 
         l.assignedTo.toLowerCase() === 'all' ||
         l.assignedTo.trim() === '';
-      return isUnassigned && !isOlderThan24Hours(l);
+      return isUnassigned;
     }).length;
   }, [activeChatLeads]);
 
@@ -278,6 +291,63 @@ export default function MessagingCenter({
     }).length;
   }, [activeChatLeads, currentAgentId, userRole, selectedCoordinatorFilter]);
 
+  // Helper to determine if a chat is waiting for our response (the last message is from the candidate)
+  const isReplyPending = (lead: Lead) => {
+    const msgs = (lead.messages || []).filter(
+      m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database')
+    );
+    if (msgs.length === 0) return false;
+    const latestMsg = msgs[msgs.length - 1];
+    return latestMsg?.sender === 'lead';
+  };
+
+  // Pending reply counts for Active Chats (candidates waiting for response from us within 24h)
+  const activePendingReplyCount = useMemo(() => {
+    return activeChatLeads.filter(l => {
+      const isUnassigned = !l.assignedTo || 
+        l.assignedTo.toLowerCase() === 'unassigned' || 
+        l.assignedTo.toLowerCase() === 'all' ||
+        l.assignedTo.trim() === '';
+      const isMine = isAssignedToAgent(l, currentAgentId);
+      
+      if (userRole === 'admin') {
+        if (isUnassigned || isOlderThan24Hours(l)) return false;
+        if (selectedCoordinatorFilter) {
+          if (selectedCoordinatorFilter === 'unassigned') {
+            if (!isUnassigned) return false;
+          } else if (!isAssignedToAgent(l, selectedCoordinatorFilter)) {
+            return false;
+          }
+        }
+        return isReplyPending(l);
+      }
+      return isMine && !isOlderThan24Hours(l) && isReplyPending(l);
+    }).length;
+  }, [activeChatLeads, currentAgentId, userRole, selectedCoordinatorFilter]);
+
+  // Pending reply counts for History (candidates waiting for response from us in >24h history)
+  const historyPendingReplyCount = useMemo(() => {
+    return activeChatLeads.filter(l => {
+      const isUnassigned = !l.assignedTo || 
+        l.assignedTo.toLowerCase() === 'unassigned' || 
+        l.assignedTo.toLowerCase() === 'all' ||
+        l.assignedTo.trim() === '';
+      const isMine = isAssignedToAgent(l, currentAgentId);
+      if (userRole === 'admin') {
+        if (!isOlderThan24Hours(l)) return false;
+        if (selectedCoordinatorFilter) {
+          if (selectedCoordinatorFilter === 'unassigned') {
+            if (!isUnassigned) return false;
+          } else if (!isAssignedToAgent(l, selectedCoordinatorFilter)) {
+            return false;
+          }
+        }
+        return isReplyPending(l);
+      }
+      return isMine && isOlderThan24Hours(l) && isReplyPending(l);
+    }).length;
+  }, [activeChatLeads, currentAgentId, userRole, selectedCoordinatorFilter]);
+
   // Total unread messages count for requesting
   const requestingUnreadCount = useMemo(() => {
     return activeChatLeads.reduce((sum, l) => {
@@ -285,8 +355,7 @@ export default function MessagingCenter({
         l.assignedTo.toLowerCase() === 'unassigned' || 
         l.assignedTo.toLowerCase() === 'all' ||
         l.assignedTo.trim() === '';
-      const isReq = isUnassigned && !isOlderThan24Hours(l);
-      if (!isReq) return sum;
+      if (!isUnassigned) return sum;
       const unreadMsgs = (l.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
       return sum + unreadMsgs;
     }, 0);
@@ -365,19 +434,21 @@ export default function MessagingCenter({
         }
       }
 
-      // Requesting: Always unassigned
+      // Requesting: Always unassigned candidates waiting for assignment & action
       if (filterType === 'requesting') {
-        if (olderThan24h || !isUnassigned) return false;
+        if (!isUnassigned) return false;
       } 
       // Active: Assigned (All for admin, Me for coordinator), not older than 24h
       else if (filterType === 'active') {
         if (olderThan24h || isUnassigned) return false;
         if (userRole !== 'admin' && !assignedToMe) return false;
+        if (replyFilter === 'pending' && !isReplyPending(lead)) return false;
       }
       // History: Older than 24h
       else if (filterType === 'history') {
         if (!olderThan24h) return false;
         if (userRole !== 'admin' && !assignedToMe) return false;
+        if (replyFilter === 'pending' && !isReplyPending(lead)) return false;
       }
 
       // Search query
@@ -403,7 +474,7 @@ export default function MessagingCenter({
       const bLatest = bMsgs.length > 0 ? new Date(bMsgs[bMsgs.length - 1].timestamp || 0).getTime() : 0;
       return bLatest - aLatest;
     });
-  }, [activeChatLeads, searchQuery, filterType, userRole, currentAgentId]);
+  }, [activeChatLeads, searchQuery, filterType, replyFilter, userRole, currentAgentId, selectedCoordinatorFilter]);
 
   // Currently active lead for chat panel
   const currentChatLead = useMemo(() => {
@@ -698,8 +769,8 @@ export default function MessagingCenter({
   return (
     <div className="flex-1 flex min-h-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-lg overflow-hidden text-left" id="cgp-messaging-center">
       
-      {/* Left Pane: Candidate Conversation List (Width increased by 15% from original) */}
-      <div className={`w-full md:w-[405px] lg:w-[450px] xl:w-[495px] flex flex-col border-r border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0 ${
+      {/* Left Pane: Candidate Conversation List (Expanded width to fit all tabs and badges without scrolling) */}
+      <div className={`w-full md:w-[490px] lg:w-[540px] xl:w-[580px] 2xl:w-[620px] flex flex-col border-r border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0 ${
         mobileView === 'chat' ? 'hidden md:flex' : 'flex'
       }`}>
         
@@ -787,13 +858,13 @@ export default function MessagingCenter({
             </div>
           )}
 
-          {/* Filter Buttons: Single Line, No-Wrap */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-nowrap w-full py-0.5">
+          {/* Filter Buttons: Full width distribution, larger font, no gaps */}
+          <div className="flex items-center gap-1.5 w-full py-0.5">
             {/* Tab 1: Requesting (Admin Only) */}
             {userRole === 'admin' && (
               <button
                 onClick={() => setFilterType('requesting')}
-                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                className={`flex-1 text-xs font-black py-1.5 px-2 rounded-lg transition-all cursor-pointer border flex items-center justify-center gap-1.5 whitespace-nowrap ${
                   filterType === 'requesting'
                     ? 'bg-amber-500 text-white border-amber-500 shadow-2xs font-black'
                     : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 hover:bg-amber-100'
@@ -801,14 +872,14 @@ export default function MessagingCenter({
               >
                 <span>📥 Requesting</span>
                 {requestingLeadsCount > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
+                  <span className={`text-[10.5px] px-1.5 py-0.5 rounded-full font-mono font-black ${
                     filterType === 'requesting' ? 'bg-white text-amber-700' : 'bg-amber-100 dark:bg-amber-900 text-amber-400 dark:text-amber-200'
                   }`}>
                     {requestingLeadsCount}
                   </span>
                 )}
                 {requestingUnreadCount > 0 && (
-                  <span className="text-[9.5px] px-1.5 py-0.2 rounded-full font-mono font-black bg-rose-500 text-white animate-pulse" title={`${requestingUnreadCount} unread WhatsApp messages`}>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono font-black bg-rose-500 text-white animate-pulse" title={`${requestingUnreadCount} unread WhatsApp messages`}>
                     ✉ {requestingUnreadCount}
                   </span>
                 )}
@@ -818,24 +889,29 @@ export default function MessagingCenter({
             {/* Tab 2: Active Chats */}
             <button
               onClick={() => setFilterType('active')}
-              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              className={`flex-1 text-xs font-black py-1.5 px-2 rounded-lg transition-all cursor-pointer border flex items-center justify-center gap-1.5 whitespace-nowrap ${
                 filterType === 'active'
                   ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs font-black'
                   : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
               }`}
             >
-              <MessageSquare className="h-3 w-3" />
+              <MessageSquare className="h-3.5 w-3.5" />
               <span>Active Chats</span>
               {activeLeadsCount > 0 && (
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
+                <span className={`text-[10.5px] px-1.5 py-0.5 rounded-full font-mono font-black ${
                   filterType === 'active' ? 'bg-white text-emerald-700' : 'bg-emerald-100 dark:bg-emerald-900 text-emerald-400 dark:text-emerald-200'
                 }`}>
                   {activeLeadsCount}
                 </span>
               )}
               {activeUnreadCount > 0 && (
-                <span className="text-[9.5px] px-1.5 py-0.2 rounded-full font-mono font-black bg-rose-500 text-white animate-pulse" title={`${activeUnreadCount} unread WhatsApp messages`}>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono font-black bg-rose-500 text-white animate-pulse" title={`${activeUnreadCount} unread WhatsApp messages`}>
                   ✉ {activeUnreadCount}
+                </span>
+              )}
+              {activePendingReplyCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono font-black bg-amber-500 text-slate-950 shadow-xs" title={`${activePendingReplyCount} chats awaiting reply in active chats`}>
+                  ⏳ {activePendingReplyCount}
                 </span>
               )}
             </button>
@@ -843,23 +919,66 @@ export default function MessagingCenter({
             {/* Tab 3: History */}
             <button
               onClick={() => setFilterType('history')}
-              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              className={`flex-1 text-xs font-black py-1.5 px-2 rounded-lg transition-all cursor-pointer border flex items-center justify-center gap-1.5 whitespace-nowrap ${
                 filterType === 'history'
                   ? 'bg-slate-800 dark:bg-slate-700 text-white border-slate-800 shadow-2xs font-black'
                   : 'bg-slate-800 dark:bg-slate-850 border-slate-750 dark:border-slate-700 text-slate-400 dark:text-slate-300 hover:bg-slate-750'
               }`}
             >
-              <Clock className="h-3 w-3" />
+              <Clock className="h-3.5 w-3.5" />
               <span>History (&gt;24h)</span>
               {historyLeadsCount > 0 && (
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-black ${
+                <span className={`text-[10.5px] px-1.5 py-0.5 rounded-full font-mono font-black ${
                   filterType === 'history' ? 'bg-white text-slate-800' : 'bg-slate-900 dark:bg-slate-700 text-slate-300 dark:text-slate-300'
                 }`}>
                   {historyLeadsCount}
                 </span>
               )}
+              {historyPendingReplyCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono font-black bg-amber-500 text-slate-950 shadow-xs" title={`${historyPendingReplyCount} chats awaiting reply in history`}>
+                  ⏳ {historyPendingReplyCount}
+                </span>
+              )}
             </button>
           </div>
+
+          {/* Sub-filter for Active Chats & History: All Chats vs Reply Pending (for both Admin & Coordinators) */}
+          {(filterType === 'active' || filterType === 'history') && (
+            <div className="flex items-center gap-1.5 bg-slate-800/90 p-1 rounded-xl border border-slate-750 mt-1.5">
+              <button
+                type="button"
+                onClick={() => setReplyFilter('all')}
+                className={`flex-1 text-xs font-black py-1.5 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  replyFilter === 'all'
+                    ? 'bg-slate-700 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>All Chats</span>
+                <span className="text-[10.5px] font-mono opacity-80">
+                  ({filterType === 'active' ? activeLeadsCount : historyLeadsCount})
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setReplyFilter('pending')}
+                className={`flex-1 text-xs font-black py-1.5 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  replyFilter === 'pending'
+                    ? 'bg-amber-500 text-slate-950 shadow-xs'
+                    : 'text-amber-400 hover:text-amber-300 hover:bg-amber-950/30'
+                }`}
+              >
+                <span>⏳ Reply Pending</span>
+                {(filterType === 'active' ? activePendingReplyCount : historyPendingReplyCount) > 0 && (
+                  <span className={`text-[10.5px] px-1.5 py-0.5 rounded-full font-mono font-black ${
+                    replyFilter === 'pending' ? 'bg-amber-950 text-amber-200' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                  }`}>
+                    {filterType === 'active' ? activePendingReplyCount : historyPendingReplyCount}
+                  </span>
+                )}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* List of Chat Threads */}
@@ -870,19 +989,32 @@ export default function MessagingCenter({
                   <MessageSquare className="h-5 w-5" />
                 </div>
                 <p className="text-xs font-bold">
-                  {filterType === 'requesting' 
-                    ? 'No unassigned chats in Requesting' 
-                    : filterType === 'history' 
-                      ? 'No chat history older than 24 hours' 
-                      : 'No conversations found'}
+                  {replyFilter === 'pending'
+                    ? `No chats waiting for reply in ${filterType === 'active' ? 'Active Chats' : 'History'}`
+                    : filterType === 'requesting' 
+                      ? 'No unassigned chats in Requesting' 
+                      : filterType === 'history' 
+                        ? 'No chat history older than 24 hours' 
+                        : 'No conversations found'}
                 </p>
                 <p className="text-[11px] text-slate-400">
-                  {filterType === 'requesting' 
-                    ? 'All inbound candidate messages have been assigned to coordinators!' 
-                    : filterType === 'history'
-                      ? 'Conversations older than 24 hours will automatically archive here.'
-                      : 'Assigned candidate messages will appear here.'}
+                  {replyFilter === 'pending'
+                    ? 'All candidate messages have received replies from the team!'
+                    : filterType === 'requesting' 
+                      ? 'All inbound candidate messages have been assigned to coordinators!' 
+                      : filterType === 'history'
+                        ? 'Conversations older than 24 hours will automatically archive here.'
+                        : 'Assigned candidate messages will appear here.'}
                 </p>
+                {replyFilter === 'pending' && (
+                  <button
+                    type="button"
+                    onClick={() => setReplyFilter('all')}
+                    className="text-xs text-amber-400 hover:underline font-bold mt-2 cursor-pointer inline-block"
+                  >
+                    View all chats
+                  </button>
+                )}
               </div>
             ) : (
               filteredChatLeads.map(lead => {
@@ -930,6 +1062,15 @@ export default function MessagingCenter({
                             >
                               <Ban className="h-2 w-2 stroke-[2.5]" />
                               BLOCKED
+                            </span>
+                          )}
+                          {isReplyPending(lead) && (
+                            <span 
+                              className="shrink-0 text-[8.5px] font-black text-amber-300 bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.2 rounded-full flex items-center gap-0.5 uppercase tracking-wider shadow-2xs"
+                              title="Candidate message waiting for reply from us"
+                            >
+                              <Clock className="h-2 w-2 stroke-[2.5]" />
+                              Reply Pending
                             </span>
                           )}
                         </div>
@@ -1166,7 +1307,7 @@ export default function MessagingCenter({
 
                 {/* Right Sub-Pane: Lead Form & Transfer Panel (Admin Only) */}
                 {userRole === 'admin' && showLeadDetailsPanel && (
-                  <div className="w-[320px] lg:w-[370px] xl:w-[410px] border-l border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex flex-col min-h-0 shrink-0">
+                  <div className="w-[300px] lg:w-[340px] xl:w-[375px] border-l border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex flex-col min-h-0 shrink-0">
                     
                     {/* Header with Title and Unassigned Badge */}
                     <div className="p-3.5 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">

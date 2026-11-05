@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  X, Plus, Edit2, Trash2, Check, Coins, Lock, Globe, Briefcase, Info 
+  X, Plus, Edit2, Trash2, Check, Coins, Lock, Globe, Briefcase, Info, Target, Trophy, CheckCircle 
 } from 'lucide-react';
 import { IncentiveRule } from '../types.ts';
 
@@ -34,6 +34,52 @@ export default function IncentiveRulesManager({
   const [editCountry, setEditCountry] = useState('');
   const [editAmount, setEditAmount] = useState<number>(0);
 
+  // Monthly Target states (Coord Bishwo & Priya)
+  const [targetWonCount, setTargetWonCount] = useState<number>(15);
+  const [tier1Rate, setTier1Rate] = useState<number>(300);
+  const [tier2Rate, setTier2Rate] = useState<number>(150);
+  const [savingTarget, setSavingTarget] = useState(false);
+  const [targetSuccess, setTargetSuccess] = useState<string | null>(null);
+
+  const fetchMonthlyTargetSettings = async () => {
+    try {
+      const res = await fetch('/api/monthly-target-settings');
+      if (res.ok) {
+        const data = await res.json();
+        setTargetWonCount(data.targetWonCount || 15);
+        setTier1Rate(data.tier1Rate || 300);
+        setTier2Rate(data.tier2Rate || 150);
+      }
+    } catch {}
+  };
+
+  const handleSaveMonthlyTarget = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingTarget(true);
+    setTargetSuccess(null);
+    try {
+      const res = await fetch('/api/monthly-target-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetWonCount: Number(targetWonCount) || 15,
+          tier1Rate: Number(tier1Rate) || 300,
+          tier2Rate: Number(tier2Rate) || 150,
+          targetCoordinators: ['bishwo', 'priya']
+        })
+      });
+      if (res.ok) {
+        setTargetSuccess('Monthly target rules saved successfully!');
+        if (onRulesChanged) onRulesChanged();
+        setTimeout(() => setTargetSuccess(null), 3500);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingTarget(false);
+    }
+  };
+
   // Fetch rules from server on mount
   const fetchRules = async () => {
     setLoading(true);
@@ -56,6 +102,7 @@ export default function IncentiveRulesManager({
   useEffect(() => {
     if (userRole === 'admin') {
       fetchRules();
+      fetchMonthlyTargetSettings();
     }
   }, [userRole]);
 
@@ -204,6 +251,109 @@ export default function IncentiveRulesManager({
         {/* Scrollable Container */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           
+          {/* Monthly Won Target Form (Bishwo & Priya) */}
+          <div className="bg-gradient-to-r from-slate-900/80 via-slate-900 to-indigo-950/40 p-5 rounded-2xl border border-indigo-500/30 shadow-lg space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-500/20 border border-indigo-500/30 rounded-xl text-indigo-400">
+                  <Target className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-black text-slate-100 uppercase tracking-wider">
+                      Monthly Won Target & Tier Rates
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[9px] font-black uppercase">
+                      Bishwo & Priya
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Target milestone bonuses for Coord Bishwo (BDM) & Priya (Manager) credited at month end.
+                  </p>
+                </div>
+              </div>
+              
+              {targetSuccess && (
+                <div className="px-3 py-1 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5 animate-in fade-in">
+                  <CheckCircle className="h-3.5 w-3.5" />
+                  <span>{targetSuccess}</span>
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={handleSaveMonthlyTarget} className="space-y-3.5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                    🎯 Monthly Won Target (Candidates)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={targetWonCount}
+                    onChange={(e) => setTargetWonCount(Number(e.target.value) || 1)}
+                    className="w-full text-xs px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                    placeholder="e.g. 15"
+                    required
+                  />
+                  <p className="text-[10px] text-slate-500 mt-0.5">Target threshold (default: 15 won)</p>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                    🏆 Target Met Rate (INR / candidate)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={tier1Rate}
+                    onChange={(e) => setTier1Rate(Number(e.target.value) || 0)}
+                    className="w-full text-xs px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                    placeholder="e.g. 300"
+                    required
+                  />
+                  <p className="text-[10px] text-slate-500 mt-0.5">Applied when won ≥ target (15 won = 4,500 INR)</p>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                    ⏳ Below Target Rate (INR / candidate)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={tier2Rate}
+                    onChange={(e) => setTier2Rate(Number(e.target.value) || 0)}
+                    className="w-full text-xs px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                    placeholder="e.g. 150"
+                    required
+                  />
+                  <p className="text-[10px] text-slate-500 mt-0.5">Applied when won &lt; target (14 won = 2,100 INR)</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
+                <div className="text-[11px] text-slate-400">
+                  <span className="font-bold text-slate-300">Live Preview: </span>
+                  <span className="text-emerald-400 font-mono font-bold">15 won = INR {(15 * tier1Rate).toLocaleString()}</span>
+                  <span className="text-slate-500"> | </span>
+                  <span className="text-emerald-400 font-mono font-bold">16 won = INR {(16 * tier1Rate).toLocaleString()}</span>
+                  <span className="text-slate-500"> | </span>
+                  <span className="text-amber-400 font-mono font-bold">14 won = INR {(14 * tier2Rate).toLocaleString()}</span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingTarget}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 self-end sm:self-auto shadow-md"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  <span>{savingTarget ? 'Saving...' : 'Save Target & Rates'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
           {/* Rule Creator Form */}
           <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800">
             <h4 className="text-xs font-black text-slate-300 uppercase tracking-wider mb-3">Create New Incentive Structure Rule</h4>

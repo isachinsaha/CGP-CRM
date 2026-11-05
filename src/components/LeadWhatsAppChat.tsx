@@ -431,7 +431,7 @@ export default function LeadWhatsAppChat({
           console.warn('[Chat Poll] Poll skipped:', err?.message || err);
         }
       }
-    }, 60000);
+    }, 3500);
     return () => clearInterval(interval);
   }, [lead.id]);
 

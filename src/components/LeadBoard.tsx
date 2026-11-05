@@ -828,8 +828,9 @@ export default function LeadBoard({
               </p>
             </div>
           ) : (
-            <div className="text-[11.5px] text-left text-slate-500 font-sans font-medium italic">
-              No Remarks Logged
+            <div className="text-[11.5px] text-left text-slate-500 font-sans font-medium italic flex items-center justify-between">
+              <span>{lead.position ? `Intake: ${lead.position}` : 'Awaiting Telecaller Call'}</span>
+              <span className="text-[9.5px] text-slate-500 font-mono uppercase tracking-wider">Awaiting Call</span>
             </div>
           )}
         </div>

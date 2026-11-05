@@ -33,12 +33,18 @@ import {
   addWalletTransaction, 
   deleteWalletTransaction,
   reconcileWalletsFromLeads,
+  TEAM_ROLES,
+  normalizeCoordUsername,
   createWalletSnapshot,
   listWalletSnapshots,
   restoreWalletSnapshot,
   getWalletSafetyStatus,
   getIncentiveRules, 
   saveIncentiveRules,
+  getMonthlyTargetSettings,
+  saveMonthlyTargetSettings,
+  getMonthlyTargetProgress,
+  settleMonthlyTargetPayout,
   createFullDatabaseBackup,
   generateFullXLSXBuffer,
   executeScheduledFullBackup,
@@ -1099,13 +1105,33 @@ app.post('/api/leads', async (req, res) => {
       return;
     }
 
-    const leads = await getLeads(true);
+    const leads = await getLeads();
 
-    const existingDuplicate = leads.find(l => arePhonesMatching(l.phone, phone) || (l.alternateNo && arePhonesMatching(l.alternateNo, phone)));
+    // Only active (non-deleted) candidates should prevent duplicate enrollment
+    const existingDuplicate = leads.find(l => !l.isDeleted && (arePhonesMatching(l.phone, phone) || (l.alternateNo && arePhonesMatching(l.alternateNo, phone))));
     if (existingDuplicate) {
       res.status(400).json({ error: `Phone number already exists in CRM (Duplicate number detected: matches lead ${existingDuplicate.serialNo} - ${existingDuplicate.name})` });
       return;
     }
+
+    if (alternateNo && String(alternateNo).trim()) {
+      const existingAltDuplicate = leads.find(l => !l.isDeleted && (arePhonesMatching(l.phone, alternateNo) || (l.alternateNo && arePhonesMatching(l.alternateNo, alternateNo))));
+      if (existingAltDuplicate) {
+        res.status(400).json({ error: `Alternate phone number already exists in CRM (Duplicate number detected: matches lead ${existingAltDuplicate.serialNo} - ${existingAltDuplicate.name})` });
+        return;
+      }
+    }
+
+    // Clean up/archive phone on any previously soft-deleted records with this same number so the new enrollment has a clean slate
+    const ghostLeads = leads.filter(l => l.isDeleted && (arePhonesMatching(l.phone, phone) || (alternateNo && arePhonesMatching(l.phone, alternateNo))));
+    ghostLeads.forEach(g => {
+      if (arePhonesMatching(g.phone, phone)) {
+        g.phone = `${g.phone}_archived_${Date.now()}`;
+      }
+      if (alternateNo && g.alternateNo && arePhonesMatching(g.alternateNo, alternateNo)) {
+        g.alternateNo = `${g.alternateNo}_archived_${Date.now()}`;
+      }
+    });
     
     // Auto increment serial number
     const sequence = leads.length + 1;
@@ -1202,10 +1228,10 @@ app.post('/api/leads/bulk', async (req, res) => {
 
       const cleanPhone = String(phone).trim();
       const formattedName = formatCandidateNameBackend(name);
-      const duplicateExists = currentLeads.some((l: any) => String(l.phone).trim() === cleanPhone) || 
-                              newLeadsToAdd.some((l: any) => String(l.phone).trim() === cleanPhone);
+      const duplicateExists = currentLeads.some((l: any) => !l.isDeleted && (arePhonesMatching(l.phone, cleanPhone) || (l.alternateNo && arePhonesMatching(l.alternateNo, cleanPhone)))) || 
+                              newLeadsToAdd.some((l: any) => arePhonesMatching(l.phone, cleanPhone) || (l.alternateNo && arePhonesMatching(l.alternateNo, cleanPhone)));
       if (duplicateExists) {
-        skipped.push(`${formattedName} (${phone}): Already exists in database.`);
+        skipped.push(`${formattedName} (${phone}): Already exists in active database.`);
         return;
       }
 
@@ -1931,6 +1957,170 @@ app.get('/api/leads/:id', async (req, res) => {
   }
 });
 
+// --- MANAGEMENT INCENTIVE SYSTEM (Effective Nov 04, 2026 onwards) ---
+
+/**
+ * Awards Won bucket incentives based on Management's new policy (Effective Nov 04, 2026 onwards):
+ * - Telecaller leads (Joyce, Maryada, Sarina):
+ *     - Telecaller gets INR 400 CR
+ *     - Shreya (TL) gets INR 200 CR
+ *     - Eden (Manager, edenla) gets INR 200 CR
+ *     - Sachin (Digital Marketer, sachinsaha) gets INR 200 CR
+ * - Management / Senior leads (Shreya, Eden/edenla, Priya, Bishwo):
+ *     - Assigned coordinator gets INR 400 CR
+ *     - Sachin (sachinsaha) gets INR 200 CR
+ * - Any other coordinator:
+ *     - Assigned coordinator gets INR 400 CR
+ *     - Sachin (sachinsaha) gets INR 200 CR (if assigned != sachinsaha)
+ */
+async function awardWonIncentivesForLead(
+  leadId: string,
+  assignedCoordRaw: string,
+  candidateName: string,
+  projectName?: string,
+  countryName?: string
+): Promise<void> {
+  const normCoord = normalizeCoordUsername(assignedCoordRaw);
+  if (!normCoord) return;
+
+  const pName = projectName || 'General';
+  const cName = countryName || 'Unknown';
+
+  const coords = await getCoordinators();
+  const assignedCoordObj = coords.find(c => c.username.toLowerCase() === normCoord);
+  const assignedDisplayName = assignedCoordObj ? assignedCoordObj.displayName : assignedCoordRaw;
+
+  const beneficiaries: Array<{ username: string; amount: number; reason: string }> = [];
+
+  if (TEAM_ROLES.TELECALLERS.includes(normCoord)) {
+    // Case A: Telecaller lead (Joyce, Maryada, Sarina)
+    beneficiaries.push({
+      username: normCoord,
+      amount: 400,
+      reason: `Closed Won incentive for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
+    });
+    beneficiaries.push({
+      username: 'shreya',
+      amount: 200,
+      reason: `TL Closed Won Share (Telecaller sale by: ${assignedDisplayName}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
+    });
+    beneficiaries.push({
+      username: 'edenla',
+      amount: 200,
+      reason: `Manager Closed Won Share (Telecaller sale by: ${assignedDisplayName}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
+    });
+    beneficiaries.push({
+      username: 'sachinsaha',
+      amount: 200,
+      reason: `Digital Marketer Closed Won Share (Telecaller sale by: ${assignedDisplayName}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
+    });
+  } else if (TEAM_ROLES.MANAGEMENT_SENIORS.includes(normCoord)) {
+    // Case B: Management / Senior (Shreya, Eden, Priya, Bishwo)
+    beneficiaries.push({
+      username: normCoord,
+      amount: 400,
+      reason: `Closed Won incentive for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
+    });
+    if (normCoord !== 'sachinsaha') {
+      beneficiaries.push({
+        username: 'sachinsaha',
+        amount: 200,
+        reason: `Digital Marketer Closed Won Share (Sale by: ${assignedDisplayName}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
+      });
+    }
+  } else {
+    // Case C: Any other coordinator (or Sachin himself)
+    beneficiaries.push({
+      username: normCoord,
+      amount: 400,
+      reason: `Closed Won incentive for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
+    });
+    if (normCoord !== 'sachinsaha') {
+      beneficiaries.push({
+        username: 'sachinsaha',
+        amount: 200,
+        reason: `Digital Marketer Closed Won Share (Sale by: ${assignedDisplayName}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
+      });
+    }
+  }
+
+  // Credit each beneficiary only if they do not already have an unreversed Won credit for this lead
+  for (const b of beneficiaries) {
+    try {
+      const wallet = await getWalletByUsername(b.username);
+      const wonCredits = (wallet.transactions || []).filter(
+        tx => tx.leadId === leadId && tx.type === 'credit' && (
+          tx.reason.includes('Closed Won') || tx.reason.includes('Won Share') || tx.reason.includes('Override Bonus')
+        )
+      ).reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
+
+      const wonDebits = (wallet.transactions || []).filter(
+        tx => tx.leadId === leadId && tx.type === 'debit' && (
+          tx.reason.includes('Reversal: Closed Won') || tx.reason.includes('Won Share') || tx.reason.includes('rollback')
+        )
+      ).reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
+
+      const netActive = wonCredits - wonDebits;
+      if (netActive < b.amount) {
+        const creditNeeded = b.amount - Math.max(0, netActive);
+        await addWalletTransaction(
+          b.username,
+          'credit',
+          creditNeeded,
+          b.reason,
+          leadId
+        );
+        console.log(`[Incentive Policy] Credited INR ${creditNeeded} to @${b.username} for Won candidate ${candidateName} (${leadId})`);
+      }
+    } catch (err: any) {
+      console.error(`[Incentive Policy] Error crediting @${b.username} for Won candidate ${leadId}:`, err?.message || err);
+    }
+  }
+}
+
+/**
+ * Rolls back all Won bucket incentives for a lead across all recipient wallets:
+ * (Assigned coordinator, Shreya, Edenla, Sachin, Priya, Bishwo, etc.)
+ * Strictly reverses active net credits so balance is safely restored with zero data loss.
+ */
+async function rollbackWonIncentivesForLead(
+  leadId: string,
+  candidateName: string,
+  actionReason: string
+): Promise<void> {
+  try {
+    const allWallets = await getWallets();
+    for (const w of allWallets) {
+      const txs = w.transactions || [];
+      const wonCredits = txs.filter(
+        tx => tx.leadId === leadId && tx.type === 'credit' && (
+          tx.reason.includes('Closed Won') || tx.reason.includes('Won Share') || tx.reason.includes('Override Bonus')
+        )
+      ).reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
+
+      const wonDebits = txs.filter(
+        tx => tx.leadId === leadId && tx.type === 'debit' && (
+          tx.reason.includes('Reversal: Closed Won') || tx.reason.includes('Won Share') || tx.reason.includes('rollback')
+        )
+      ).reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
+
+      const netActiveWonCredit = wonCredits - wonDebits;
+      if (netActiveWonCredit > 0) {
+        await addWalletTransaction(
+          w.username,
+          'debit',
+          netActiveWonCredit,
+          `Reversal: Closed Won stage corrected/removed. Candidate: ${candidateName} (${actionReason})`,
+          leadId
+        );
+        console.log(`[Incentive Rollback] Debited INR ${netActiveWonCredit} from @${w.username} for rolled-back candidate ${candidateName} (${actionReason})`);
+      }
+    }
+  } catch (err: any) {
+    console.error(`[Incentive Rollback] Error rolling back Won incentives for lead ${leadId}:`, err?.message || err);
+  }
+}
+
 // PUT update lead fields
 app.put('/api/leads/:id', async (req, res) => {
   try {
@@ -1959,16 +2149,16 @@ app.put('/api/leads/:id', async (req, res) => {
       }
     }
 
-    // Strict duplicate phone validation ONLY if phone or alternateNo is actually being changed to a new number
+    // Strict duplicate phone validation ONLY against active leads if phone or alternateNo is actually being changed to a new number
     if (phone && (!lead.phone || !arePhonesMatching(lead.phone, phone))) {
-      const dup = leads.find(l => l.id !== req.params.id && (arePhonesMatching(l.phone, phone) || (l.alternateNo && arePhonesMatching(l.alternateNo, phone))));
+      const dup = leads.find(l => !l.isDeleted && l.id !== req.params.id && (arePhonesMatching(l.phone, phone) || (l.alternateNo && arePhonesMatching(l.alternateNo, phone))));
       if (dup) {
         res.status(400).json({ error: `Phone number already exists in CRM (Duplicate number detected: matches lead ${dup.serialNo || dup.id} - ${dup.name})` });
         return;
       }
     }
     if (alternateNo && (!lead.alternateNo || !arePhonesMatching(lead.alternateNo, alternateNo))) {
-      const dup = leads.find(l => l.id !== req.params.id && (arePhonesMatching(l.phone, alternateNo) || (l.alternateNo && arePhonesMatching(l.alternateNo, alternateNo))));
+      const dup = leads.find(l => !l.isDeleted && l.id !== req.params.id && (arePhonesMatching(l.phone, alternateNo) || (l.alternateNo && arePhonesMatching(l.alternateNo, alternateNo))));
       if (dup) {
         res.status(400).json({ error: `Alternate phone number already exists in CRM (Duplicate number detected: matches lead ${dup.serialNo || dup.id} - ${dup.name})` });
         return;
@@ -1986,96 +2176,13 @@ app.put('/api/leads/:id', async (req, res) => {
       const isClosedWonTransition = (stage === 'won' && lead.stage !== 'won');
       if (isClosedWonTransition) {
         try {
-          const wallet = await getWalletByUsername(cleanCoord);
-          const alreadyCredited = (wallet.transactions || []).some(
-            tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Closed Won')
+          await awardWonIncentivesForLead(
+            lead.id,
+            coordinatorToIncentivize,
+            name || lead.name,
+            project !== undefined ? project : lead.project,
+            country !== undefined ? country : lead.country
           );
-          if (!alreadyCredited) {
-            // Dynamic Rule Match with direct country fallbacks
-            const rules = await getIncentiveRules();
-            let incentiveAmount = 400; // Ultimate fallback default
-            const pName = String(project !== undefined ? project : (lead.project || '')).trim().toLowerCase();
-            const cName = String(country !== undefined ? country : (lead.country || '')).trim().toLowerCase();
-            const cNameLower = cName.trim();
-            
-            // Set regional baseline defaults first
-            if (['japan', 'albania', 'europe', 'malta', 'greece'].includes(cNameLower)) {
-              incentiveAmount = 1000;
-            } else if (['kuwait', 'dubai', 'qatar', 'u.a.e', 'oman'].includes(cNameLower)) {
-              incentiveAmount = 400;
-            }
-
-            const matchedRules = rules.filter(r => {
-              const rProject = (r.projectName || '').trim().toLowerCase();
-              const rCountry = (r.country || '').trim().toLowerCase();
-              
-              const projectMatches = rProject === 'all' || rProject === 'any' || rProject === '' || rProject === pName;
-              const countryMatches = rCountry === 'all' || rCountry === 'any' || rCountry === '' || rCountry === 'all countries' || rCountry === cName;
-              
-              return projectMatches && countryMatches;
-            });
-            
-            if (matchedRules.length > 0) {
-              // Sort by specificity
-              matchedRules.sort((a, b) => {
-                const aProjSpecific = !['all', 'any', ''].includes((a.projectName || '').trim().toLowerCase());
-                const aCtrySpecific = !['all', 'any', '', 'all countries'].includes((a.country || '').trim().toLowerCase());
-                const bProjSpecific = !['all', 'any', ''].includes((b.projectName || '').trim().toLowerCase());
-                const bCtrySpecific = !['all', 'any', '', 'all countries'].includes((b.country || '').trim().toLowerCase());
-                
-                const aScore = (aProjSpecific ? 1 : 0) + (aCtrySpecific ? 2 : 0);
-                const bScore = (bProjSpecific ? 1 : 0) + (bCtrySpecific ? 2 : 0);
-                
-                return bScore - aScore; // highest score first
-              });
-              
-              const bestRule = matchedRules[0];
-              const bestRuleCtrySpecific = !['all', 'any', '', 'all countries'].includes((bestRule.country || '').trim().toLowerCase());
-              
-              // Apply matched rule if it is specific to the country. Otherwise, fall back to our premium regions first.
-              if (bestRuleCtrySpecific) {
-                incentiveAmount = bestRule.amount;
-              } else {
-                if (['japan', 'albania', 'europe', 'malta', 'greece'].includes(cNameLower)) {
-                  incentiveAmount = 1000;
-                } else if (['kuwait', 'dubai', 'qatar', 'u.a.e', 'oman'].includes(cNameLower)) {
-                  incentiveAmount = 400;
-                } else {
-                  incentiveAmount = bestRule.amount;
-                }
-              }
-            }
-            
-            await addWalletTransaction(
-              cleanCoord,
-              'credit',
-              incentiveAmount,
-              `Closed Won incentive for candidate: ${name || lead.name} (Project: ${project !== undefined ? project : (lead.project || 'General')}, Country: ${country !== undefined ? country : (lead.country || 'Unknown')})`,
-              lead.id
-            );
-
-            // Sachin Saha override bonus credit
-            if (incentiveAmount === 400 || incentiveAmount === 1000) {
-              const sachinBonus = incentiveAmount === 400 ? 100 : 200;
-              try {
-                const sachinWallet = await getWalletByUsername('sachinsaha');
-                const sachinAlreadyCredited = (sachinWallet.transactions || []).some(
-                  tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Sachin Saha Override Bonus')
-                );
-                if (!sachinAlreadyCredited) {
-                  await addWalletTransaction(
-                    'sachinsaha',
-                    'credit',
-                    sachinBonus,
-                    `Sachin Saha Override Bonus (Sale by: ${cleanCoord}) for candidate: ${name || lead.name} (Project: ${project !== undefined ? project : (lead.project || 'General')}, Country: ${country !== undefined ? country : (lead.country || 'Unknown')})`,
-                    lead.id
-                  );
-                }
-              } catch (sachinErr) {
-                console.error('Failed to auto-credit Sachin override bonus:', sachinErr);
-              }
-            }
-          }
         } catch (walletErr) {
           console.error('Failed to auto-credit Closed Won incentive:', walletErr);
         }
@@ -2085,29 +2192,39 @@ app.put('/api/leads/:id', async (req, res) => {
       const isClosedWonReversal = (lead.stage === 'won' && stage !== undefined && stage !== 'won');
       if (isClosedWonReversal) {
         try {
-          const wallet = await getWalletByUsername(prevCoord);
-          
-          const creditsForLead = (wallet.transactions || []).filter(
-            tx => tx.leadId === lead.id && tx.type === 'credit' && tx.reason.includes('Closed Won')
+          await rollbackWonIncentivesForLead(
+            lead.id,
+            name || lead.name,
+            `moved to ${stage}`
           );
-          
-          const reversalsForLead = (wallet.transactions || []).filter(
-            tx => tx.leadId === lead.id && tx.type === 'debit' && tx.reason.includes('Reversal: Closed Won')
-          );
-          
-          if (creditsForLead.length > reversalsForLead.length && prevCoord !== 'priya') {
-            const amountToDebit = creditsForLead[0].amount;
-            
-            await addWalletTransaction(
-              prevCoord,
-              'debit',
-              amountToDebit,
-              `Reversal: Closed Won stage corrected/removed. Candidate: ${name || lead.name} (moved to ${stage})`,
-              lead.id
-            );
-          }
         } catch (walletErr) {
           console.error('Failed to auto-debit Closed Won reversal:', walletErr);
+        }
+      }
+
+      // 2b. Won lead reassignment Trigger (Rollback previous team credits, award new team credits)
+      const isWonReassignment = (
+        lead.stage === 'won' &&
+        (stage === undefined || stage === 'won') &&
+        assignedTo !== undefined &&
+        cleanCoord !== prevCoord
+      );
+      if (isWonReassignment) {
+        try {
+          await rollbackWonIncentivesForLead(
+            lead.id,
+            name || lead.name,
+            `reassigned from ${prevCoord} to ${cleanCoord}`
+          );
+          await awardWonIncentivesForLead(
+            lead.id,
+            cleanCoord,
+            name || lead.name,
+            project !== undefined ? project : lead.project,
+            country !== undefined ? country : lead.country
+          );
+        } catch (reassignErr) {
+          console.error('Failed to reassign Won lead incentives:', reassignErr);
         }
       }
 
@@ -2867,6 +2984,7 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
     let existingIndex = -1;
     if (rawTargetDigits.length >= 7) {
       existingIndex = leads.findIndex(l => {
+        if (l.isDeleted) return false;
         const leadDigits = (l.phone || '').replace(/[^0-9]/g, '').slice(-10);
         return leadDigits === rawTargetDigits;
       });
@@ -3950,6 +4068,7 @@ app.post('/api/whatsapp/webhook', (req, res) => {
         }
 
         const matchIdx = leads.findIndex(l => {
+          if (l.isDeleted) return false;
           const leadDigits = String(l.phone || '').replace(/\D/g, '');
           if (!leadDigits) return false;
           return leadDigits.includes(cleanPhone) || cleanPhone.includes(leadDigits) ||
@@ -3986,16 +4105,16 @@ app.post('/api/whatsapp/webhook', (req, res) => {
             continue;
           }
 
-          // DEDUPLICATION CHECK 2: Content Echo & Retry Filter
-          // If the last inbound message from this candidate has the identical text and no coordinator reply intervened
+          // DEDUPLICATION CHECK 2: Rapid Network Retry & Webhook Echo Filter
+          // Only drop if identical message was sent within 15 seconds without coordinator reply (transient Meta webhook re-delivery)
           const lastInbound = lead.messages.filter(m => m && m.sender === 'lead').slice(-1)[0];
           if (lastInbound && lastInbound.text && inMsg.messageBody) {
             const isIdentical = lastInbound.text.trim().toLowerCase() === inMsg.messageBody.trim().toLowerCase();
             const timeDiff = Math.abs(new Date(inMsg.timestamp || Date.now()).getTime() - new Date(lastInbound.timestamp).getTime());
             const hasCoordinatorReplySince = lead.messages.slice(lead.messages.indexOf(lastInbound)).some(m => m && m.sender !== 'lead');
 
-            if (isIdentical && !hasCoordinatorReplySince && (timeDiff < 24 * 60 * 60 * 1000 || !inMsg.mediaUrl)) {
-              console.log(`[Meta Webhook] Duplicate inbound text echo detected for "${lead.name}": "${inMsg.messageBody}". Dropping retry.`);
+            if (isIdentical && !hasCoordinatorReplySince && timeDiff < 15000) {
+              console.log(`[Meta Webhook] Duplicate inbound text echo detected within ${timeDiff}ms for "${lead.name}": "${inMsg.messageBody}". Dropping network replay.`);
               continue;
             }
           }
@@ -4220,6 +4339,19 @@ app.delete('/api/leads/:id', async (req, res) => {
       return;
     }
     
+    // Automatic Rollback of Won Incentives if candidate was in Won bucket
+    if (leads[leadIndex].stage === 'won') {
+      try {
+        await rollbackWonIncentivesForLead(
+          leads[leadIndex].id,
+          leads[leadIndex].name || req.params.id,
+          'lead deleted'
+        );
+      } catch (rbErr) {
+        console.error('Failed to rollback Won incentives on lead delete:', rbErr);
+      }
+    }
+
     // Mark as soft-deleted so it can be fully recovered anytime by an administrator
     leads[leadIndex].isDeleted = true;
     leads[leadIndex].deletedAt = new Date().toISOString();
@@ -4228,6 +4360,66 @@ app.delete('/api/leads/:id', async (req, res) => {
     await saveLeads(leads);
     console.log(`[Backup System] Lead ${leads[leadIndex].name || req.params.id} was soft-deleted instead of being permanently removed.`);
     res.json({ success: true, message: 'Candidate soft-deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST Bulk Delete leads (Soft-delete to lighten active CRM footprint while preserving disaster recovery)
+app.post('/api/leads/bulk-delete', async (req, res) => {
+  try {
+    const { leadIds, ids } = req.body;
+    const targetIds: string[] = Array.isArray(leadIds) ? leadIds : (Array.isArray(ids) ? ids : []);
+    if (targetIds.length === 0) {
+      res.status(400).json({ error: 'leadIds must be a non-empty array of candidate IDs' });
+      return;
+    }
+
+    const idSet = new Set(targetIds.map(String));
+    const leads = await getLeads(true);
+    let deletedCount = 0;
+    const nowIso = new Date().toISOString();
+
+    for (const lead of leads) {
+      if (idSet.has(lead.id) && !lead.isDeleted) {
+        // Automatic Rollback of Won Incentives if candidate was in Won bucket
+        if (lead.stage === 'won') {
+          try {
+            await rollbackWonIncentivesForLead(
+              lead.id,
+              lead.name || lead.id,
+              'bulk deleted'
+            );
+          } catch (rbErr) {
+            console.error('Failed to rollback Won incentives on bulk delete for lead:', lead.id, rbErr);
+          }
+        }
+
+        lead.isDeleted = true;
+        lead.deletedAt = nowIso;
+        lead.updatedAt = nowIso;
+        if (!Array.isArray(lead.timeline)) lead.timeline = [];
+        lead.timeline.push({
+          id: `tl_${Date.now()}_bulk_del_${Math.random().toString(36).substring(2, 6)}`,
+          type: 'status',
+          text: 'Candidate soft-deleted via Bulk Spreadsheet action.',
+          actor: 'Administrator',
+          timestamp: nowIso
+        });
+        deletedCount++;
+      }
+    }
+
+    if (deletedCount > 0) {
+      await saveLeads(leads);
+      console.log(`[Bulk Delete] Successfully soft-deleted ${deletedCount} candidates from active CRM view.`);
+    }
+
+    res.json({
+      success: true,
+      message: `Successfully deleted ${deletedCount} candidate${deletedCount !== 1 ? 's' : ''}.`,
+      deletedCount
+    });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -4243,11 +4435,36 @@ app.post('/api/leads/:id/restore', async (req, res) => {
       return;
     }
     
+    // Check if an active candidate with this phone number already exists before restoring
+    const targetLead = leads[leadIndex];
+    if (targetLead.phone) {
+      const activeConflict = leads.find(l => !l.isDeleted && l.id !== targetLead.id && (arePhonesMatching(l.phone, targetLead.phone) || (l.alternateNo && arePhonesMatching(l.alternateNo, targetLead.phone))));
+      if (activeConflict) {
+        res.status(400).json({ error: `Cannot restore: an active candidate with phone number ${targetLead.phone} already exists in CRM (${activeConflict.serialNo} - ${activeConflict.name}).` });
+        return;
+      }
+    }
+    
     // Restore
     leads[leadIndex].isDeleted = false;
     leads[leadIndex].deletedAt = null;
     leads[leadIndex].updatedAt = new Date().toISOString();
     
+    // Re-award Won incentives if restoring a won candidate
+    if (leads[leadIndex].stage === 'won' && leads[leadIndex].assignedTo) {
+      try {
+        await awardWonIncentivesForLead(
+          leads[leadIndex].id,
+          leads[leadIndex].assignedTo,
+          leads[leadIndex].name || leads[leadIndex].id,
+          leads[leadIndex].project,
+          leads[leadIndex].country
+        );
+      } catch (awardErr) {
+        console.error('Failed to re-award Won incentives on restore:', awardErr);
+      }
+    }
+
     await saveLeads(leads);
     console.log(`[Backup System] Lead ${leads[leadIndex].name || req.params.id} was successfully restored.`);
     res.json({ success: true, message: 'Candidate successfully restored' });
@@ -5332,6 +5549,55 @@ app.delete('/api/incentive-rules/:id', async (req, res) => {
   }
 });
 
+// --- MONTHLY WON TARGET & INCENTIVE MILESTONE (Coord Bishwo & Priya) ---
+
+// GET monthly target configuration
+app.get('/api/monthly-target-settings', async (req, res) => {
+  try {
+    const settings = await getMonthlyTargetSettings();
+    res.json(settings);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST update monthly target configuration (Admin only)
+app.post('/api/monthly-target-settings', async (req, res) => {
+  try {
+    const { targetWonCount, tier1Rate, tier2Rate, targetCoordinators } = req.body;
+    const updated = await saveMonthlyTargetSettings({
+      targetWonCount,
+      tier1Rate,
+      tier2Rate,
+      targetCoordinators
+    });
+    res.json({ success: true, settings: updated });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET live progress of monthly target
+app.get('/api/monthly-target-progress', async (req, res) => {
+  try {
+    const monthKey = req.query.month as string | undefined;
+    const progress = await getMonthlyTargetProgress(monthKey);
+    res.json(progress);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST execute month-end payout settlement to Bishwo and Priya's wallets
+app.post('/api/monthly-target-settle', async (req, res) => {
+  try {
+    const { monthKey, note } = req.body;
+    const result = await settleMonthlyTargetPayout(monthKey, note);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
 
 // ==========================================
 // CANDIDATE REACTIVATION ENGINE ENDPOINTS
@@ -6362,9 +6628,9 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
 
     console.log(`Processing inbound WhatsApp webhook lead from ${profileName} (${phone})...`);
 
-    // Fetch leads to check if this candidate already exists
+    // Fetch leads to check if this candidate already exists in active CRM
     const leads = await getLeads();
-    const existingLead = leads.find(l => arePhonesMatching(l.phone, phone) || (l.alternateNo && arePhonesMatching(l.alternateNo, phone)));
+    const existingLead = leads.find(l => !l.isDeleted && (arePhonesMatching(l.phone, phone) || (l.alternateNo && arePhonesMatching(l.alternateNo, phone))));
 
     if (existingLead) {
       if (existingLead.isBlocked) {

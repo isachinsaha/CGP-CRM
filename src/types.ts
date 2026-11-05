@@ -257,6 +257,45 @@ export interface AppNotification {
   createdAt: string;
 }
 
+export interface MonthlyTargetSettings {
+  targetWonCount: number;
+  tier1Rate: number; // Rate per candidate if target met or exceeded (default 300)
+  tier2Rate: number; // Rate per candidate if below target (default 150)
+  targetCoordinators: string[]; // ['bishwo', 'priya']
+  updatedAt: string;
+}
+
+export interface MonthlyTargetProgress {
+  monthKey: string; // e.g. "2026-11"
+  monthLabel: string; // e.g. "November 2026"
+  targetWonCount: number;
+  tier1Rate: number;
+  tier2Rate: number;
+  targetCoordinators: string[];
+  coordinatorsInfo: Array<{
+    username: string;
+    displayName: string;
+    role: string;
+  }>;
+  wonCount: number;
+  progressPercent: number;
+  isTargetAchieved: boolean;
+  applicableRate: number;
+  projectedPayoutPerCoord: number;
+  totalProjectedPayout: number;
+  isSettledForMonth: boolean;
+  settledAt?: string | null;
+  wonLeads: Array<{
+    id: string;
+    name: string;
+    phone: string;
+    wonDate: string;
+    assignedTo: string;
+    country?: string;
+    project?: string;
+  }>;
+}
+
 
 
 

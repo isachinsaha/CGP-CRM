@@ -55,6 +55,7 @@ export default function LeadList({
   const [searchQuery, setSearchQuery] = useState('');
   const [countryFilter, setCountryFilter] = useState('All');
   const [coordinatorFilter, setCoordinatorFilter] = useState('All');
+  const [stageFilter, setStageFilter] = useState('All');
   const [fitScoreFilter, setFitScoreFilter] = useState('All');
   const [tagFilter, setTagFilter] = useState('All');
   const [projectFilter, setProjectFilter] = useState('All');
@@ -77,6 +78,8 @@ export default function LeadList({
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [bulkCoordinator, setBulkCoordinator] = useState('');
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+  const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   // Sub-Agent Bucket Toggle filter: default to "My Bucket" if the role is agent!
   const [bucketToggle, setBucketToggle] = useState<'my' | 'all'>(userRole === 'agent' ? 'my' : 'all');
@@ -110,7 +113,7 @@ export default function LeadList({
   // Reset pagination to first page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, countryFilter, projectFilter, positionFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter, remarksFilter]);
+  }, [searchQuery, countryFilter, stageFilter, projectFilter, positionFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, coordinatorFilter, remarksFilter]);
 
   // Synchronize filter updates back to parent if server-side filtering is enabled with debounce
   const prevFiltersRef = React.useRef<string>('');
@@ -121,6 +124,7 @@ export default function LeadList({
       search: searchQuery,
       country: countryFilter,
       coordinator: coordinatorFilter,
+      stage: stageFilter,
       fitScore: fitScoreFilter,
       tag: tagFilter,
       project: projectFilter,
@@ -142,7 +146,7 @@ export default function LeadList({
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, countryFilter, coordinatorFilter, fitScoreFilter, tagFilter, projectFilter, positionFilter, genderFilter, dateFilter, customStartDate, customEndDate, bucketToggle, remarksFilter, onFiltersChange]);
+  }, [searchQuery, countryFilter, coordinatorFilter, stageFilter, fitScoreFilter, tagFilter, projectFilter, positionFilter, genderFilter, dateFilter, customStartDate, customEndDate, bucketToggle, remarksFilter, onFiltersChange]);
 
   // Synchronize page index back to parent
   const prevPageRef = React.useRef<number>(currentPage);
@@ -673,6 +677,17 @@ export default function LeadList({
     return list;
   }, [coordinators]);
 
+  const stageOptions = useMemo(() => [
+    { value: 'All', label: 'All Pipeline Stages' },
+    { value: 'new', label: '1. New Inbound' },
+    { value: 'negotiating', label: '2. In Discussion' },
+    { value: 'strong_opportunity', label: '3. Strong Opportunity' },
+    { value: 'office_visited', label: '4. Office Visited / Interview' },
+    { value: 'won', label: '5. Won' },
+    { value: 'cold_leads', label: '6. Cold Leads' },
+    { value: 'lost', label: '7. Lost' },
+  ], []);
+
   const projectOptions = useMemo(() => [
     { value: 'All', label: 'All Projects' },
     ...targetProjectsList.filter(p => p !== 'All').map(proj => ({
@@ -893,9 +908,24 @@ export default function LeadList({
         }
       }
 
-      return matchesSearch && matchesCountry && matchesProject && matchesPosition && matchesFit && matchesTag && matchesDate && matchesCoordinator && matchesGender && matchesRemarks;
+      // 8.7 Pipeline Stage Filter
+      let matchesStage = true;
+      if (stageFilter !== 'All') {
+        const s = lead.stage || 'new';
+        if (stageFilter === 'negotiating') {
+          matchesStage = s === 'negotiating' || s === 'in_discussion';
+        } else if (stageFilter === 'office_visited') {
+          matchesStage = s === 'office_visited' || s === 'proposal';
+        } else if (stageFilter === 'cold_leads') {
+          matchesStage = s === 'cold_leads' || s === 'rotations';
+        } else {
+          matchesStage = s === stageFilter;
+        }
+      }
+
+      return matchesSearch && matchesCountry && matchesProject && matchesPosition && matchesFit && matchesTag && matchesDate && matchesCoordinator && matchesGender && matchesRemarks && matchesStage;
     });
-  }, [leads, searchQuery, countryFilter, projectFilter, positionFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter, remarksFilter, onFiltersChange]);
+  }, [leads, searchQuery, countryFilter, stageFilter, projectFilter, positionFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter, remarksFilter, onFiltersChange]);
 
   // Paginated leads for page-wise viewport listing
   const paginatedLeads = useMemo(() => {
@@ -947,6 +977,39 @@ export default function LeadList({
       alert(err.message || 'Failed to re-assign selected leads. Please try again.');
     } finally {
       setIsBulkUpdating(false);
+    }
+  };
+
+  // Bulk Delete Candidates API Caller (Removes leads from active views to lighten load)
+  const handleBulkDelete = async () => {
+    if (selectedLeadIds.length === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const res = await fetch('/api/leads/bulk-delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId
+        },
+        body: JSON.stringify({ leadIds: selectedLeadIds })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to delete selected leads');
+      }
+
+      const count = selectedLeadIds.length;
+      setSelectedLeadIds([]);
+      setIsBulkDeleteConfirmOpen(false);
+      if (onRefreshData) onRefreshData();
+      console.log(`[Bulk Delete] Successfully soft-deleted ${count} leads.`);
+    } catch (err: any) {
+      console.error('[Bulk Delete] Error:', err);
+      alert(err.message || 'Failed to delete selected leads. Please try again.');
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -1132,12 +1195,13 @@ export default function LeadList({
             </div>
             
             {/* Reset All Filters button if any are active */}
-            {(countryFilter !== 'All' || coordinatorFilter !== 'All' || projectFilter !== 'All' || positionFilter !== 'All' || tagFilter !== 'All' || fitScoreFilter !== 'All' || genderFilter !== 'All' || remarksFilter !== 'All' || dateFilter !== 'All') && (
+            {(countryFilter !== 'All' || coordinatorFilter !== 'All' || stageFilter !== 'All' || projectFilter !== 'All' || positionFilter !== 'All' || tagFilter !== 'All' || fitScoreFilter !== 'All' || genderFilter !== 'All' || remarksFilter !== 'All' || dateFilter !== 'All') && (
               <button
                 type="button"
                 onClick={() => {
                   setCountryFilter('All');
                   setCoordinatorFilter('All');
+                  setStageFilter('All');
                   setProjectFilter('All');
                   setPositionFilter('All');
                   setTagFilter('All');
@@ -1155,8 +1219,8 @@ export default function LeadList({
             )}
           </div>
 
-          {/* Filters Responsive Grid - 9 Filters total */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2.5 w-full">
+          {/* Filters Responsive Grid - 10 Filters total */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10 gap-2.5 w-full">
             
             {/* Country filter */}
             <div className="w-full">
@@ -1184,6 +1248,17 @@ export default function LeadList({
                   MY ASSIGNED
                 </div>
               )}
+            </div>
+
+            {/* Pipeline Stage Filter */}
+            <div className="w-full">
+              <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Pipeline Stage</label>
+              <SearchableSelect
+                value={stageFilter}
+                onChange={setStageFilter}
+                options={stageOptions}
+                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+              />
             </div>
 
             {/* Hiring Project filter */}
@@ -1573,6 +1648,18 @@ export default function LeadList({
             >
               {isBulkUpdating ? 'Assigning...' : `Assign ${selectedLeadIds.length} Candidate${selectedLeadIds.length > 1 ? 's' : ''}`}
             </button>
+
+            {/* Bulk Delete Button */}
+            <button
+              type="button"
+              onClick={() => setIsBulkDeleteConfirmOpen(true)}
+              disabled={isBulkDeleting}
+              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-extrabold text-xs rounded-lg shadow-sm transition-all flex items-center gap-1.5 cursor-pointer ml-1"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{isBulkDeleting ? 'Deleting...' : `Delete Selected (${selectedLeadIds.length})`}</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setSelectedLeadIds([])}
@@ -1580,6 +1667,61 @@ export default function LeadList({
             >
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Modal */}
+      {isBulkDeleteConfirmOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-rose-900/60 rounded-2xl max-w-md w-full p-6 text-left shadow-2xl relative overflow-hidden animate-in zoom-in-95">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-rose-500 via-rose-600 to-rose-700" />
+            <div className="flex items-start gap-3.5 mb-4">
+              <div className="p-2.5 bg-rose-950/60 border border-rose-800/80 rounded-xl text-rose-400 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-100 uppercase tracking-wide">
+                  Confirm Bulk Deletion
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 font-bold">
+                  Are you sure you want to delete <span className="text-rose-400 font-black">{selectedLeadIds.length}</span> selected candidate(s)?
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-rose-950/25 border border-rose-900/40 rounded-xl p-3 text-[11px] text-rose-300/90 font-medium mb-5">
+              This will remove the selected candidates from active views, pipelines, and spreadsheets to reduce CRM system load. Candidates are safely archived in soft-delete state and can be restored anytime by an administrator.
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsBulkDeleteConfirmOpen(false)}
+                disabled={isBulkDeleting}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                disabled={isBulkDeleting}
+                className="px-5 py-2 rounded-xl text-xs font-black text-white bg-rose-600 hover:bg-rose-500 transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-rose-950/50"
+              >
+                {isBulkDeleting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting Candidates...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Yes, Delete {selectedLeadIds.length} Candidate{selectedLeadIds.length > 1 ? 's' : ''}</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

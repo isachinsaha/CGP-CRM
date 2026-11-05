@@ -28,9 +28,13 @@ import {
   Lock,
   Database,
   Download,
-  FileText
+  FileText,
+  Trophy,
+  Target,
+  Flame,
+  Sparkles
 } from 'lucide-react';
-import { Job, ImportantUpdate, Wallet, WalletTransaction } from '../types';
+import { Job, ImportantUpdate, Wallet, WalletTransaction, MonthlyTargetProgress, MonthlyTargetSettings } from '../types';
 import { getCountryFlagUrl, getCountryCode } from '../utils';
 
 interface ActiveJobsProps {
@@ -101,6 +105,102 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     if (txFilter === 'debit') return list.filter(t => t.type === 'debit');
     return list;
   }, [selectedWallet?.transactions, txFilter]);
+
+  const getCoordRoleBadge = React.useCallback((username: string) => {
+    const u = String(username || '').toLowerCase().trim();
+    if (u === 'shreya') return { label: 'TL', color: 'bg-purple-500/20 text-purple-300 border-purple-500/30' };
+    if (u === 'edenla' || u === 'eden') return { label: 'Manager', color: 'bg-blue-500/20 text-blue-300 border-blue-500/30' };
+    if (u === 'priya') return { label: 'Manager', color: 'bg-blue-500/20 text-blue-300 border-blue-500/30' };
+    if (u === 'bishwo') return { label: 'BDM', color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' };
+    if (u === 'sachinsaha' || u === 'sachin') return { label: 'Digital Marketer', color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' };
+    if (u === 'joyce' || u === 'maryada' || u === 'sarina') return { label: 'Telecaller', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+    return null;
+  }, []);
+
+  // Monthly Won Target & Tier Rates State (Coord Bishwo & Priya)
+  const [monthlyProgress, setMonthlyProgress] = useState<MonthlyTargetProgress | null>(null);
+  const [loadingMonthlyProgress, setLoadingMonthlyProgress] = useState(false);
+  const [isTargetEditModalOpen, setIsTargetEditModalOpen] = useState(false);
+  const [targetWonCountInput, setTargetWonCountInput] = useState<number>(15);
+  const [tier1RateInput, setTier1RateInput] = useState<number>(300);
+  const [tier2RateInput, setTier2RateInput] = useState<number>(150);
+  const [savingTargetSettings, setSavingTargetSettings] = useState(false);
+  const [isSettlingTargetPayout, setIsSettlingTargetPayout] = useState(false);
+  const [showWonLeadsDrawer, setShowWonLeadsDrawer] = useState(false);
+
+  const fetchMonthlyTargetProgress = React.useCallback(async (monthKey?: string) => {
+    setLoadingMonthlyProgress(true);
+    try {
+      const url = monthKey ? `/api/monthly-target-progress?month=${encodeURIComponent(monthKey)}` : '/api/monthly-target-progress';
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setMonthlyProgress(data);
+        setTargetWonCountInput(data.targetWonCount);
+        setTier1RateInput(data.tier1Rate);
+        setTier2RateInput(data.tier2Rate);
+      }
+    } catch (err) {
+      console.error('Failed to load monthly target progress:', err);
+    } finally {
+      setLoadingMonthlyProgress(false);
+    }
+  }, []);
+
+  const handleSaveTargetSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingTargetSettings(true);
+    try {
+      const res = await fetch('/api/monthly-target-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetWonCount: Number(targetWonCountInput) || 15,
+          tier1Rate: Number(tier1RateInput) || 300,
+          tier2Rate: Number(tier2RateInput) || 150,
+          targetCoordinators: ['bishwo', 'priya']
+        })
+      });
+      if (!res.ok) throw new Error('Failed to update target settings');
+      setIsTargetEditModalOpen(false);
+      setWalletSuccess('Monthly Target settings updated successfully!');
+      await fetchMonthlyTargetProgress();
+    } catch (err: any) {
+      setWalletError(err.message || 'Error updating settings');
+    } finally {
+      setSavingTargetSettings(false);
+    }
+  };
+
+  const handleSettleTargetPayout = async () => {
+    if (!monthlyProgress) return;
+    const confirmMsg = `Settle Month-End Payout for ${monthlyProgress.monthLabel}?\n\n` +
+      `Total Won: ${monthlyProgress.wonCount} candidates\n` +
+      `Rate Applied: INR ${monthlyProgress.applicableRate}/candidate (${monthlyProgress.isTargetAchieved ? 'Target Met' : 'Below Target'})\n` +
+      `Each Coordinator (Bishwo & Priya) will receive: INR ${monthlyProgress.projectedPayoutPerCoord.toLocaleString()} CR.`;
+    
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsSettlingTargetPayout(true);
+    try {
+      const res = await fetch('/api/monthly-target-settle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          monthKey: monthlyProgress.monthKey
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to settle payout');
+      setWalletSuccess(data.message || 'Month-end payout settled successfully!');
+      await fetchWalletData();
+      await fetchMonthlyTargetProgress();
+    } catch (err: any) {
+      setWalletError(err.message || 'Error settling monthly payout');
+    } finally {
+      setIsSettlingTargetPayout(false);
+    }
+  };
 
   // Data Vault & Safe Storage State
   const [safetyStatus, setSafetyStatus] = useState<any>(null);
@@ -204,6 +304,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
       setWalletSuccess(`Successfully verified and reconciled coordinator incentive wallets! (${data.count} coordinator ledgers synchronized with zero data loss)`);
       await fetchWalletData();
       await fetchSafetyStatus();
+      await fetchMonthlyTargetProgress();
     } catch (err: any) {
       setWalletError(err.message || 'Error reconciling wallets');
     } finally {
@@ -247,8 +348,9 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     if (subTab === 'wallet') {
       fetchWalletData();
       fetchSafetyStatus();
+      fetchMonthlyTargetProgress();
     }
-  }, [subTab, fetchWalletData, fetchSafetyStatus]);
+  }, [subTab, fetchWalletData, fetchSafetyStatus, fetchMonthlyTargetProgress]);
 
   // When activeWalletUsername changes and wallets are already loaded, update selectedWallet
   const handleSelectWalletUser = (username: string) => {
@@ -1409,17 +1511,260 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     {subTab === 'wallet' && (
       <div className="space-y-6 text-left animate-fade-in">
         
-        {/* Motivation & Incentive Structure Infotip Banner */}
-        <div className="bg-emerald-950/15 dark:bg-emerald-950/40 border border-emerald-800/30 rounded-xl py-2 px-4 shadow-sm flex items-center gap-3">
-          <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-            <PiggyBank className="w-3.5 h-3.5" />
+        {/* MONTHLY TARGET ACHIEVEMENT HUB (Coord Bishwo & Priya) */}
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950/50 border border-slate-750 p-6 shadow-2xl space-y-6">
+          {/* Ambient background glow */}
+          <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+          <div className="absolute bottom-0 left-0 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20" />
+
+          {/* Top Row: Header & Live Target Status */}
+          <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500/20 via-indigo-500/20 to-emerald-500/20 border border-indigo-500/30 text-amber-300 flex items-center justify-center shrink-0 shadow-lg">
+                <Trophy className="w-6 h-6 text-amber-400" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400 font-mono flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-indigo-400" /> Monthly Won Milestone
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[9px] font-black uppercase tracking-wider">
+                    {monthlyProgress?.monthLabel || 'Current Month'}
+                  </span>
+                  {monthlyProgress?.isSettledForMonth && (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                      <CheckCircle className="w-2.5 h-2.5 text-emerald-400" /> Month Settled
+                    </span>
+                  )}
+                </div>
+                <h3 className="text-base font-black text-slate-100 uppercase tracking-tight mt-0.5">
+                  Agency Monthly Target & Executive Incentive
+                </h3>
+                <p className="text-xs text-slate-400 font-medium">
+                  Exclusive milestone rewards for Coord <strong className="text-slate-200">Bishwo (BDM)</strong> & <strong className="text-slate-200">Priya (Manager)</strong>.
+                </p>
+              </div>
+            </div>
+
+            {/* Target Status Badge & Quick Actions */}
+            <div className="flex items-center gap-2 flex-wrap self-end md:self-auto">
+              {monthlyProgress?.isTargetAchieved ? (
+                <div className="px-3.5 py-1.5 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center gap-2 shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  <span className="text-xs font-black uppercase tracking-wider">🎯 Target Achieved ({monthlyProgress?.wonCount} Won)</span>
+                </div>
+              ) : (
+                <div className="px-3.5 py-1.5 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-400" />
+                  <span className="text-xs font-black uppercase tracking-wider">
+                    {monthlyProgress 
+                      ? `${monthlyProgress.wonCount} / ${monthlyProgress.targetWonCount} Won (${monthlyProgress.targetWonCount - monthlyProgress.wonCount} to 2x tier)` 
+                      : 'Tracking Progress...'}
+                  </span>
+                </div>
+              )}
+
+              {currentUser?.role === 'admin' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsTargetEditModalOpen(true)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-black text-[11px] uppercase tracking-wider transition cursor-pointer flex items-center gap-1.5"
+                    title="Edit Monthly Target Count & Winning Amounts"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Edit Target</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSettleTargetPayout}
+                    disabled={isSettlingTargetPayout || monthlyProgress?.isSettledForMonth}
+                    className={`px-3 py-1.5 rounded-xl font-black text-[11px] uppercase tracking-wider transition cursor-pointer flex items-center gap-1.5 ${
+                      monthlyProgress?.isSettledForMonth
+                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 cursor-default'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md'
+                    }`}
+                    title={monthlyProgress?.isSettledForMonth ? 'Payout already settled for this month' : 'Settle and credit month-end incentive to Bishwo and Priya'}
+                  >
+                    {isSettlingTargetPayout ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : monthlyProgress?.isSettledForMonth ? (
+                      <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Coins className="w-3.5 h-3.5" />
+                    )}
+                    <span>{monthlyProgress?.isSettledForMonth ? 'Month Settled' : 'Settle Payout'}</span>
+                  </button>
+                </>
+              )}
+            </div>
           </div>
-          <div className="space-y-0.5">
-            <h4 className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">Coordinator Incentive & Compensation Rules</h4>
-            <p className="text-[10px] text-slate-300 dark:text-slate-300 leading-normal font-medium">
-              Automated compensations: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">Closed Won</strong> yields Japan: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">INR 1,000</strong>, Kuwait: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">INR 400</strong>, others: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">INR 400</strong>. Reaching <strong className="text-emerald-600 dark:text-emerald-400 font-bold">Interview Attended</strong> yields <strong className="text-emerald-600 dark:text-emerald-400 font-bold">INR 11</strong> bonus!
-            </p>
+
+          {/* Live Progress Bar Container */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs font-mono font-bold">
+              <span className="text-slate-400 flex items-center gap-1.5">
+                <Flame className="w-4 h-4 text-amber-400 animate-pulse" />
+                Live Target Achievement Pace
+              </span>
+              <span className="text-slate-200">
+                <strong className="text-emerald-400 font-extrabold text-sm">{monthlyProgress?.wonCount || 0}</strong>
+                <span className="text-slate-500"> / {monthlyProgress?.targetWonCount || 15} Won</span>
+                <span className="ml-2 text-indigo-400 font-black">({monthlyProgress?.progressPercent || 0}%)</span>
+              </span>
+            </div>
+
+            {/* The Track & Fill Bar */}
+            <div className="relative h-6 w-full rounded-2xl bg-slate-950/80 border border-slate-800 p-1 shadow-inner overflow-hidden flex items-center">
+              {/* Background Target Guideline */}
+              <div 
+                className="absolute top-0 bottom-0 border-r-2 border-dashed border-amber-400/60 z-10"
+                style={{ left: '100%' }}
+                title="Monthly Target Line"
+              />
+              
+              {/* Filled Bar */}
+              <div
+                className={`h-full rounded-xl transition-all duration-700 ease-out flex items-center justify-end pr-2 text-[10px] font-black font-mono text-white shadow-lg ${
+                  monthlyProgress?.isTargetAchieved
+                    ? 'bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 shadow-emerald-500/20'
+                    : 'bg-gradient-to-r from-indigo-600 via-purple-600 to-amber-500'
+                }`}
+                style={{ width: `${Math.max(4, Math.min(100, monthlyProgress?.progressPercent || 0))}%` }}
+              >
+                {monthlyProgress && monthlyProgress.progressPercent >= 12 && (
+                  <span className="drop-shadow-sm flex items-center gap-1">
+                    {monthlyProgress.isTargetAchieved ? '🏆 100%' : `${monthlyProgress.progressPercent}%`}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Target Tier Indicator Footnote */}
+            <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium px-1">
+              <span>0 Won (Start of Month)</span>
+              <span className={monthlyProgress?.isTargetAchieved ? 'text-emerald-400 font-bold' : 'text-amber-400 font-semibold'}>
+                Target: {monthlyProgress?.targetWonCount || 15} Won • Tier 1 Rate: INR {monthlyProgress?.tier1Rate || 300}/candidate (INR {((monthlyProgress?.targetWonCount || 15) * (monthlyProgress?.tier1Rate || 300)).toLocaleString()})
+              </span>
+            </div>
           </div>
+
+          {/* 4-Card Summary Metrics */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 pt-2">
+            
+            {/* Card 1: Live Month Won */}
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-3.5 space-y-1">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono block">
+                MONTH WON TOTAL
+              </span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-black text-slate-100 font-mono">
+                  {monthlyProgress?.wonCount || 0}
+                </span>
+                <span className="text-[11px] text-slate-400 font-semibold">candidates</span>
+              </div>
+              <p className="text-[10px] text-slate-500 font-medium">
+                {monthlyProgress?.isTargetAchieved
+                  ? `Target reached! Earning full INR ${monthlyProgress?.tier1Rate} per candidate.`
+                  : `${(monthlyProgress?.targetWonCount || 15) - (monthlyProgress?.wonCount || 0)} more to unlock INR ${monthlyProgress?.tier1Rate} tier.`}
+              </p>
+            </div>
+
+            {/* Card 2: Active Rate Tier */}
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-3.5 space-y-1">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono block">
+                APPLICABLE RATE TIER
+              </span>
+              <div className="flex items-baseline gap-2">
+                <span className={`text-2xl font-black font-mono ${
+                  monthlyProgress?.isTargetAchieved ? 'text-emerald-400' : 'text-amber-400'
+                }`}>
+                  INR {monthlyProgress?.applicableRate || 150}
+                </span>
+                <span className="text-[11px] text-slate-400 font-semibold">/ candidate</span>
+              </div>
+              <p className="text-[10px] text-slate-500 font-medium">
+                {monthlyProgress?.isTargetAchieved
+                  ? `Achieved ≥ 15: Full INR ${monthlyProgress?.tier1Rate || 300} rate active`
+                  : `< 15 won: Sub-target INR ${monthlyProgress?.tier2Rate || 150} rate active`}
+              </p>
+            </div>
+
+            {/* Card 3: Projected Payout per Coord */}
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-3.5 space-y-1">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono block">
+                MONTH-END PAYOUT (EACH)
+              </span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-black text-emerald-400 font-mono">
+                  INR {monthlyProgress?.projectedPayoutPerCoord?.toLocaleString() || 0}
+                </span>
+                <span className="text-[11px] text-slate-400 font-semibold">CR</span>
+              </div>
+              <p className="text-[10px] text-slate-500 font-medium">
+                Both Bishwo & Priya each receive this amount at month end.
+              </p>
+            </div>
+
+            {/* Card 4: Beneficiaries */}
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-3.5 space-y-1.5 flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono block">
+                  ELIGIBLE BENEFICIARIES
+                </span>
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-black">
+                    <span>Bishwo</span>
+                    <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-200">BDM</span>
+                  </div>
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs font-black">
+                    <span>Priya</span>
+                    <span className="text-[9px] px-1 py-0.2 rounded bg-blue-500/20 text-blue-200">Manager</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Toggle Won Candidates List */}
+              {(monthlyProgress?.wonLeads?.length || 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowWonLeadsDrawer(prev => !prev)}
+                  className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold underline transition self-start cursor-pointer flex items-center gap-1"
+                >
+                  <span>{showWonLeadsDrawer ? 'Hide won candidates' : `View ${monthlyProgress?.wonLeads?.length} won candidates`}</span>
+                  <ChevronDown className={`w-3 h-3 transition-transform ${showWonLeadsDrawer ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Won Candidates Collapsible Drawer */}
+          {showWonLeadsDrawer && (monthlyProgress?.wonLeads?.length || 0) > 0 && (
+            <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-slate-300 uppercase tracking-wider">
+                  Won Candidates in {monthlyProgress?.monthLabel} ({monthlyProgress?.wonLeads?.length})
+                </span>
+                <span className="text-[10px] font-mono text-slate-500">
+                  Target milestone: {monthlyProgress?.targetWonCount} won
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+                {monthlyProgress?.wonLeads.map((wl, idx) => (
+                  <div key={wl.id} className="p-2 rounded-xl bg-slate-900 border border-slate-800/80 text-xs flex items-center justify-between">
+                    <div className="space-y-0.5 truncate pr-2">
+                      <p className="font-bold text-slate-200 truncate">{idx + 1}. {wl.name}</p>
+                      <p className="text-[10px] text-slate-500 font-mono truncate">{wl.phone} • {wl.assignedTo}</p>
+                    </div>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono font-bold shrink-0">
+                      Won
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* DATA VAULT & PERMANENT SAFE STORAGE HUB */}
@@ -1539,6 +1884,15 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                         <div className="space-y-0.5">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <p className="text-xs font-extrabold uppercase">{w.displayName || w.username}</p>
+                            {(() => {
+                              const badge = getCoordRoleBadge(w.username);
+                              if (!badge) return null;
+                              return (
+                                <span className={`px-1.5 py-0.2 text-[9px] font-black uppercase tracking-wider rounded-md border ${badge.color}`}>
+                                  {badge.label}
+                                </span>
+                              );
+                            })()}
                             {debitsCount > 0 && (
                               <span className="px-1.5 py-0.2 text-[9px] font-black uppercase tracking-wider rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30" title={`${debitsCount} debit(s) on file`}>
                                 {debitsCount} DR
@@ -1565,9 +1919,20 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                 <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider rounded-full">
                   <WalletIcon className="w-3 h-3" /> My Personal Ledger
                 </div>
-                <h3 className="text-base font-black text-slate-100 uppercase tracking-tight">
-                  {currentUser?.displayName || currentUser?.username}
-                </h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-base font-black text-slate-100 uppercase tracking-tight">
+                    {currentUser?.displayName || currentUser?.username}
+                  </h3>
+                  {(() => {
+                    const badge = getCoordRoleBadge(currentUser?.username || '');
+                    if (!badge) return null;
+                    return (
+                      <span className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-md border ${badge.color}`}>
+                        {badge.label}
+                      </span>
+                    );
+                  })()}
+                </div>
                 <p className="text-xs text-slate-400 font-semibold leading-relaxed">
                   Welcome to your live earnings ledger. Every lead that you convert or coordinate automatically accrues incentives here.
                 </p>
@@ -1602,9 +1967,20 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
               <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/20 border border-slate-750 rounded-3xl p-6 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="space-y-1">
                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">SELECTED COORDINATOR</p>
-                  <h3 className="text-lg font-black text-slate-100 uppercase">
-                    {selectedWallet.displayName || selectedWallet.username}
-                  </h3>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-lg font-black text-slate-100 uppercase">
+                      {selectedWallet.displayName || selectedWallet.username}
+                    </h3>
+                    {(() => {
+                      const badge = getCoordRoleBadge(selectedWallet.username);
+                      if (!badge) return null;
+                      return (
+                        <span className={`px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded-md border ${badge.color}`}>
+                          {badge.label}
+                        </span>
+                      );
+                    })()}
+                  </div>
                   <p className="text-xs font-mono text-slate-400">Username: @{selectedWallet.username}</p>
                 </div>
                 
@@ -2485,6 +2861,113 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT MONTHLY TARGET SETTINGS MODAL */}
+      {isTargetEditModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 text-left">
+          <div className="bg-slate-850 rounded-3xl shadow-2xl border border-slate-750 w-full max-w-lg p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150 text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-750 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-500/20 border border-indigo-500/30 rounded-xl text-indigo-400">
+                  <Target className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-100 text-sm uppercase">Configure Monthly Target</h3>
+                  <p className="text-[10px] font-mono text-slate-400">ADMIN CONTROL • COORD BISHWO & PRIYA</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTargetEditModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-100 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveTargetSettings} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300 block">
+                  Monthly Won Target (Candidates)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={targetWonCountInput}
+                  onChange={(e) => setTargetWonCountInput(Number(e.target.value) || 1)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-750 rounded-xl text-sm font-mono text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="e.g. 15"
+                  required
+                />
+                <p className="text-[10px] text-slate-400">Default is 15 won per month.</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300 block">
+                    Target Met Rate (INR / candidate)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={tier1RateInput}
+                    onChange={(e) => setTier1RateInput(Number(e.target.value) || 0)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-750 rounded-xl text-sm font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                    placeholder="e.g. 300"
+                    required
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Applied when won &gt;= target. (15 won * 300 = INR 4,500)
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300 block">
+                    Below Target Rate (INR / candidate)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={tier2RateInput}
+                    onChange={(e) => setTier2RateInput(Number(e.target.value) || 0)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-750 rounded-xl text-sm font-mono text-slate-100 focus:outline-none focus:border-amber-500"
+                    placeholder="e.g. 150"
+                    required
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Applied when won &lt; target. (14 won * 150 = INR 2,100)
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 text-[11px] text-slate-300 space-y-1">
+                <p className="font-bold text-slate-200">Rule Summary:</p>
+                <p>• <strong>15 Won (Target):</strong> Bishwo & Priya get <strong>INR {(15 * tier1RateInput).toLocaleString()}</strong> each.</p>
+                <p>• <strong>16 Won:</strong> Bishwo & Priya get <strong>INR {(16 * tier1RateInput).toLocaleString()}</strong> each (INR {tier1RateInput}/candidate).</p>
+                <p>• <strong>14 Won:</strong> Bishwo & Priya get <strong>INR {(14 * tier2RateInput).toLocaleString()}</strong> each (INR {tier2RateInput}/candidate).</p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-750">
+                <button
+                  type="button"
+                  onClick={() => setIsTargetEditModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingTargetSettings}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {savingTargetSettings && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Save Settings</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
