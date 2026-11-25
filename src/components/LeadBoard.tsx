@@ -1,30 +1,19 @@
 import React, { useState } from 'react';
 import { Lead, LeadStage, Coordinator } from '../types.ts';
 import { 
-  TrendingUp, 
-  ArrowRight, 
-  ArrowLeft, 
   MessageSquare, 
   Briefcase, 
   Calendar, 
   ShieldCheck, 
-  Sparkles, 
-  Star,
   Inbox,
   X,
-  LayoutGrid,
-  Trello,
-  RotateCw,
   Search,
   Zap,
-  Snowflake,
-  CheckCircle2,
-  ExternalLink,
-  Ban
+  Snowflake
 } from 'lucide-react';
-import { motion } from 'motion/react';
-import { getCountryFlagUrl, formatCandidateName, getEffectiveIntake, isCoordinatorMatch } from '../utils';
-import { SearchableSelect } from './SearchableSelect.tsx';
+import { getCountryFlagUrl, getEffectiveIntake, isCoordinatorMatch } from '../utils';
+import { MultiSearchableSelect } from './MultiSearchableSelect.tsx';
+import { LeadCard } from './LeadCard.tsx';
 
 interface LeadBoardProps {
   leads: Lead[];
@@ -51,37 +40,33 @@ export default function LeadBoard({
   coordinators = []
 }: LeadBoardProps) {
   
-  // View mode switcher: 'hub' (container tabs view like Active Jobs Hub) or 'board' (classic kanban)
-  const [viewMode, setViewMode] = useState<'board' | 'hub'>('hub');
-  
   // Selected stage for Pipeline Hub View
   const [selectedStage, setSelectedStage] = useState<LeadStage>('new');
 
   // Bucket filtering for agents
-  const [bucketToggle, setBucketToggle] = useState<'my' | 'all'>(userRole === 'agent' ? 'my' : 'all');
   const [draggedOverColumn, setDraggedOverColumn] = useState<string | null>(null);
 
-  // Coordinator filter state (for Admin View)
-  const [coordinatorFilter, setCoordinatorFilter] = useState('All');
+  // Coordinator multi-select filter state (for Admin View; [] = All)
+  const [coordinatorFilter, setCoordinatorFilter] = useState<string[]>([]);
 
   // Search input state for Pipeline
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Remarks filter state
-  const [remarksFilter, setRemarksFilter] = useState('All');
+  // Remarks multi-select filter state ([] = All)
+  const [remarksFilter, setRemarksFilter] = useState<string[]>([]);
 
-  // Country, Position, Gender, and Tag Filters for selected stage
-  const [boardCountryFilter, setBoardCountryFilter] = useState('All');
-  const [boardPositionFilter, setBoardPositionFilter] = useState('All');
-  const [boardGenderFilter, setBoardGenderFilter] = useState('All');
-  const [boardTagFilter, setBoardTagFilter] = useState('All');
+  // Country, Position, Gender, and Tag multi-select Filters for selected stage ([] = All)
+  const [boardCountryFilter, setBoardCountryFilter] = useState<string[]>([]);
+  const [boardPositionFilter, setBoardPositionFilter] = useState<string[]>([]);
+  const [boardGenderFilter, setBoardGenderFilter] = useState<string[]>([]);
+  const [boardTagFilter, setBoardTagFilter] = useState<string[]>([]);
 
   // Reset stage filters when stage is switched
   React.useEffect(() => {
-    setBoardCountryFilter('All');
-    setBoardPositionFilter('All');
-    setBoardGenderFilter('All');
-    setBoardTagFilter('All');
+    setBoardCountryFilter([]);
+    setBoardPositionFilter([]);
+    setBoardGenderFilter([]);
+    setBoardTagFilter([]);
   }, [selectedStage]);
 
   // Memoized options list for searchable coordinator select
@@ -139,8 +124,8 @@ export default function LeadBoard({
     ];
   }, [leads]);
 
-  // Date filter state: 'all' | 'today' | 'yesterday' | 'date-wise'
-  const [pipelineDateFilter, setPipelineDateFilter] = useState<'all' | 'today' | 'yesterday' | 'date-wise'>('all');
+  // Date filter multi-select state: [] = All, values in ['today', 'yesterday', 'date-wise']
+  const [pipelineDateFilter, setPipelineDateFilter] = useState<string[]>([]);
   // From Date and To Date for custom range filtering
   const [filterStartDate, setFilterStartDate] = useState<string>(() => {
     const date = new Date();
@@ -155,8 +140,10 @@ export default function LeadBoard({
 
     if (userRole === 'agent') {
       lifetimeScopeLeads = leads.filter(l => isCoordinatorMatch(l.assignedTo, currentAgentId, coordinators));
-    } else if (coordinatorFilter !== 'All') {
-      lifetimeScopeLeads = leads.filter(l => isCoordinatorMatch(l.assignedTo, coordinatorFilter, coordinators));
+    } else if (coordinatorFilter.length > 0) {
+      lifetimeScopeLeads = leads.filter(l =>
+        coordinatorFilter.some(cf => isCoordinatorMatch(l.assignedTo, cf, coordinators))
+      );
     }
 
     const totalAssignedLifetime = lifetimeScopeLeads.length;
@@ -226,35 +213,6 @@ export default function LeadBoard({
     { id: 'lost', title: '7. Lost', color: 'border-slate-750 bg-slate-900/20', headerColor: 'text-slate-400 bg-slate-800' }
   ];
 
-  const getFitScoreBadge = (score: string) => {
-    switch (score) {
-      case 'high':
-        return 'bg-emerald-950/40 text-emerald-400 border-emerald-900/30';
-      case 'medium':
-        return 'bg-teal-950/40 text-teal-400 border-teal-900/30';
-      case 'low':
-        return 'bg-amber-950/40 text-amber-400 border-amber-900/30';
-      case 'unqualified':
-      default:
-        return 'bg-slate-800 text-slate-400 border-slate-750';
-    }
-  };
-
-  const getStageNeighbors = (current: LeadStage): { prev: LeadStage | null; next: LeadStage | null } => {
-    const list: LeadStage[] = ['new', 'in_discussion', 'strong_opportunity', 'office_visited', 'won', 'cold_leads', 'lost'];
-    // Map legacy alias to standard
-    let normalized = current;
-    if (current === 'negotiating') normalized = 'in_discussion';
-    else if (current === 'proposal') normalized = 'office_visited';
-    else if (current === 'rotations') normalized = 'cold_leads';
-
-    const idx = list.indexOf(normalized);
-    return {
-      prev: idx > 0 ? list[idx - 1] : null,
-      next: idx < list.length - 1 && idx >= 0 ? list[idx + 1] : null
-    };
-  };
-
   // Filter leads based on agent bucket selection AND date filters
   const visibleLeads = React.useMemo(() => {
     let filtered = leads;
@@ -281,70 +239,71 @@ export default function LeadBoard({
       filtered = filtered.filter(lead => isCoordinatorMatch(lead.assignedTo, currentAgentId, coordinators));
     }
 
-    // Coordinator Filter (only in Admin view)
-    if (userRole === 'admin' && coordinatorFilter !== 'All') {
-      filtered = filtered.filter(lead => isCoordinatorMatch(lead.assignedTo, coordinatorFilter, coordinators));
+    // Coordinator Multi-Filter (only in Admin view)
+    if (userRole === 'admin' && coordinatorFilter.length > 0) {
+      filtered = filtered.filter(lead =>
+        coordinatorFilter.some(cf => isCoordinatorMatch(lead.assignedTo, cf, coordinators))
+      );
     }
 
-    // Date range filter
-    if (pipelineDateFilter !== 'all') {
-      let startMs: number | null = null;
-      let endMs: number | null = null;
+    // Multi-select Date range filter ([] = all)
+    if (pipelineDateFilter.length > 0) {
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      const todayStart = new Date(todayStr + 'T00:00:00').getTime();
+      const todayEnd = new Date(todayStr + 'T23:59:59').getTime();
 
-      if (pipelineDateFilter === 'today') {
-        const todayStr = new Date().toLocaleDateString('en-CA');
-        startMs = new Date(todayStr + 'T00:00:00').getTime();
-        endMs = new Date(todayStr + 'T23:59:59').getTime();
-      } else if (pipelineDateFilter === 'yesterday') {
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toLocaleDateString('en-CA');
-        startMs = new Date(yesterdayStr + 'T00:00:00').getTime();
-        endMs = new Date(yesterdayStr + 'T23:59:59').getTime();
-      } else if (pipelineDateFilter === 'date-wise') {
-        startMs = new Date(filterStartDate + 'T00:00:00').getTime();
-        endMs = new Date(filterEndDate + 'T23:59:59').getTime();
-      }
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toLocaleDateString('en-CA');
+      const yesterdayStart = new Date(yesterdayStr + 'T00:00:00').getTime();
+      const yesterdayEnd = new Date(yesterdayStr + 'T23:59:59').getTime();
 
-      if (startMs !== null && endMs !== null) {
-        filtered = filtered.filter(lead => {
-          const datesToTry = [lead.createdAt, lead.updatedAt, lead.assignDate, lead.entryDate];
+      const customStart = filterStartDate ? new Date(filterStartDate + 'T00:00:00').getTime() : 0;
+      const customEnd = filterEndDate ? new Date(filterEndDate + 'T23:59:59').getTime() : Infinity;
+
+      filtered = filtered.filter(lead => {
+        const datesToTry = [lead.createdAt, lead.updatedAt, lead.assignDate, lead.entryDate];
+        return pipelineDateFilter.some(df => {
+          let startMs = 0;
+          let endMs = Infinity;
+          if (df === 'today') {
+            startMs = todayStart;
+            endMs = todayEnd;
+          } else if (df === 'yesterday') {
+            startMs = yesterdayStart;
+            endMs = yesterdayEnd;
+          } else if (df === 'date-wise') {
+            startMs = customStart;
+            endMs = customEnd;
+          }
           return datesToTry.some(dateStr => {
             if (!dateStr) return false;
-            const dateObj = new Date(dateStr);
-            const ms = dateObj.getTime();
+            const ms = new Date(dateStr).getTime();
             if (isNaN(ms)) return false;
-            return ms >= startMs! && ms <= endMs!;
+            return ms >= startMs && ms <= endMs;
           });
         });
-      }
+      });
     }
 
-    // Remarks Wise Filter
-    if (remarksFilter && remarksFilter !== 'All') {
+    // Remarks Wise Multi-Filter
+    if (remarksFilter.length > 0) {
       filtered = filtered.filter(lead => {
         const r1 = !!(lead.remarks1 && lead.remarks1.trim());
         const r2 = !!(lead.remarks2 && lead.remarks2.trim());
         const r3 = !!(lead.remarks3 && lead.remarks3.trim());
 
-        if (remarksFilter === 'remarks1') {
-          return r1;
-        } else if (remarksFilter === 'remarks2') {
-          return r2;
-        } else if (remarksFilter === 'remarks3') {
-          return r3;
-        } else if (remarksFilter === 'remarks1Only') {
-          return r1 && !r2 && !r3;
-        } else if (remarksFilter === 'remarks2Only') {
-          return r2 && !r1 && !r3;
-        } else if (remarksFilter === 'remarks3Only') {
-          return r3 && !r1 && !r2;
-        } else if (remarksFilter === 'noRemarks') {
-          return !r1 && !r2 && !r3;
-        } else if (remarksFilter === 'allRemarks') {
-          return r1 && r2 && r3;
-        }
-        return true;
+        return remarksFilter.some(rf => {
+          if (rf === 'remarks1') return r1;
+          if (rf === 'remarks2') return r2;
+          if (rf === 'remarks3') return r3;
+          if (rf === 'remarks1Only') return r1 && !r2 && !r3;
+          if (rf === 'remarks2Only') return r2 && !r1 && !r3;
+          if (rf === 'remarks3Only') return r3 && !r1 && !r2;
+          if (rf === 'noRemarks') return !r1 && !r2 && !r3;
+          if (rf === 'allRemarks') return r1 && r2 && r3;
+          return true;
+        });
       });
     }
 
@@ -545,29 +504,38 @@ export default function LeadBoard({
     return options;
   }, [stageLeads]);
 
-  // Dynamically filter and sort active column leads by Country, Position, Gender, and Tags
+  // Dynamically filter and sort active column leads by Country, Position, Gender, and Tags (all multi-select)
   const filteredStageLeads = React.useMemo(() => {
     const filtered = stageLeads.filter(l => {
       // Country filter
-      if (boardCountryFilter !== 'All') {
-        if (!l.country || l.country.toUpperCase().trim() !== boardCountryFilter) return false;
+      if (boardCountryFilter.length > 0) {
+        const cUpper = String(l.country || '').toUpperCase().trim();
+        if (!cUpper || !boardCountryFilter.some(cf => cf.toUpperCase().trim() === cUpper)) return false;
       }
 
       // Position filter
-      if (boardPositionFilter !== 'All') {
-        if (!l.position || l.position.toUpperCase().trim() !== boardPositionFilter) return false;
+      if (boardPositionFilter.length > 0) {
+        const pUpper = String(l.position || '').toUpperCase().trim();
+        if (!pUpper || !boardPositionFilter.some(pf => pf.toUpperCase().trim() === pUpper)) return false;
       }
 
       // Gender filter
-      if (boardGenderFilter !== 'All') {
+      if (boardGenderFilter.length > 0) {
         const leadGender = String(l.gender || '').toUpperCase().trim();
-        const targetGender = boardGenderFilter === 'MALE' ? 'M' : 'F';
-        if (leadGender !== targetGender && leadGender !== boardGenderFilter) return false;
+        const matchesGender = boardGenderFilter.some(gf => {
+          const targetShort = gf === 'MALE' ? 'M' : gf === 'FEMALE' ? 'F' : gf;
+          return leadGender === targetShort || leadGender === gf;
+        });
+        if (!matchesGender) return false;
       }
 
       // Tag filter
-      if (boardTagFilter !== 'All') {
-        if (!l.tags || !Array.isArray(l.tags) || !l.tags.some(t => t.trim().toLowerCase() === boardTagFilter.trim().toLowerCase())) {
+      if (boardTagFilter.length > 0) {
+        if (
+          !l.tags ||
+          !Array.isArray(l.tags) ||
+          !boardTagFilter.some(tf => l.tags!.some(t => t.trim().toLowerCase() === tf.trim().toLowerCase()))
+        ) {
           return false;
         }
       }
@@ -579,369 +547,89 @@ export default function LeadBoard({
     return sortLeadsByUnreadAndDate(filtered);
   }, [stageLeads, boardCountryFilter, boardPositionFilter, boardGenderFilter, boardTagFilter]);
 
-  // Lead Card Render Helper to avoid duplicate JSX
-  const renderLeadCard = (lead: Lead) => {
-    const { prev, next } = getStageNeighbors(lead.stage);
-    const r1 = String(lead.remarks1 || '').trim();
-    const r2 = String(lead.remarks2 || '').trim();
-    const r3 = String(lead.remarks3 || '').trim();
-    const adminR = String(lead.adminRemarks || '').trim();
-    const assigned = String(lead.assignedTo || '').trim();
-    const hasRemarks = r1 !== '' || r2 !== '' || r3 !== '';
-    const latestRemarkLabel = r3 !== '' ? '📞 3rd Remark' : r2 !== '' ? '📞 2nd Remark' : '📞 1st Remark';
-    const latestRemarkValue = r3 !== '' ? r3 : r2 !== '' ? r2 : r1;
-
-    let formattedDate = 'Recent';
-    try {
-      if (lead.updatedAt) {
-        const d = new Date(lead.updatedAt);
-        if (!isNaN(d.getTime())) {
-          formattedDate = d.toLocaleDateString(undefined, {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
-        }
-      }
-    } catch {
-      formattedDate = 'Recent';
-    }
-
-    return (
-      <motion.div
-        key={lead.id}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.15, ease: "easeOut" }}
-        draggable="true"
-        onDragStart={(e: any) => {
-          if (e.dataTransfer) {
-            e.dataTransfer.setData('text/plain', lead.id);
-            e.dataTransfer.effectAllowed = 'move';
-          }
-        }}
-        className="bg-slate-900/95 rounded-xl border border-slate-800/90 p-4.5 shadow-[0_0_15px_rgba(16,185,129,0.02)] cursor-grab active:cursor-grabbing relative group flex flex-col text-left h-full transition-all duration-150 ease-out transform hover:-translate-y-1 hover:border-emerald-500/50 hover:shadow-[0_0_22px_rgba(16,185,129,0.12)] select-none"
-        onClick={() => onSelectLead(lead)}
-      >
-        {/* Top Row: Country Badge on Left, Document Checklists on Right */}
-        <div className="flex justify-between items-center gap-1.5 mb-3">
-          <div className="flex items-center gap-2">
-            <span className="text-[12px] font-bold text-slate-200 bg-slate-805/90 border border-slate-700/80 px-2.5 py-1 rounded-md uppercase tracking-wider flex items-center gap-1.5 font-sans shrink-0 shadow-2xs">
-              {lead.country && getCountryFlagUrl(String(lead.country)) ? (
-                <img 
-                  src={getCountryFlagUrl(String(lead.country))} 
-                  alt="" 
-                  className="w-4.5 h-3.5 object-cover rounded-2xs inline-block shadow-2xs shrink-0"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <span>🌐</span>
-              )}
-              {lead.country || 'Pending'}
-            </span>
-
-            {(() => {
-              const unreadCount = (lead.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
-              if (unreadCount > 0) {
-                return (
-                  <span 
-                    className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs font-mono border text-emerald-950 dark:text-emerald-100 bg-emerald-400 dark:bg-emerald-900/60 border-emerald-500/50 dark:border-emerald-500/60 animate-pulse"
-                    title={`${unreadCount} unread WhatsApp message${unreadCount > 1 ? 's' : ''} received`}
-                  >
-                    <MessageSquare className="h-3 w-3 fill-emerald-400 text-emerald-100" />
-                    <span>{unreadCount}</span>
-                  </span>
-                );
-              }
-              return null;
-            })()}
-          </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            {lead.docResume && (
-              lead.resumeUrl ? (
-                <a
-                  href={lead.resumeUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  title={`View ${formatCandidateName(String(lead.name || 'Candidate'))}'s CV`}
-                  className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-800/60 hover:border-emerald-700 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs transition-all flex items-center gap-1 cursor-pointer"
-                >
-                  <span>CV ✓</span>
-                  <ExternalLink className="h-2.5 w-2.5 opacity-80" />
-                </a>
-              ) : (
-                <span 
-                  title="Resume marked as received offline (Click card to view details or generate CV)"
-                  className="text-[11px] font-bold text-emerald-400/80 bg-emerald-950/30 border border-emerald-900/40 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs"
-                >
-                  CV ✓
-                </span>
-              )
-            )}
-            {lead.docPassportCopy && (
-              lead.passportCopyUrl ? (
-                <a
-                  href={lead.passportCopyUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  title={`View passport for ${formatCandidateName(String(lead.name || 'Candidate'))}`}
-                  className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-800/60 hover:border-emerald-700 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs transition-all flex items-center gap-1 cursor-pointer"
-                >
-                  <span>Passport ✓</span>
-                  <ExternalLink className="h-2.5 w-2.5 opacity-80" />
-                </a>
-              ) : (
-                <span 
-                  title="Passport marked as received offline"
-                  className="text-[11px] font-bold text-emerald-400/80 bg-emerald-950/30 border border-emerald-900/40 px-2 py-1 rounded-sm tracking-wider uppercase shadow-2xs"
-                >
-                  Passport ✓
-                </span>
-              )
-            )}
-          </div>
-        </div>
-
-        {/* Name, Stars & Message Count Section */}
-        <div className="flex items-start justify-between gap-1.5 mb-1.5">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <h4 className="font-extrabold text-slate-100 text-[15px] sm:text-[16px] leading-tight tracking-wide uppercase font-poppins truncate" title={lead.name}>
-                {formatCandidateName(String(lead.name || 'Candidate'))}
-              </h4>
-              {lead.isBlocked && (
-                <span 
-                  className="shrink-0 text-[9px] font-black text-white bg-red-600 px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs uppercase tracking-wider"
-                  title={`BLOCKED: ${lead.blockedReason || 'Blocked candidate'}`}
-                >
-                  <Ban className="h-2.5 w-2.5 stroke-[2.5]" />
-                  BLOCKED
-                </span>
-              )}
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Stars rating inline on the right */}
-            <div className="flex items-center gap-0.5" title={`${lead.importance || 3} Stars`}>
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Star 
-                   key={i} 
-                   className={`h-3.5 w-3.5 ${
-                     i < (lead.importance || 3) 
-                       ? 'text-amber-400 fill-amber-400' 
-                       : 'text-slate-700'
-                   }`} 
-                   id={`lead-board-star-${lead.id}-${i}`}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Sub-Header: Contact Info & Gender-Age inline */}
-        <div className="flex items-center justify-between text-[11.5px] xs:text-[12.5px] xl:text-[13.5px] text-slate-400 font-sans pb-2 border-b border-slate-800/60 mb-2">
-          <span className="font-mono tracking-wider font-bold text-slate-200">{lead.phone || 'No Phone'}</span>
-          <span className="font-mono text-slate-400 text-[12px] font-bold">
-            {(() => {
-              const g = String(lead.gender || '').toUpperCase().trim();
-              if (g === 'F' || g === 'FEMALE') return 'F';
-              if (g === 'M' || g === 'MALE') return 'M';
-              return 'N/A';
-            })()} • Age {lead.age || 'N/A'}
-          </span>
-        </div>
-
-        {/* Layer 1 Container: Candidate Info (SSW, JAPAN SSW, Source, etc.) */}
-        <div className="bg-slate-950/40 dark:bg-slate-950/30 border border-slate-800/80 rounded-lg p-3 space-y-2 mt-4">
-          <div className="flex items-center gap-1.5 truncate text-[12.5px] text-slate-200">
-            <span className="text-slate-500 shrink-0">💼</span>
-            <span className="font-bold truncate">
-              {lead.position || 'General Applicant'}
-            </span>
-          </div>
-
-          {lead.project && (
-            <>
-              <div className="h-[1px] bg-slate-800/40 w-full" />
-              <div className="flex items-center gap-1.5 truncate text-[12.5px] text-slate-300">
-                <span className="text-slate-500 shrink-0">🎯</span>
-                <span className="truncate">
-                  Project: <span className="text-white font-extrabold">{lead.project}</span>
-                </span>
-              </div>
-            </>
-          )}
-
-          {lead.source && (
-            <>
-              <div className="h-[1px] bg-slate-800/40 w-full" />
-              <div className="flex items-center gap-1.5 truncate text-[12.5px] text-slate-300">
-                <span className="text-slate-500 shrink-0">📣</span>
-                <span className="truncate">
-                  Source: <span className="text-white font-extrabold">{lead.source}</span>
-                </span>
-              </div>
-            </>
-          )}
-
-          {lead.docEcrPassport && (
-            <>
-              <div className="h-[1px] bg-slate-800/40 w-full" />
-              <div className="inline-flex items-center gap-1.5 bg-red-950/20 border border-red-900/35 text-red-400 px-2 py-0.5 rounded-sm text-[10.5px] mt-1">
-                <span>🛂 ECR Passport</span>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Layer 2 Container: Remarks */}
-        <div className="bg-slate-950/40 dark:bg-slate-950/30 border border-slate-800/80 rounded-lg p-3 mt-2.5">
-          {hasRemarks ? (
-            <div className="border-l-2 border-emerald-500/40 pl-2.5 py-0.5 text-left transition-all group/remarks cursor-help">
-              <span className="text-[10px] uppercase font-bold text-emerald-400 block mb-1 tracking-wider flex justify-between items-center font-sans">
-                <span>{latestRemarkLabel}</span>
-                <span className="text-[9px] text-slate-500 normal-case font-normal group-hover/remarks:opacity-0 transition-opacity">Hover for full</span>
-              </span>
-              <p className="text-slate-100 italic font-sans text-[13px] leading-relaxed line-clamp-1 group-hover/remarks:line-clamp-none transition-all font-medium">
-                "{latestRemarkValue}"
-              </p>
-            </div>
-          ) : adminR !== '' ? (
-            <div className="border-l-2 border-amber-500/40 pl-2.5 py-0.5 text-left transition-all group/adminRemarks cursor-help">
-              <span className="text-[10px] uppercase font-bold text-amber-400 block mb-1 tracking-wider flex justify-between items-center font-sans">
-                <span className="flex items-center gap-1">
-                  <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
-                  👑 ADMIN REMARK
-                </span>
-                <span className="text-[9px] text-slate-500 normal-case font-normal group-hover/adminRemarks:opacity-0 transition-opacity">Hover for full</span>
-              </span>
-              <p className="text-slate-100 italic font-sans text-[13px] leading-relaxed line-clamp-1 group-hover/adminRemarks:line-clamp-none transition-all font-medium">
-                "{adminR}"
-              </p>
-            </div>
-          ) : (
-            <div className="text-[11.5px] text-left text-slate-500 font-sans font-medium italic flex items-center justify-between">
-              <span>{lead.position ? `Intake: ${lead.position}` : 'Awaiting Telecaller Call'}</span>
-              <span className="text-[9.5px] text-slate-500 font-mono uppercase tracking-wider">Awaiting Call</span>
-            </div>
-          )}
-        </div>
-
-        {/* Spacer */}
-        <div className="flex-1 min-h-[12px]" />
-
-        {/* Move Controls */}
-        <div className="flex justify-between items-center gap-1 pt-2 border-t border-slate-800/60 mt-1">
-          <div>
-            {prev ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onUpdateStage(lead.id, prev);
-                }}
-                className="p-1 px-2.5 rounded-md bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-slate-100 transition-all flex items-center gap-0.5 border border-slate-700/40 cursor-pointer"
-                title={`Move back to ${prev}`}
-              >
-                <ArrowLeft className="h-3 w-3" />
-              </button>
-            ) : <div className="w-6" />}
-          </div>
-
-          <div className="flex items-center gap-2 select-none text-center justify-center font-sans text-[11.5px] font-bold text-slate-400">
-            <span className="font-mono tracking-wider">
-              {formattedDate}
-            </span>
-            <span className="text-slate-600 font-normal">|</span>
-            {assigned !== '' && assigned.toLowerCase() !== 'unassigned' ? (
-              <span className="text-indigo-400 font-black tracking-wider uppercase flex items-center gap-0.5">
-                👤 {assigned}
-              </span>
-            ) : (
-              <span className="text-slate-500 font-extrabold tracking-wider uppercase flex items-center gap-0.5">
-                👤 UNASSIGNED
-              </span>
-            )}
-          </div>
-
-          <div>
-            {next ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onUpdateStage(lead.id, next);
-                }}
-                className="p-1 px-2 rounded-md bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-accent-purple transition-all flex items-center gap-0.5 border border-slate-700/60 cursor-pointer"
-                title={`Advance to ${next}`}
-              >
-                <ArrowRight className="h-3 w-3" />
-              </button>
-            ) : <div className="w-6" />}
-          </div>
-        </div>
-
-      </motion.div>
-    );
-  };
+  const hasTopFilters =
+    coordinatorFilter.length > 0 ||
+    remarksFilter.length > 0 ||
+    pipelineDateFilter.length > 0 ||
+    searchQuery.trim() !== '';
 
   return (
-    <div className="space-y-6" id="cgp-leads-pipeline">
+    <div className="space-y-4 2xl:space-y-6" id="cgp-leads-pipeline">
 
       {/* Pipeline Border Card Container */}
-      <div className="bg-slate-950/40 rounded-3xl border border-emerald-600/35 dark:border-emerald-500/20 p-6 shadow-xl text-left">
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between mb-5 border-b border-slate-700 pb-4 gap-3.5">
+      <div className="bg-slate-950/40 rounded-3xl border border-emerald-600/35 dark:border-emerald-500/20 p-3.5 sm:p-4 2xl:p-6 shadow-xl text-left">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between mb-4 2xl:mb-5 border-b border-slate-700 pb-3.5 2xl:pb-4 gap-3">
           {/* Left Side: Controls wrapping nicely on small screens to prevent clipping */}
-          <div className="flex flex-wrap items-center gap-2.5 xl:gap-3.5 w-full xl:w-auto pb-1.5 xl:pb-0">
+          <div className="flex flex-wrap items-center gap-2 2xl:gap-3.5 w-full xl:w-auto pb-1 xl:pb-0">
             {/* 1. Search option */}
-            <div className="relative w-40 xl:w-56 text-left shrink-0">
+            <div className="relative w-40 2xl:w-56 text-left shrink-0">
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" />
               <input
                 type="text"
                 placeholder="Search candidate..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 text-[11px] xl:text-xs rounded-xl border border-slate-750 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-900 text-slate-100 placeholder-slate-500 font-semibold"
+                className="w-full pl-8 pr-3 py-1.5 text-[0.6875rem] xl:text-xs rounded-xl border border-slate-750 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-900 text-slate-100 placeholder-slate-500 font-semibold"
               />
             </div>
 
-            {/* 2. All coordinators filter - only in Admin View */}
+            {/* 2. All coordinators multi-select filter - only in Admin View */}
             {userRole === 'admin' && (
-              <SearchableSelect
-                value={coordinatorFilter}
+              <MultiSearchableSelect
+                values={coordinatorFilter}
                 onChange={setCoordinatorFilter}
                 options={coordinatorOptions}
+                allLabel="👤 All Coordinators"
+                placeholder="Search coordinators..."
+                badgeColor="bg-emerald-600"
+                activeTextClass="text-white"
+                activeBorderClass="border-emerald-400 ring-1 ring-emerald-400/40"
                 className="text-[11px] xl:text-xs px-2.5 xl:px-3.5 py-1.5 rounded-xl border border-emerald-700 dark:border-emerald-600 bg-emerald-800 dark:bg-emerald-950 hover:bg-emerald-900 dark:hover:bg-emerald-900 text-white dark:text-emerald-100 font-black focus:outline-none focus:ring-1 focus:ring-emerald-400 cursor-pointer uppercase shadow-xs shrink-0"
               />
             )}
 
-            {/* Remarks wise Filter */}
-            <SearchableSelect
-              value={remarksFilter}
+            {/* Remarks wise multi-select Filter */}
+            <MultiSearchableSelect
+              values={remarksFilter}
               onChange={setRemarksFilter}
               options={remarksOptions}
+              allLabel={`💬 Remarks: All (${leads.length})`}
+              placeholder="Search remarks filter..."
+              badgeColor="bg-emerald-600"
+              activeTextClass="text-white"
+              activeBorderClass="border-emerald-400 ring-1 ring-emerald-400/40"
               className="text-[11px] xl:text-xs px-2.5 xl:px-3.5 py-1.5 rounded-xl border border-emerald-700 dark:border-emerald-600 bg-emerald-800 dark:bg-emerald-950 hover:bg-emerald-900 dark:hover:bg-emerald-900 text-white dark:text-emerald-100 font-black focus:outline-none focus:ring-1 focus:ring-emerald-400 cursor-pointer uppercase shadow-xs shrink-0"
             />
 
-            {/* 3. Time filters: All, Today, Yesterday, Date */}
+            {/* 3. Multi-select Time filters: All, Today, Yesterday, Date */}
             <div className="flex items-center gap-0.5 xl:gap-1 bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
+              <button
+                type="button"
+                onClick={() => setPipelineDateFilter([])}
+                className={`px-2 xl:px-3 py-1 rounded-lg text-[9.5px] xl:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  pipelineDateFilter.length === 0
+                    ? 'bg-emerald-800 text-white border border-emerald-600/60 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                All
+              </button>
               {[
-                { id: 'all', label: 'All' },
                 { id: 'today', label: 'Today' },
                 { id: 'yesterday', label: 'Yesterday' },
                 { id: 'date-wise', label: 'Date' }
               ].map(filter => {
-                const isActive = pipelineDateFilter === filter.id;
+                const isActive = pipelineDateFilter.includes(filter.id);
                 return (
                   <button
                     key={filter.id}
                     type="button"
                     onClick={() => {
-                      if (isActive) {
-                        setPipelineDateFilter('all');
-                      } else {
-                        setPipelineDateFilter(filter.id as any);
-                      }
+                      setPipelineDateFilter(prev =>
+                        prev.includes(filter.id)
+                          ? prev.filter(item => item !== filter.id)
+                          : [...prev, filter.id]
+                      );
                     }}
                     className={`px-2 xl:px-3 py-1 rounded-lg text-[9.5px] xl:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
                       isActive
@@ -955,7 +643,7 @@ export default function LeadBoard({
               })}
             </div>
 
-            {pipelineDateFilter === 'date-wise' && (
+            {pipelineDateFilter.includes('date-wise') && (
               <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 px-3 py-1 rounded-xl text-left animate-fade-in shrink-0">
                 <input
                   type="date"
@@ -975,38 +663,25 @@ export default function LeadBoard({
               </div>
             )}
 
-            {/* 4. View Switcher segment button styled beautifully (Pipeline & Classic) */}
-            <div className="flex items-center gap-0.5 xl:gap-1 bg-slate-900 border border-slate-750 p-1 rounded-xl shadow-inner shrink-0">
+            {hasTopFilters && (
               <button
                 type="button"
-                onClick={() => setViewMode('hub')}
-                className={`flex items-center gap-1 xl:gap-1.5 px-2 xl:px-3 py-1 rounded-lg text-[9.5px] xl:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                  viewMode === 'hub'
-                    ? 'bg-emerald-800 text-white border border-emerald-600/60 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
+                onClick={() => {
+                  setSearchQuery('');
+                  setCoordinatorFilter([]);
+                  setRemarksFilter([]);
+                  setPipelineDateFilter([]);
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-rose-950/30 hover:bg-rose-950/50 text-rose-400 border border-rose-500/30 text-[10px] font-black uppercase tracking-wider cursor-pointer transition-all"
               >
-                <LayoutGrid className="h-3 w-3" />
-                Pipeline View
+                ✕ Reset Filters
               </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('board')}
-                className={`flex items-center gap-1 xl:gap-1.5 px-2 xl:px-3 py-1 rounded-lg text-[9.5px] xl:text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                  viewMode === 'board'
-                    ? 'bg-emerald-800 text-white border border-emerald-600/60 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Trello className="h-3 w-3" />
-                Classic View
-              </button>
-            </div>
+            )}
           </div>
 
           {/* Right Side: Results indicator */}
           <div className="flex items-center shrink-0">
-            {pipelineDateFilter !== 'all' ? (
+            {hasTopFilters ? (
               <div className="text-[10px] text-slate-400 font-bold bg-slate-900 border border-slate-750 px-3 py-1.5 rounded-xl">
                 Filtered: <span className="text-accent-emerald font-black font-mono">{visibleLeads.length} matches</span>
               </div>
@@ -1017,12 +692,12 @@ export default function LeadBoard({
             )}
           </div>
         </div>
-        {/* View Layout Conditional Render */}
-        {viewMode === 'hub' ? (
-          <div className="space-y-6 animate-fade-in">
-            {/* Stage Selector Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
-              {COLUMNS.map((col) => {
+
+        {/* Pipeline Hub Layout (Classic View removed) */}
+          <div className="space-y-4 2xl:space-y-6 animate-fade-in">
+            {/* Stage Selector Grid — Refined Executive Metric Strip */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 2xl:gap-3.5">
+              {COLUMNS.map((col, idx) => {
                 const colLeads = visibleLeads.filter(l => {
                   if (col.id === 'in_discussion') return l.stage === 'in_discussion' || l.stage === 'negotiating';
                   if (col.id === 'office_visited') return l.stage === 'office_visited' || l.stage === 'proposal';
@@ -1038,7 +713,7 @@ export default function LeadBoard({
                   (selectedStage === 'proposal' && col.id === 'office_visited') ||
                   (selectedStage === 'rotations' && col.id === 'cold_leads');
                 const isDraggedOver = draggedOverColumn === col.id;
-                
+
                 // Map icons dynamically for 7 stages
                 let IconComponent = Inbox;
                 if (col.id === 'in_discussion' || col.id === 'negotiating') IconComponent = Briefcase;
@@ -1048,51 +723,115 @@ export default function LeadBoard({
                 else if (col.id === 'cold_leads' || col.id === 'rotations') IconComponent = Snowflake;
                 else if (col.id === 'lost') IconComponent = X;
 
-                // Determine visual accent based on stage
-                let selectedClass = '';
-                let badgeColor = '';
-                let iconColor = 'text-slate-400';
-                let unselectedClass = 'bg-slate-850 border-emerald-600/35 dark:border-emerald-500/20 hover:border-emerald-600 text-slate-200 hover:bg-slate-800/50 shadow-3xs';
-                
+                // Per-stage refined visual tokens (preserving dynamic workload health tier on In Discussion)
+                let accentHex = '#64748b';
+                let iconColorClass = 'text-slate-400';
+                let metricAccentClass = 'text-slate-400';
+                let selectedSurfaceClass = 'border-sky-500/70 bg-slate-900 shadow-lg';
+                let hoverBorderClass = 'hover:border-slate-600';
+
                 if (col.id === 'new') {
-                  selectedClass = isSelected ? 'bg-sky-950/20 dark:bg-sky-950/80 border-2 border-sky-600 dark:border-sky-500 text-slate-100 shadow-md ring-2 ring-sky-500/20' : '';
-                  badgeColor = isSelected ? 'bg-sky-500/20 text-sky-700 dark:text-sky-400 border-sky-500/30' : 'bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20';
-                  if (isSelected) iconColor = 'text-sky-600 dark:text-sky-400';
+                  accentHex = '#38bdf8';
+                  iconColorClass = isSelected ? 'text-sky-600 dark:text-sky-400' : 'text-sky-600/80 dark:text-sky-400/80 group-hover:text-sky-500 dark:group-hover:text-sky-400';
+                  metricAccentClass = 'text-sky-600 dark:text-sky-400';
+                  selectedSurfaceClass = 'border-sky-500/80 bg-sky-500/10 dark:bg-sky-950/45 shadow-lg shadow-sky-950/20';
+                  hoverBorderClass = 'hover:border-sky-500/50';
                 } else if (col.id === 'in_discussion' || col.id === 'negotiating') {
-                  selectedClass = inDiscussionPctInfo.selectedClass;
-                  badgeColor = inDiscussionPctInfo.badgeColor;
-                  iconColor = inDiscussionPctInfo.iconColor;
-                  unselectedClass = inDiscussionPctInfo.unselectedClass;
+                  if (inDiscussionPctInfo.level === 'red') {
+                    accentHex = '#f43f5e';
+                    iconColorClass = isSelected ? 'text-rose-600 dark:text-rose-400' : 'text-rose-600/85 dark:text-rose-400/85 group-hover:text-rose-500 dark:group-hover:text-rose-400';
+                    metricAccentClass = inDiscussionPctInfo.textColor;
+                    selectedSurfaceClass = 'border-rose-500/80 bg-rose-500/10 dark:bg-rose-950/45 shadow-lg shadow-rose-950/20';
+                    hoverBorderClass = 'hover:border-rose-500/50';
+                  } else if (inDiscussionPctInfo.level === 'orange') {
+                    accentHex = '#f97316';
+                    iconColorClass = isSelected ? 'text-orange-600 dark:text-orange-400' : 'text-orange-600/85 dark:text-orange-400/85 group-hover:text-orange-500 dark:group-hover:text-orange-400';
+                    metricAccentClass = inDiscussionPctInfo.textColor;
+                    selectedSurfaceClass = 'border-orange-500/80 bg-orange-500/10 dark:bg-orange-950/45 shadow-lg shadow-orange-950/20';
+                    hoverBorderClass = 'hover:border-orange-500/50';
+                  } else if (inDiscussionPctInfo.level === 'yellow') {
+                    accentHex = '#eab308';
+                    iconColorClass = isSelected ? 'text-amber-600 dark:text-amber-400' : 'text-amber-600/85 dark:text-amber-400/85 group-hover:text-amber-500 dark:group-hover:text-amber-400';
+                    metricAccentClass = inDiscussionPctInfo.textColor;
+                    selectedSurfaceClass = 'border-amber-500/80 bg-amber-500/10 dark:bg-amber-950/40 shadow-lg shadow-amber-950/20';
+                    hoverBorderClass = 'hover:border-amber-500/50';
+                  } else {
+                    accentHex = '#10b981';
+                    iconColorClass = isSelected ? 'text-emerald-600 dark:text-emerald-400' : 'text-emerald-600/85 dark:text-emerald-400/85 group-hover:text-emerald-500 dark:group-hover:text-emerald-400';
+                    metricAccentClass = inDiscussionPctInfo.textColor;
+                    selectedSurfaceClass = 'border-emerald-500/80 bg-emerald-500/10 dark:bg-emerald-950/45 shadow-lg shadow-emerald-950/20';
+                    hoverBorderClass = 'hover:border-emerald-500/50';
+                  }
                 } else if (col.id === 'strong_opportunity') {
-                  selectedClass = isSelected ? 'bg-amber-950/25 dark:bg-amber-950/80 border-2 border-amber-500 text-slate-100 shadow-md ring-2 ring-amber-500/20' : '';
-                  badgeColor = isSelected ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20';
-                  if (isSelected) iconColor = 'text-amber-500 dark:text-amber-400';
+                  accentHex = '#f59e0b';
+                  iconColorClass = isSelected ? 'text-amber-600 dark:text-amber-400' : 'text-amber-600/80 dark:text-amber-400/80 group-hover:text-amber-500 dark:group-hover:text-amber-400';
+                  metricAccentClass = 'text-amber-600 dark:text-amber-400';
+                  selectedSurfaceClass = 'border-amber-500/80 bg-amber-500/10 dark:bg-amber-950/45 shadow-lg shadow-amber-950/20';
+                  hoverBorderClass = 'hover:border-amber-500/50';
                 } else if (col.id === 'office_visited' || col.id === 'proposal') {
-                  selectedClass = isSelected ? 'bg-purple-950/20 dark:bg-purple-950/80 border-2 border-purple-600 dark:border-purple-500 text-slate-100 shadow-md ring-2 ring-purple-500/20' : '';
-                  badgeColor = isSelected ? 'bg-purple-500/20 text-purple-700 dark:text-purple-400 border-purple-500/30' : 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/20';
-                  if (isSelected) iconColor = 'text-purple-600 dark:text-purple-400';
+                  accentHex = '#818cf8';
+                  iconColorClass = isSelected ? 'text-indigo-600 dark:text-indigo-400' : 'text-indigo-600/80 dark:text-indigo-400/80 group-hover:text-indigo-500 dark:group-hover:text-indigo-400';
+                  metricAccentClass = 'text-indigo-600 dark:text-indigo-400';
+                  selectedSurfaceClass = 'border-indigo-500/80 bg-indigo-500/10 dark:bg-indigo-950/45 shadow-lg shadow-indigo-950/20';
+                  hoverBorderClass = 'hover:border-indigo-500/50';
                 } else if (col.id === 'won') {
-                  selectedClass = isSelected ? 'bg-emerald-950/20 dark:bg-emerald-950/80 border-2 border-emerald-600 dark:border-emerald-500 text-slate-100 shadow-md ring-2 ring-emerald-500/20' : '';
-                  badgeColor = isSelected ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border-emerald-500/30' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20';
-                  if (isSelected) iconColor = 'text-emerald-600 dark:text-emerald-400';
+                  accentHex = '#10b981';
+                  iconColorClass = isSelected ? 'text-emerald-600 dark:text-emerald-400' : 'text-emerald-600/80 dark:text-emerald-400/80 group-hover:text-emerald-500 dark:group-hover:text-emerald-400';
+                  metricAccentClass = 'text-emerald-600 dark:text-emerald-400';
+                  selectedSurfaceClass = 'border-emerald-500/80 bg-emerald-500/10 dark:bg-emerald-950/45 shadow-lg shadow-emerald-950/20';
+                  hoverBorderClass = 'hover:border-emerald-500/50';
                 } else if (col.id === 'cold_leads' || col.id === 'rotations') {
-                  selectedClass = isSelected ? 'bg-blue-950/20 dark:bg-blue-950/80 border-2 border-blue-600 dark:border-blue-500 text-slate-100 shadow-md ring-2 ring-blue-500/20' : '';
-                  badgeColor = isSelected ? 'bg-blue-500/20 text-blue-700 dark:text-blue-400 border-blue-500/30' : 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20';
-                  if (isSelected) iconColor = 'text-blue-600 dark:text-blue-400';
+                  accentHex = '#3b82f6';
+                  iconColorClass = isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-blue-600/80 dark:text-blue-400/80 group-hover:text-blue-500 dark:group-hover:text-blue-400';
+                  metricAccentClass = 'text-blue-600 dark:text-blue-400';
+                  selectedSurfaceClass = 'border-blue-500/80 bg-blue-500/10 dark:bg-blue-950/45 shadow-lg shadow-blue-950/20';
+                  hoverBorderClass = 'hover:border-blue-500/50';
                 } else if (col.id === 'lost') {
-                  selectedClass = isSelected ? 'bg-rose-950/20 dark:bg-rose-950/80 border-2 border-rose-600 dark:border-rose-500 text-slate-100 shadow-md ring-2 ring-rose-500/20' : '';
-                  badgeColor = isSelected ? 'bg-rose-500/20 text-rose-700 dark:text-rose-400 border-rose-500/30' : 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20';
-                  if (isSelected) iconColor = 'text-rose-600 dark:text-rose-400';
+                  accentHex = '#f43f5e';
+                  iconColorClass = isSelected ? 'text-rose-600 dark:text-rose-400' : 'text-rose-600/80 dark:text-rose-400/80 group-hover:text-rose-500 dark:group-hover:text-rose-400';
+                  metricAccentClass = 'text-rose-600 dark:text-rose-400';
+                  selectedSurfaceClass = 'border-rose-500/80 bg-rose-500/10 dark:bg-rose-950/45 shadow-lg shadow-rose-950/20';
+                  hoverBorderClass = 'hover:border-rose-500/50';
                 }
 
-                let themeColorHex = '#64748b'; // default slate
-                if (col.id === 'new') themeColorHex = '#38bdf8'; // sky-400 (sky blue)
-                else if (col.id === 'in_discussion' || col.id === 'negotiating') themeColorHex = '#eab308'; // yellow/amber
-                else if (col.id === 'strong_opportunity') themeColorHex = '#c084fc'; // purple/amethyst
-                else if (col.id === 'office_visited' || col.id === 'proposal') themeColorHex = '#818cf8'; // indigo/violet
-                else if (col.id === 'won') themeColorHex = '#10b981'; // emerald green
-                else if (col.id === 'cold_leads' || col.id === 'rotations') themeColorHex = '#3b82f6'; // royal blue
-                else if (col.id === 'lost') themeColorHex = '#f43f5e'; // rose/red
+                const cleanStageName = col.title.replace(/^\d+\.\s*/, '');
+                const stageSharePct = visibleLeads.length > 0 ? (colLeads.length / visibleLeads.length) * 100 : 0;
+                const displayPct = col.id === 'in_discussion' ? inDiscussionPctInfo.percentage : stageSharePct;
+                const pctTitle =
+                  col.id === 'in_discussion'
+                    ? `In Discussion load: ${inDiscussionPctInfo.inDiscussionCount}/${inDiscussionPctInfo.totalAssignedLifetime} lifetime assigned leads (${inDiscussionPctInfo.percentage.toFixed(1)}%)`
+                    : `${stageSharePct.toFixed(1)}% of visible leads`;
+
+                // Real 6-bucket recent activity trend from colLeads (older -> 30d -> 14d -> 7d -> 3d -> 24h)
+                const nowMs = Date.now();
+                const buckets = [0, 0, 0, 0, 0, 0];
+                for (const l of colLeads) {
+                  const ts = new Date(l.updatedAt || l.createdAt || 0).getTime();
+                  const ageDays = ts > 0 ? Math.max(0, (nowMs - ts) / 86400000) : 99;
+                  if (ageDays <= 1) buckets[5] += 1;
+                  else if (ageDays <= 3) buckets[4] += 1;
+                  else if (ageDays <= 7) buckets[3] += 1;
+                  else if (ageDays <= 14) buckets[2] += 1;
+                  else if (ageDays <= 30) buckets[1] += 1;
+                  else buckets[0] += 1;
+                }
+                const maxBucket = Math.max(...buckets, 1);
+                const chartPts = buckets.map((val, bIdx) => {
+                  const x = Math.round((bIdx / 5) * 200);
+                  // Keep curve gracefully inside y=[10..38] so it complements text without collision
+                  const norm = colLeads.length === 0 ? 0.08 : 0.14 + (val / maxBucket) * 0.72;
+                  const y = Math.round((42 - norm * 34) * 10) / 10;
+                  return { x, y };
+                });
+                let curvePath = `M ${chartPts[0].x},${chartPts[0].y}`;
+                for (let p = 0; p < chartPts.length - 1; p++) {
+                  const curr = chartPts[p];
+                  const next = chartPts[p + 1];
+                  const midX = Math.round(((curr.x + next.x) / 2) * 10) / 10;
+                  curvePath += ` C ${midX},${curr.y} ${midX},${next.y} ${next.x},${next.y}`;
+                }
+                const areaPath = `${curvePath} L 200,44 L 0,44 Z`;
+                const lastPt = chartPts[chartPts.length - 1];
 
                 return (
                   <button
@@ -1112,71 +851,141 @@ export default function LeadBoard({
                         onUpdateStage(leadId, col.id);
                       }
                     }}
-                    className={`group p-2.5 px-3 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex flex-col justify-between h-[112px] min-h-[112px] relative overflow-hidden ${
+                    title={col.title}
+                    style={
+                      isSelected
+                        ? { boxShadow: `0 10px 28px -10px ${accentHex}55, inset 0 1px 0 0 ${accentHex}45` }
+                        : undefined
+                    }
+                    className={`group relative overflow-hidden rounded-2xl border p-3.5 2xl:p-4 pb-4 2xl:pb-5 text-left transition-all duration-150 ease-out select-none cursor-pointer flex flex-col justify-between min-h-[7.75rem] 2xl:min-h-[8.25rem] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
                       isDraggedOver
-                        ? 'border-accent-purple bg-accent-purple/10 scale-[1.03] ring-2 ring-accent-purple/40 shadow-lg'
+                        ? 'border-accent-purple bg-accent-purple/10 ring-2 ring-accent-purple/40 shadow-lg'
                         : isSelected
-                        ? `${selectedClass} scale-[1.02]`
-                        : unselectedClass
+                        ? `${selectedSurfaceClass}`
+                        : `bg-slate-900 border-slate-750 ${hoverBorderClass} hover:bg-slate-850`
                     }`}
                   >
-                    <div className="relative z-10 flex items-start justify-between w-full">
-                      <div className={`text-sm font-bold flex items-center justify-center w-7.5 h-7.5 rounded-lg border ${isSelected ? 'bg-slate-900/20 border-slate-700' : 'bg-slate-900 border-slate-800'}`}>
-                        <IconComponent className={`w-4 h-4 ${iconColor}`} />
-                      </div>
-                      <div className="flex flex-col items-end gap-0.5">
-                        <span className={`text-xs sm:text-[13px] font-black px-2 py-0.5 rounded-md font-mono border ${badgeColor}`}>
-                          {colLeads.length} {colLeads.length === 1 ? 'Lead' : 'Leads'}
+                    {/* Gradient Halo Glow Aura */}
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none absolute inset-0 transition-opacity duration-200 ${
+                        isSelected ? 'opacity-100' : 'opacity-60 group-hover:opacity-100'
+                      }`}
+                      style={{
+                        background: `radial-gradient(120% 85% at 88% 8%, ${accentHex}${isSelected ? '2e' : '18'} 0%, transparent 62%), radial-gradient(90% 60% at 18% 100%, ${accentHex}${isSelected ? '1c' : '0c'} 0%, transparent 65%)`
+                      }}
+                    />
+
+                    {/* Crisp Top Edge Highlight Bar on Active Stage */}
+                    {isSelected && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute top-0 left-0 right-0 h-[2.5px] z-10"
+                        style={{ backgroundColor: accentHex }}
+                      />
+                    )}
+
+                    {/* Top Row: Clean Icon + Step Index on Left, Unread Alert or Active State on Right */}
+                    <div className="relative z-10 flex items-center justify-between gap-2 w-full">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <IconComponent className={`w-[1.125rem] h-[1.125rem] shrink-0 transition-colors ${iconColorClass}`} />
+                        <span className="text-xs font-mono font-bold tabular-nums text-slate-400">
+                          {String(idx + 1).padStart(2, '0')}
                         </span>
-                        {col.id === 'in_discussion' && (
-                          <span className={`text-[9px] font-extrabold font-mono ${inDiscussionPctInfo.textColor}`} title={`In Discussion load: ${inDiscussionPctInfo.inDiscussionCount}/${inDiscussionPctInfo.totalAssignedLifetime} lifetime assigned leads (${inDiscussionPctInfo.percentage.toFixed(1)}%)`}>
-                            {inDiscussionPctInfo.percentage.toFixed(1)}%
-                          </span>
-                        )}
                       </div>
-                    </div>
-                    
-                    <div className="relative z-10 mt-1.5 w-full">
-                      <div className="flex items-center justify-between gap-1 w-full">
-                        <h3 className={`font-black text-[11.5px] sm:text-[13px] tracking-wide uppercase leading-tight line-clamp-2 ${isSelected ? 'text-slate-100' : 'text-slate-200'}`}>
-                          {col.title}
-                        </h3>
-                        {colUnreadCount > 0 && (
-                          <span 
-                            className="shrink-0 flex items-center gap-1 bg-emerald-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-pulse shadow-xs"
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {colUnreadCount > 0 ? (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400"
                             title={`${colUnreadCount} unread WhatsApp messages`}
                           >
-                            <MessageSquare className="h-2.5 w-2.5 fill-current text-white" />
+                            <MessageSquare className="w-3.5 h-3.5 fill-current" />
                             <span>{colUnreadCount}</span>
                           </span>
-                        )}
+                        ) : isSelected ? (
+                          <span className={`text-xs font-bold whitespace-nowrap ${metricAccentClass}`}>
+                            Active
+                          </span>
+                        ) : null}
                       </div>
-                      <p className={`text-[9px] font-bold mt-0.5 ${isSelected ? 'text-slate-100 opacity-90' : 'text-slate-400'}`}>
-                        {isSelected ? '● Selected' : 'Click to view'}
-                      </p>
                     </div>
 
-                    {/* Elegant background sparkline graph matching the bucket theme */}
-                    <svg className="absolute bottom-0 left-0 w-full h-8 pointer-events-none opacity-25 dark:opacity-45 group-hover:opacity-40 dark:group-hover:opacity-85 transition-opacity z-0" viewBox="0 0 200 40" preserveAspectRatio="none">
+                    {/* Hero Metric Row: Larger Bold Tabular Count with natural digit spacing + Share/Load Percentage */}
+                    <div className="relative z-10 flex items-baseline justify-between gap-2 mt-3 2xl:mt-3.5 w-full">
+                      <div className="flex items-baseline gap-2 min-w-0">
+                        <span className="text-[1.65rem] 2xl:text-[1.875rem] font-extrabold font-display tracking-[0.04em] tabular-nums leading-none text-slate-100">
+                          {colLeads.length.toLocaleString()}
+                        </span>
+                        <span className="text-xs font-medium tracking-wide text-slate-400">
+                          {colLeads.length === 1 ? 'lead' : 'leads'}
+                        </span>
+                      </div>
+
+                      <span
+                        title={pctTitle}
+                        className={`text-xs font-mono font-bold tabular-nums shrink-0 ${
+                          col.id === 'in_discussion'
+                            ? inDiscussionPctInfo.textColor
+                            : isSelected
+                            ? metricAccentClass
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        {displayPct.toFixed(1)}%
+                      </span>
+                    </div>
+
+                    {/* Stage Title */}
+                    <h3
+                      className={`relative z-10 mt-2.5 2xl:mt-3 text-[0.8125rem] 2xl:text-[0.875rem] font-bold tracking-tight leading-snug truncate w-full transition-colors ${
+                        isSelected ? 'text-slate-100' : 'text-slate-200 group-hover:text-slate-100'
+                      }`}
+                    >
+                      {cleanStageName}
+                    </h3>
+
+                    {/* Data-Driven Gradient Area Graph along Bottom */}
+                    <svg
+                      aria-hidden="true"
+                      className={`absolute bottom-[2px] left-0 right-0 w-full h-11 pointer-events-none transition-opacity duration-200 z-0 ${
+                        isSelected ? 'opacity-85' : 'opacity-45 group-hover:opacity-75'
+                      }`}
+                      viewBox="0 0 200 44"
+                      preserveAspectRatio="none"
+                    >
                       <defs>
-                        <linearGradient id={`grad-${col.id}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={themeColorHex} stopOpacity="0.4" />
-                          <stop offset="100%" stopColor={themeColorHex} stopOpacity="0.0" />
+                        <linearGradient id={`stage-graph-grad-${col.id}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={accentHex} stopOpacity="0.38" />
+                          <stop offset="100%" stopColor={accentHex} stopOpacity="0.0" />
                         </linearGradient>
                       </defs>
-                      <path 
-                        d="M 0,38 L 70,38 Q 100,38 120,28 T 150,24 T 180,14 T 200,12 L 200,40 L 0,40 Z" 
-                        fill={`url(#grad-${col.id})`}
-                      />
-                      <path 
-                        d="M 0,38 L 70,38 Q 100,38 120,28 T 150,24 T 180,14 T 200,12" 
-                        fill="none" 
-                        stroke={themeColorHex} 
-                        strokeWidth="1.5" 
+                      <path d={areaPath} fill={`url(#stage-graph-grad-${col.id})`} />
+                      <path
+                        d={curvePath}
+                        fill="none"
+                        stroke={accentHex}
+                        strokeWidth="1.75"
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       />
+                      <circle cx={lastPt.x - 2} cy={lastPt.y} r="2.2" fill={accentHex} />
                     </svg>
+
+                    {/* Bottom 2px Proportional Stage Share Track */}
+                    <div
+                      aria-hidden="true"
+                      className="absolute bottom-0 left-0 right-0 h-[2px] bg-slate-800/60 z-10"
+                    >
+                      <div
+                        className="h-full transition-opacity duration-150"
+                        style={{
+                          width: `${colLeads.length > 0 ? Math.min(100, Math.max(4, stageSharePct)) : 0}%`,
+                          backgroundColor: accentHex,
+                          opacity: isSelected ? 1 : 0.65
+                        }}
+                      />
+                    </div>
                   </button>
                 );
               })}
@@ -1184,12 +993,12 @@ export default function LeadBoard({
 
             {/* Active Stage Container (Active Jobs Hub style) */}
             {selectedStage && (
-              <div className="bg-slate-950/40 border border-emerald-600/35 dark:border-emerald-500/20 rounded-3xl p-6 shadow-3xs text-left space-y-6">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-slate-700 pb-4 gap-4">
+              <div className="bg-slate-950/40 border border-emerald-600/35 dark:border-emerald-500/20 rounded-3xl p-3.5 sm:p-4 2xl:p-6 shadow-3xs text-left space-y-4 2xl:space-y-6">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-slate-700 pb-3.5 2xl:pb-4 gap-3 2xl:gap-4">
                   {/* Left Title, Stats AND Filters grouped beautifully with fully responsive layout */}
-                  <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 min-w-0 flex-1">
+                  <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 2xl:gap-6 min-w-0 flex-1">
                     <div className="shrink-0">
-                      <h3 className="text-sm sm:text-base font-black text-slate-100 uppercase tracking-wide flex items-center gap-2">
+                      <h3 className="text-sm 2xl:text-base font-black text-slate-100 uppercase tracking-wide flex items-center gap-2">
                         📂 {COLUMNS.find(c => c.id === selectedStage || (selectedStage === 'negotiating' && c.id === 'in_discussion') || (selectedStage === 'proposal' && c.id === 'office_visited') || (selectedStage === 'rotations' && c.id === 'cold_leads'))?.title} Candidates
                       </h3>
                       <p className="text-xs text-slate-400 font-bold mt-0.5">
@@ -1197,14 +1006,19 @@ export default function LeadBoard({
                       </p>
                     </div>
 
-                    {/* Inline Premium Filters next to title in a responsive grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 xl:flex xl:flex-row gap-2.5 w-full xl:w-auto items-center">
+                    {/* Inline Premium Multi-Select Filters next to title in a responsive grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 xl:flex xl:flex-row gap-2 2xl:gap-2.5 w-full xl:w-auto items-center">
                       {/* Country Filter */}
                       <div className="w-full xl:w-auto">
-                        <SearchableSelect
-                          value={boardCountryFilter}
+                        <MultiSearchableSelect
+                          values={boardCountryFilter}
                           onChange={setBoardCountryFilter}
                           options={searchableCountryOptions}
+                          allLabel={`All Countries (${stageLeads.length})`}
+                          placeholder="Search countries..."
+                          badgeColor="bg-emerald-600"
+                          activeTextClass="text-emerald-300"
+                          activeBorderClass="border-emerald-500/80 ring-1 ring-emerald-500/30"
                           className="w-full text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs"
                           dropdownClassName="dark:bg-slate-950 border-slate-700 w-60"
                         />
@@ -1212,10 +1026,15 @@ export default function LeadBoard({
  
                       {/* Position Filter */}
                       <div className="w-full xl:w-auto">
-                        <SearchableSelect
-                          value={boardPositionFilter}
+                        <MultiSearchableSelect
+                          values={boardPositionFilter}
                           onChange={setBoardPositionFilter}
                           options={searchablePositionOptions}
+                          allLabel={`All Positions (${stageLeads.length})`}
+                          placeholder="Search positions..."
+                          badgeColor="bg-emerald-600"
+                          activeTextClass="text-emerald-300"
+                          activeBorderClass="border-emerald-500/80 ring-1 ring-emerald-500/30"
                           className="w-full text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs truncate"
                           dropdownClassName="dark:bg-slate-950 border-slate-700 w-64"
                         />
@@ -1223,10 +1042,15 @@ export default function LeadBoard({
  
                       {/* Gender Filter */}
                       <div className="w-full xl:w-auto">
-                        <SearchableSelect
-                          value={boardGenderFilter}
+                        <MultiSearchableSelect
+                          values={boardGenderFilter}
                           onChange={setBoardGenderFilter}
                           options={searchableGenderOptions}
+                          allLabel={`All Genders (${stageLeads.length})`}
+                          placeholder="Filter genders..."
+                          badgeColor="bg-emerald-600"
+                          activeTextClass="text-emerald-300"
+                          activeBorderClass="border-emerald-500/80 ring-1 ring-emerald-500/30"
                           className="w-full text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs"
                           dropdownClassName="dark:bg-slate-950 border-slate-700 w-48"
                         />
@@ -1234,23 +1058,30 @@ export default function LeadBoard({
 
                       {/* Tags Filter */}
                       <div className="w-full xl:w-auto">
-                        <SearchableSelect
-                          value={boardTagFilter}
+                        <MultiSearchableSelect
+                          values={boardTagFilter}
                           onChange={setBoardTagFilter}
                           options={searchableTagOptions}
+                          allLabel={`All Tags (${stageLeads.length})`}
+                          placeholder="Search tags..."
+                          badgeColor="bg-emerald-600"
+                          activeTextClass="text-emerald-300"
+                          activeBorderClass="border-emerald-500/80 ring-1 ring-emerald-500/30"
+                          align="right"
                           className="w-full text-xs px-3 py-1.5 rounded-xl border border-slate-750 dark:border-slate-700 bg-slate-900 hover:bg-slate-850 text-slate-200 font-black cursor-pointer uppercase transition-all shadow-xs"
                           dropdownClassName="dark:bg-slate-950 border-slate-700 w-52"
                         />
                       </div>
 
                       {/* Reset Filters button if any are active */}
-                      {(boardCountryFilter !== 'All' || boardPositionFilter !== 'All' || boardGenderFilter !== 'All' || boardTagFilter !== 'All') && (
+                      {(boardCountryFilter.length > 0 || boardPositionFilter.length > 0 || boardGenderFilter.length > 0 || boardTagFilter.length > 0) && (
                         <button
+                          type="button"
                           onClick={() => {
-                            setBoardCountryFilter('All');
-                            setBoardPositionFilter('All');
-                            setBoardGenderFilter('All');
-                            setBoardTagFilter('All');
+                            setBoardCountryFilter([]);
+                            setBoardPositionFilter([]);
+                            setBoardGenderFilter([]);
+                            setBoardTagFilter([]);
                           }}
                           className="col-span-2 sm:col-span-4 xl:col-span-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-black rounded-xl transition cursor-pointer border border-slate-700 w-full xl:w-auto"
                         >
@@ -1273,9 +1104,17 @@ export default function LeadBoard({
                 </div>
 
                 {/* Grid layout of lead cards under the selected stage */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 py-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 2xl:gap-4 py-1">
                   {filteredStageLeads.length > 0 ? (
-                    filteredStageLeads.map((lead) => renderLeadCard(lead))
+                    filteredStageLeads.map((lead) => (
+                      <LeadCard
+                        key={lead.id}
+                        lead={lead}
+                        onSelectLead={onSelectLead}
+                        onUpdateStage={onUpdateStage}
+                        draggable={true}
+                      />
+                    ))
                   ) : (
                     <div className="col-span-full border border-dashed border-slate-750 rounded-2xl flex flex-col items-center justify-center py-20 text-slate-500 space-y-2 bg-slate-900/20">
                       <Inbox className="h-10 w-10 opacity-30 text-slate-400" />
@@ -1289,86 +1128,6 @@ export default function LeadBoard({
               </div>
             )}
           </div>
-        ) : (
-          /* Classic horizontal scrollable Kanban channels */
-          <div className="relative">
-            <div className="absolute inset-0 bg-gradient-to-r from-accent-purple/5 via-transparent to-accent-emerald/5 pointer-events-none rounded-2xl" />
-            
-            {/* Grid Columns */}
-            <div className="flex gap-4 overflow-x-auto pb-4 w-full relative z-10 xl:justify-start" id="kanban-pipeline-columns">
-              {COLUMNS.map(col => {
-                const colLeads = visibleLeads.filter(l => {
-                  if (col.id === 'in_discussion') return l.stage === 'in_discussion' || l.stage === 'negotiating';
-                  if (col.id === 'office_visited') return l.stage === 'office_visited' || l.stage === 'proposal';
-                  if (col.id === 'cold_leads') return l.stage === 'cold_leads' || l.stage === 'rotations';
-                  return l.stage === col.id;
-                });
-                const colClassicUnreadCount = colLeads.reduce((acc, lead) => {
-                  const leadUnread = (lead.messages || []).filter(m => m && m.sender === 'lead' && m.status !== 'read').length;
-                  return acc + leadUnread;
-                }, 0);
-                const isDraggedOver = draggedOverColumn === col.id;
-
-                return (
-                  <div
-                    key={col.id}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                    }}
-                    onDragEnter={() => setDraggedOverColumn(col.id)}
-                    onDragLeave={() => setDraggedOverColumn(null)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setDraggedOverColumn(null);
-                      const leadId = e.dataTransfer.getData('text/plain');
-                      if (leadId) {
-                        onUpdateStage(leadId, col.id);
-                      }
-                    }}
-                    className={`rounded-2xl border p-3.5 flex flex-col min-h-[580px] w-[280px] sm:w-[300px] md:w-[310px] shrink-0 h-full text-left shadow-md transition-all duration-200 ${
-                      isDraggedOver 
-                        ? 'border-accent-purple bg-accent-purple/10 scale-[1.01] shadow-xl ring-2 ring-accent-purple/20' 
-                        : 'border-emerald-600/35 dark:border-emerald-500/20 bg-slate-900/90'
-                    }`}
-                  >
-                    {/* Column Header */}
-                    <div className="flex items-center justify-between mb-4 border-b border-slate-700 pb-2.5 min-h-[44px]">
-                      <div className="flex items-center justify-between w-full gap-2">
-                        <span className={`text-[9px] sm:text-[9.5px] font-black uppercase tracking-tight px-2 py-1 rounded-md leading-normal break-words inline-block ${
-                          colClassicUnreadCount > 0 
-                            ? 'bg-rose-600 text-white animate-pulse' 
-                            : col.headerColor
-                        }`}>
-                          {col.title} ({colClassicUnreadCount > 0 ? `${colLeads.length} - ${colClassicUnreadCount}` : colLeads.length}{col.id === 'in_discussion' ? ` • ${inDiscussionPctInfo.percentage.toFixed(1)}%` : ''})
-                        </span>
-                        {colClassicUnreadCount > 0 && (
-                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white font-mono animate-pulse shrink-0 flex items-center gap-0.5" title={`${colClassicUnreadCount} unread WhatsApp messages`}>
-                            ✉ {colClassicUnreadCount}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Leads Stack */}
-                    <div className="space-y-3.5 flex-1 overflow-y-auto max-h-[550px] scrollbar-none py-2 px-0.5">
-                      {(() => {
-                        const sorted = sortLeadsByUnreadAndDate(colLeads);
-                        return sorted.length > 0 ? (
-                          sorted.map(lead => renderLeadCard(lead))
-                        ) : (
-                          <div className="h-full border border-dashed border-slate-750 rounded-xl flex flex-col items-center justify-center py-10 text-slate-500 space-y-1 bg-slate-900/20">
-                            <Briefcase className="h-4.5 w-4.5 opacity-40 text-slate-600" />
-                            <span className="text-xs font-bold text-slate-500">No leads in channel</span>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

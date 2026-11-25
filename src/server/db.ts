@@ -59,13 +59,56 @@ if (!fs.existsSync(WALLET_BACKUPS_DIR)) {
   } catch {}
 }
 export const WALLET_LEDGER_FILE = path.join(DATA_DIR, 'wallet_ledger_audit.jsonl');
+export const WALLET_TOMBSTONES_FILE = path.join(DATA_DIR, 'wallet_tombstones.json');
 
 export let databaseVersion = Date.now();
+let deltaBaseVersion = databaseVersion;
+let leadChangeLog: Array<{ version: number; id: string }> = [];
+
 export function getDatabaseVersion(): number {
   return databaseVersion;
 }
-export function incrementDatabaseVersion(): void {
-  databaseVersion = Date.now();
+
+export function incrementDatabaseVersion(changedLeadId?: string): void {
+  databaseVersion = Math.max(databaseVersion + 1, Date.now());
+  if (changedLeadId) {
+    leadChangeLog.push({ version: databaseVersion, id: changedLeadId });
+    if (leadChangeLog.length > 300) {
+      const overflow = leadChangeLog.length - 300;
+      const trimmed = leadChangeLog.splice(0, overflow);
+      const lastTrimmedVer = trimmed[trimmed.length - 1]?.version;
+      if (lastTrimmedVer && lastTrimmedVer > deltaBaseVersion) {
+        deltaBaseVersion = lastTrimmedVer;
+      }
+    }
+  } else {
+    leadChangeLog = [];
+    deltaBaseVersion = databaseVersion;
+  }
+}
+
+export function getLeadChangesSince(sinceVersion: number): {
+  version: number;
+  fullSyncRequired: boolean;
+  changedIds: string[];
+} {
+  if (!sinceVersion || isNaN(sinceVersion) || sinceVersion < deltaBaseVersion) {
+    return { version: databaseVersion, fullSyncRequired: true, changedIds: [] };
+  }
+  if (sinceVersion >= databaseVersion) {
+    return { version: databaseVersion, fullSyncRequired: false, changedIds: [] };
+  }
+  const changedSet = new Set<string>();
+  for (const entry of leadChangeLog) {
+    if (entry.version > sinceVersion) {
+      changedSet.add(entry.id);
+    }
+  }
+  return {
+    version: databaseVersion,
+    fullSyncRequired: false,
+    changedIds: Array.from(changedSet)
+  };
 }
 
 let leadsDiskTimer: NodeJS.Timeout | null = null;
@@ -284,12 +327,36 @@ function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number = 30000): Prom
   });
 }
 
-// Circuit breaker state for Firestore
+// Circuit breaker state for Firestore + persistent dirty-lead retry queue
 let cloudSyncEnabled = true;
 let cloudErrorCount = 0;
 let lastCloudErrorTime = 0;
-let cloudBreakerCooldownMs = 5 * 60 * 1000; // default 5 minutes
+let cloudBreakerCooldownMs = 30 * 1000; // default 30 seconds
 let quotaLimitExceeded = false;
+const DIRTY_LEADS_FILE = path.join(DATA_DIR, 'dirty_leads.json');
+const dirtyLeadIds = new Set<string>(safeReadJsonSync<string[]>(DIRTY_LEADS_FILE, []));
+let isFlushingDirtyLeads = false;
+
+function persistDirtyLeadIds() {
+  try {
+    safeWriteJsonSync(DIRTY_LEADS_FILE, Array.from(dirtyLeadIds));
+  } catch {}
+}
+
+export function markLeadDirty(id: string) {
+  if (!id) return;
+  if (!dirtyLeadIds.has(id)) {
+    dirtyLeadIds.add(id);
+    persistDirtyLeadIds();
+  }
+}
+
+export function clearLeadDirty(id: string) {
+  if (!id) return;
+  if (dirtyLeadIds.delete(id)) {
+    persistDirtyLeadIds();
+  }
+}
 
 async function verifyDatabaseAccess(): Promise<boolean> {
   if (dbVerified) return true;
@@ -364,33 +431,33 @@ function handleCloudError(context: string | any, err?: any) {
 
   if (isQuota) {
     if (!quotaLimitExceeded) {
-      console.warn(`[Firestore Client] Daily quota limit reached (${contextStr}). Operating seamlessly in local JSON storage mode.`);
+      console.warn(`[Firestore Client] Quota limit hit (${contextStr}). Queuing offline writes in dirty_leads.json for automatic retry in 5 minutes.`);
     }
     quotaLimitExceeded = true;
     cloudSyncEnabled = false;
     lastCloudErrorTime = Date.now();
-    cloudBreakerCooldownMs = 60 * 60 * 1000; // 1 hour cooldown for Quota errors
+    cloudBreakerCooldownMs = 5 * 60 * 1000; // 5 minutes cooldown (not 1 hour) so writes recover quickly
   } else if (isOffline) {
-    console.warn(`[Firestore Client] Network/Offline error detected during ${contextStr} (${errMsg}). Tripping circuit breaker immediately to maintain server responsiveness.`);
+    console.warn(`[Firestore Client] Network/Offline error detected during ${contextStr} (${errMsg}). Pausing cloud sync for 20s and queuing dirty writes.`);
     cloudSyncEnabled = false;
     lastCloudErrorTime = Date.now();
-    cloudBreakerCooldownMs = 3 * 60 * 1000; // 3 minutes cooldown for offline errors
+    cloudBreakerCooldownMs = 20 * 1000;
   } else if (isTimeout) {
     cloudErrorCount++;
     if (cloudErrorCount >= 2) {
-      console.warn(`[Firestore Client] Circuit breaker tripped due to timeouts (${contextStr}). Temporarily disabling cloud sync for 3 minutes to maintain server responsiveness.`);
+      console.warn(`[Firestore Client] Circuit breaker tripped due to timeouts (${contextStr}). Pausing cloud sync for 20s.`);
       cloudSyncEnabled = false;
       lastCloudErrorTime = Date.now();
-      cloudBreakerCooldownMs = 3 * 60 * 1000;
+      cloudBreakerCooldownMs = 20 * 1000;
     }
   } else {
     console.warn(`[Firestore Client] Cloud error during ${contextStr}: ${errMsg}`);
     cloudErrorCount++;
     if (cloudErrorCount >= 3) {
-      console.warn(`[Firestore Client] Circuit breaker tripped due to persistent cloud errors (${contextStr}). Temporarily disabling cloud sync for 3 minutes.`);
+      console.warn(`[Firestore Client] Circuit breaker tripped due to persistent cloud errors (${contextStr}). Pausing cloud sync for 30s.`);
       cloudSyncEnabled = false;
       lastCloudErrorTime = Date.now();
-      cloudBreakerCooldownMs = 3 * 60 * 1000;
+      cloudBreakerCooldownMs = 30 * 1000;
     }
   }
 }
@@ -401,6 +468,7 @@ export function getCloudSyncStatus() {
     cloudErrorCount,
     lastCloudErrorTime,
     quotaLimitExceeded,
+    dirtyLeadsPending: dirtyLeadIds.size,
     cooldownRemainingMs: cloudSyncEnabled ? 0 : Math.max(0, cloudBreakerCooldownMs - (Date.now() - lastCloudErrorTime)),
     currentDbId,
     dbInitialized: !!db
@@ -486,9 +554,10 @@ try {
   if (initialUpdates.length > 0) {
     dbCache.updates = { data: initialUpdates, timestamp: Date.now() };
   }
+  // Do not mark local jobs cache as fresh on boot so first read always merges with Firestore
   const initialJobs = safeReadJsonSync<Job[]>(JOBS_FILE, []);
   if (initialJobs.length > 0) {
-    dbCache.jobs = { data: initialJobs, timestamp: Date.now() };
+    dbCache.jobs = { data: initialJobs, timestamp: 0 };
   }
   const initialMetadata = safeReadJsonSync<CgpMetadata>(METADATA_FILE, {} as any);
   if (initialMetadata && Object.keys(initialMetadata).length > 0) {
@@ -1094,8 +1163,11 @@ function mergeLeadProfiles(olderLead: Lead, newerLead: Lead): Lead {
   fieldsToValidate.forEach(field => {
     const olderVal = olderLead[field];
     const newerVal = newerLead[field];
-    
-    if (olderVal !== undefined && olderVal !== null && String(olderVal).trim() !== '') {
+    const isPlaceholderInbound =
+      field === 'adminRemarks' &&
+      String(olderVal || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry';
+
+    if (!isPlaceholderInbound && olderVal !== undefined && olderVal !== null && String(olderVal).trim() !== '') {
       if (newerVal === undefined || newerVal === null || String(newerVal).trim() === '') {
         (merged as any)[field] = olderVal;
       }
@@ -1262,30 +1334,36 @@ export function extractMetaMediaId(urlOrId: string | undefined | null): string |
   return null;
 }
 
-// Normalize single lead message media URLs to proxy endpoint
+// Normalize single lead message media URLs to proxy endpoint and strip legacy placeholder adminRemarks
 export function normalizeSingleLeadMediaUrls(lead: Lead | undefined): Lead | undefined {
   if (!lead) return lead;
-  if (!lead.messages || !Array.isArray(lead.messages)) return lead;
+  const hasPlaceholderAdminRemark =
+    String(lead.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry';
 
-  const mappedMessages = lead.messages.map((m: Message) => {
-    if (!m || !m.mediaUrl) return m;
-    const rawUrl = String(m.mediaUrl).trim();
-    if (rawUrl.startsWith('/api/whatsapp/media/')) return m;
+  const mappedMessages = Array.isArray(lead.messages)
+    ? lead.messages.map((m: Message) => {
+        if (!m || !m.mediaUrl) return m;
+        const rawUrl = String(m.mediaUrl).trim();
+        if (rawUrl.startsWith('/api/whatsapp/media/')) return m;
 
-    if (rawUrl.includes('fbsbx.com') || rawUrl.includes('facebook.com') || /^\d+$/.test(rawUrl)) {
-      const extractedId = extractMetaMediaId(rawUrl);
-      if (extractedId) {
-        return {
-          ...m,
-          mediaUrl: `/api/whatsapp/media/${extractedId}`
-        };
-      }
-    }
-    return m;
-  });
+        if (rawUrl.includes('fbsbx.com') || rawUrl.includes('facebook.com') || /^\d+$/.test(rawUrl)) {
+          const extractedId = extractMetaMediaId(rawUrl);
+          if (extractedId) {
+            return {
+              ...m,
+              mediaUrl: `/api/whatsapp/media/${extractedId}`
+            };
+          }
+        }
+        return m;
+      })
+    : lead.messages;
+
+  if (!hasPlaceholderAdminRemark && mappedMessages === lead.messages) return lead;
 
   return {
     ...lead,
+    ...(hasPlaceholderAdminRemark ? { adminRemarks: '' } : {}),
     messages: mappedMessages
   };
 }
@@ -1312,6 +1390,11 @@ export async function getLeadById(id: string): Promise<Lead | undefined> {
 // Read database with immediate response and asynchronous background cloud synchronization
 async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
   await initializeDatabase();
+
+  // Always opportunistically flush any dirty leads queued while Firestore was throttled/offline
+  if (dirtyLeadIds.size > 0 && checkCloudStatus() && !isFlushingDirtyLeads) {
+    flushDirtyLeadsToFirestore().catch(() => {});
+  }
 
   // 1. Check in-memory cache first - if valid and not bypassing, return in < 1ms
   if (!forceBypassCache && dbCache.leads && Array.isArray(dbCache.leads.data) && dbCache.leads.data.length >= 50 && (Date.now() - dbCache.leads.timestamp < CACHE_TTL_MS)) {
@@ -1381,6 +1464,71 @@ async function getLeadsInternal(forceBypassCache = false): Promise<Lead[]> {
   return normalized;
 }
 
+// Flush any leads that were modified locally while Firestore was unreachable/throttled
+export async function flushDirtyLeadsToFirestore(): Promise<number> {
+  if (isFlushingDirtyLeads || dirtyLeadIds.size === 0 || !checkCloudStatus()) return 0;
+  isFlushingDirtyLeads = true;
+  let flushedCount = 0;
+
+  try {
+    const localLeads: Lead[] =
+      dbCache.leads && Array.isArray(dbCache.leads.data) && dbCache.leads.data.length > 0
+        ? dbCache.leads.data
+        : safeReadJsonSync<Lead[]>(DATA_FILE, []);
+    const localMap = new Map<string, Lead>();
+    localLeads.forEach(l => { if (l && l.id) localMap.set(l.id, l); });
+
+    const idsToFlush = Array.from(dirtyLeadIds);
+    const CHUNK_SIZE = 25;
+    for (let i = 0; i < idsToFlush.length; i += CHUNK_SIZE) {
+      if (!checkCloudStatus()) break;
+      const chunkIds = idsToFlush.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      const validIds: string[] = [];
+      for (const id of chunkIds) {
+        const leadObj = localMap.get(id);
+        if (leadObj) {
+          batch.set(doc(db, 'leads', id), cleanForFirestore(leadObj), { merge: true });
+          validIds.push(id);
+        } else {
+          dirtyLeadIds.delete(id);
+        }
+      }
+      if (validIds.length > 0) {
+        await runWithTimeout(batch.commit(), 15000);
+        validIds.forEach(id => {
+          dirtyLeadIds.delete(id);
+          flushedCount++;
+        });
+        persistDirtyLeadIds();
+      }
+    }
+
+    if (flushedCount > 0) {
+      console.log(`[Firestore Recovery] Flushed ${flushedCount} queued dirty lead(s) to Firestore.`);
+      await markDatabaseUpdated('leads').catch(() => '');
+    }
+  } catch (err: any) {
+    console.warn('[Firestore Recovery] Dirty leads flush deferred:', err?.message || err);
+    handleCloudError('flushDirtyLeadsToFirestore', err);
+  } finally {
+    isFlushingDirtyLeads = false;
+  }
+
+  return flushedCount;
+}
+
+// Background safety timer: retry any dirty leads or pending bulk syncs every 25s when Firestore recovers
+setInterval(() => {
+  if (!checkCloudStatus()) return;
+  if (dirtyLeadIds.size > 0 && !isFlushingDirtyLeads) {
+    flushDirtyLeadsToFirestore().catch(() => {});
+  }
+  if (hasPendingCloudSync && !isSyncingToCloud) {
+    triggerBackgroundCloudSync().catch(() => {});
+  }
+}, 25000);
+
 // Non-blocking background sync queue state
 let isSyncingToCloud = false;
 let hasPendingCloudSync = false;
@@ -1413,6 +1561,11 @@ async function runCloudSyncInternal(forceFull = false): Promise<void> {
 
   await initializeDatabase();
 
+  // First flush any queued offline/dirty leads immediately so they are never lost or shadowed
+  if (dirtyLeadIds.size > 0) {
+    await flushDirtyLeadsToFirestore();
+  }
+
   let localLeads: Lead[] = [];
   if (dbCache.leads && Array.isArray(dbCache.leads.data) && dbCache.leads.data.length > 0) {
     localLeads = dbCache.leads.data;
@@ -1425,11 +1578,12 @@ async function runCloudSyncInternal(forceFull = false): Promise<void> {
 
   try {
     const nowTime = Date.now();
-    const doFullSync = forceFull || (nowTime - lastFullLeadsSyncTime > 60 * 60 * 1000) || lastSyncedLeads.length === 0;
+    // Only do a full 2,400+ collection scan if explicitly requested or local cache lacks baseline sync state
+    const doFullSync = forceFull || lastSyncedLeads.length === 0 || localLeads.length < 50;
     let cloudLeads: Lead[] = [];
 
     if (doFullSync) {
-      console.log('[Firestore Background] Performing periodic full sync of leads...');
+      console.log('[Firestore Background] Performing full sync of leads...');
       const snapshot = await runWithTimeout(getDocs(collection(db, 'leads')), 25000);
       snapshot.forEach(docSnap => {
         cloudLeads.push(docSnap.data() as Lead);
@@ -1442,8 +1596,20 @@ async function runCloudSyncInternal(forceFull = false): Promise<void> {
       const syncSnap = await runWithTimeout(getDoc(syncDocRef), 8000).catch(() => null);
       const cloudSyncTimestamp = syncSnap && syncSnap.exists() ? (syncSnap.data()?.leads || syncSnap.data()?.lastUpdatedAt || '') : '';
 
-      // If cloud timestamp has not changed since our last read and we already have synced leads, skip query!
-      if (!forceFull && cloudSyncTimestamp && cloudSyncTimestamp === lastReadLeadsTimestamp && lastSyncedLeads.length > 0) {
+      // Check if localLeads has any unsynced additions or updates before considering early return
+      const syncedUpdatedMap = new Map<string, string>();
+      lastSyncedLeads.forEach(l => {
+        if (l && l.id) syncedUpdatedMap.set(l.id, String(l.updatedAt || l.createdAt || ''));
+      });
+      const hasUnsyncedLocalChanges = dirtyLeadIds.size > 0 || localLeads.some(l => {
+        if (!l || !l.id) return false;
+        const prevTs = syncedUpdatedMap.get(l.id);
+        const curTs = String(l.updatedAt || l.createdAt || '');
+        return prevTs === undefined || prevTs !== curTs;
+      });
+
+      // If cloud timestamp has not changed AND no local unsynced leads exist, skip query!
+      if (!forceFull && !hasUnsyncedLocalChanges && cloudSyncTimestamp && cloudSyncTimestamp === lastReadLeadsTimestamp && lastSyncedLeads.length > 0) {
         lastFullLeadsSyncTime = nowTime;
         return;
       }
@@ -1464,9 +1630,8 @@ async function runCloudSyncInternal(forceFull = false): Promise<void> {
       lastSyncedLeads.forEach(l => {
         if (l && l.id) reconstructedMap.set(l.id, l);
       });
-      localLeads.forEach(l => {
-        if (l && l.id) reconstructedMap.set(l.id, l);
-      });
+      // Do NOT seed from localLeads — only merge confirmed cloud records (lastSyncedLeads + deltaLeads)
+      // so any new/modified local lead is detected by syncAndMergeLeadsList and pushed via pendingUpload.
       deltaLeads.forEach(c => {
         if (c && c.id) reconstructedMap.set(c.id, c);
       });
@@ -1474,35 +1639,49 @@ async function runCloudSyncInternal(forceFull = false): Promise<void> {
       if (cloudSyncTimestamp) {
         lastReadLeadsTimestamp = cloudSyncTimestamp;
       }
+      lastFullLeadsSyncTime = nowTime;
     }
 
     if (cloudLeads.length > 0) {
-      const mergeResult = syncAndMergeLeadsList(localLeads, cloudLeads, lastSyncedLeads);
-      const finalLeads = mergeResult.mergedLeads;
+      const pendingUpload = await dbMutex.run(async () => {
+        // Re-read freshest localLeads inside mutex so concurrent addLead/updateSingleLead writes are never clobbered
+        const latestLocalLeads: Lead[] =
+          dbCache.leads && Array.isArray(dbCache.leads.data) && dbCache.leads.data.length > 0
+            ? dbCache.leads.data
+            : safeReadJsonSync<Lead[]>(DATA_FILE, []);
 
-      safeWriteJsonSync(DATA_FILE, finalLeads);
-      safeWriteJsonSync(DATA_FILE_SYNCED, finalLeads);
+        const mergeResult = syncAndMergeLeadsList(latestLocalLeads, cloudLeads, lastSyncedLeads);
+        const finalLeads = mergeResult.mergedLeads;
 
-      const normalized = normalizeLeadsMediaUrls(finalLeads);
-      dbCache.leads = { data: normalized, timestamp: Date.now() };
+        safeWriteJsonSync(DATA_FILE, finalLeads);
+        const normalized = normalizeLeadsMediaUrls(finalLeads);
+        dbCache.leads = { data: normalized, timestamp: Date.now() };
+        incrementDatabaseVersion();
+        return { pending: mergeResult.pendingUpload, finalLeads };
+      });
 
       // Push pending uploads in chunks of 50 with rate-limiting
-      if (mergeResult.pendingUpload.length > 0) {
-        console.log(`[Firestore Background] Uploading ${mergeResult.pendingUpload.length} pending leads...`);
+      if (pendingUpload.pending.length > 0) {
+        console.log(`[Firestore Background] Uploading ${pendingUpload.pending.length} pending leads...`);
+        pendingUpload.pending.forEach(l => markLeadDirty(l.id));
         const CHUNK_SIZE = 50;
-        for (let i = 0; i < mergeResult.pendingUpload.length; i += CHUNK_SIZE) {
-          const chunk = mergeResult.pendingUpload.slice(i, i + CHUNK_SIZE);
+        for (let i = 0; i < pendingUpload.pending.length; i += CHUNK_SIZE) {
+          const chunk = pendingUpload.pending.slice(i, i + CHUNK_SIZE);
           const batch = writeBatch(db);
           chunk.forEach(l => {
             const docRef = doc(db, 'leads', l.id);
             batch.set(docRef, cleanForFirestore(l), { merge: true });
           });
           await runWithTimeout(batch.commit(), 15000);
-          if (i + CHUNK_SIZE < mergeResult.pendingUpload.length) {
+          chunk.forEach(l => clearLeadDirty(l.id));
+          if (i + CHUNK_SIZE < pendingUpload.pending.length) {
             await new Promise(r => setTimeout(r, 200));
           }
         }
       }
+
+      // Only mark DATA_FILE_SYNCED after pending uploads actually committed to Firestore
+      safeWriteJsonSync(DATA_FILE_SYNCED, pendingUpload.finalLeads);
     } else {
       // Delta query found 0 new updates in cloud - database is already synchronized!
       console.log('[Firestore Background] Cloud leads are fully up to date.');
@@ -1535,6 +1714,8 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
     triggerBackgroundCloudSync().catch(err => {
       console.error('[Cloud Sync Queue] Failed to trigger background cloud sync:', err);
     });
+  } else {
+    hasPendingCloudSync = true;
   }
 }
 
@@ -1580,21 +1761,38 @@ export async function updateSingleLead(id: string, updater: (current: Lead) => L
 
     // 1. Instantly update in-memory cache so subsequent reads see this change in < 1ms
     dbCache.leads = { data: leads, timestamp: Date.now() };
-    incrementDatabaseVersion();
+    incrementDatabaseVersion(id);
 
     // 2. Persist to disk atomically
     safeWriteJsonSync(DATA_FILE, leads);
 
-    // 3. Immediately push just this single modified lead to Firestore in the background
+    // 3. Synchronously commit this single modified lead to Firestore (or queue in dirty_leads.json if offline/throttled)
+    markLeadDirty(id);
     if (checkCloudStatus()) {
       try {
         const docRef = doc(db, 'leads', id);
-        runWithTimeout(setDoc(docRef, cleanForFirestore(normalized), { merge: true }), 10000)
-          .catch(err => {
-            console.warn(`[Firestore Client] Single lead sync for ${id} deferred:`, err?.message || err);
-          });
-      } catch (err) {
-        // Suppress background sync errors so user request returns immediately
+        await runWithTimeout(setDoc(docRef, cleanForFirestore(normalized), { merge: true }), 15000);
+        clearLeadDirty(id);
+
+        const syncedList = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, []);
+        const sIdx = syncedList.findIndex(l => l.id === id);
+        if (sIdx !== -1) syncedList[sIdx] = normalized;
+        else syncedList.unshift(normalized);
+        safeWriteJsonSync(DATA_FILE_SYNCED, syncedList);
+
+        markDatabaseUpdated('leads')
+          .then(ts => {
+            if (ts) lastReadLeadsTimestamp = ts;
+          })
+          .catch(() => {});
+
+        // Also drain any earlier dirty leads if Firestore is healthy again
+        if (dirtyLeadIds.size > 0) {
+          flushDirtyLeadsToFirestore().catch(() => {});
+        }
+      } catch (err: any) {
+        console.warn(`[Firestore Client] Single lead sync for ${id} queued in dirty_leads.json:`, err?.message || err);
+        handleCloudError(`updateSingleLead(${id})`, err);
       }
     }
 
@@ -1616,15 +1814,62 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
   return dbMutex.run(() => saveLeadsInternal(leads));
 }
 
-// Add custom lead
+// Add custom lead and synchronously persist it directly to Firestore so it survives Republish/restarts
 export async function addLead(lead: Lead): Promise<void> {
-  const leads = await getLeads();
-  leads.unshift(lead);
-  await saveLeads(leads);
+  await dbMutex.run(async () => {
+    await initializeDatabase();
+
+    let leads: Lead[] = [];
+    if (dbCache.leads && Array.isArray(dbCache.leads.data) && dbCache.leads.data.length > 0) {
+      leads = [...dbCache.leads.data];
+    } else {
+      leads = safeReadJsonSync<Lead[]>(DATA_FILE, []);
+    }
+
+    const normalized = normalizeSingleLeadMediaUrls(lead) as Lead;
+    const existingIdx = leads.findIndex(l => l.id === normalized.id);
+    if (existingIdx !== -1) {
+      leads[existingIdx] = normalized;
+    } else {
+      leads.unshift(normalized);
+    }
+
+    dbCache.leads = { data: leads, timestamp: Date.now() };
+    incrementDatabaseVersion(normalized.id);
+    safeWriteJsonSync(DATA_FILE, leads);
+
+    markLeadDirty(normalized.id);
+    if (checkCloudStatus()) {
+      try {
+        const docRef = doc(db, 'leads', normalized.id);
+        await runWithTimeout(setDoc(docRef, cleanForFirestore(normalized), { merge: true }), 15000);
+        clearLeadDirty(normalized.id);
+
+        const syncedList = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, []);
+        const sIdx = syncedList.findIndex(l => l.id === normalized.id);
+        if (sIdx !== -1) syncedList[sIdx] = normalized;
+        else syncedList.unshift(normalized);
+        safeWriteJsonSync(DATA_FILE_SYNCED, syncedList);
+
+        const ts = await markDatabaseUpdated('leads');
+        if (ts) lastReadLeadsTimestamp = ts;
+        console.log(`[Firestore Client] Persisted new lead ${normalized.id} (${normalized.name}) directly to Firestore.`);
+      } catch (err: any) {
+        console.error(`[Firestore Client] Immediate cloud write failed for new lead ${normalized.id} (queued for retry):`, err?.message || err);
+        handleCloudError(`addLead(${normalized.id})`, err);
+      }
+    }
+  });
 }
 
-// Get aggregate statistics
+let cachedStats: { version: number; data: StatSummary } | null = null;
+
+// Get aggregate statistics (cached per databaseVersion for sub-millisecond reads)
 export async function getStats(): Promise<StatSummary> {
+  if (cachedStats && cachedStats.version === databaseVersion) {
+    return cachedStats.data;
+  }
+  const computeVersion = databaseVersion;
   const rawLeads = await getLeads();
   // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
   // as well as soft-deleted leads
@@ -1689,7 +1934,7 @@ export async function getStats(): Promise<StatSummary> {
     value: data.value
   }));
 
-  return {
+  const result: StatSummary = {
     totalLeads,
     newLeads,
     convertedLeads,
@@ -1699,6 +1944,11 @@ export async function getStats(): Promise<StatSummary> {
     byStage,
     byCampaign
   };
+
+  if (databaseVersion === computeVersion) {
+    cachedStats = { version: computeVersion, data: result };
+  }
+  return result;
 }
 
 let jobsInitialized = false;
@@ -2015,94 +2265,249 @@ export async function initializeJobsDatabase() {
   }
 }
 
-// Get all jobs
-export async function getJobs(): Promise<Job[]> {
+const JOBS_BACKUP_DIR = path.join(DATA_DIR, 'backups', 'jobs');
+
+function normalizeJobRecord(raw: any): Job {
+  const imageUrl = raw?.imageUrl || '';
+  return {
+    id: raw?.id || `job_${Math.random().toString(36).substring(2, 7)}`,
+    imageUrl,
+    serviceCharge: raw?.serviceCharge || '',
+    imageFormat: raw?.imageFormat || (typeof imageUrl === 'string' && imageUrl.endsWith('.webp') ? 'webp' : ''),
+    imageSizeBytes: typeof raw?.imageSizeBytes === 'number' ? raw.imageSizeBytes : undefined,
+    originalFilename: raw?.originalFilename || '',
+    title: raw?.title || '',
+    country: raw?.country || '',
+    salaryRange: raw?.salaryRange || '',
+    requirement: raw?.requirement || '',
+    positions: Array.isArray(raw?.positions) ? raw.positions : undefined,
+    processingFeeMale: raw?.processingFeeMale || '',
+    processingFeeFemale: raw?.processingFeeFemale || '',
+    accommodation: raw?.accommodation || '',
+    ageLimit: raw?.ageLimit || '',
+    conditions: Array.isArray(raw?.conditions) ? raw.conditions : [],
+    modeOfInterview: raw?.modeOfInterview || '',
+    applicability: raw?.applicability || '',
+    otherTerms: raw?.otherTerms || '',
+    isActive: raw?.isActive !== undefined ? Boolean(raw.isActive) : true,
+    isDeleted: Boolean(raw?.isDeleted) || raw?.id === 'job_1794985990412_q7c14',
+    deletedAt: raw?.deletedAt || null,
+    createdAt: raw?.createdAt || new Date().toISOString(),
+    updatedAt: raw?.updatedAt || raw?.createdAt || new Date().toISOString()
+  };
+}
+
+// Rolling local + Firestore snapshot vault for Active Jobs (zero data loss)
+async function saveJobsBackupSnapshot(jobs: Job[], reason: string): Promise<void> {
+  try {
+    if (!fs.existsSync(JOBS_BACKUP_DIR)) {
+      fs.mkdirSync(JOBS_BACKUP_DIR, { recursive: true });
+    }
+    const ts = new Date().toISOString();
+    const snapshotId = `jobs_backup_${Date.now()}`;
+    const payload = {
+      id: snapshotId,
+      reason,
+      timestamp: ts,
+      totalJobs: jobs.length,
+      activeCount: jobs.filter(j => !j.isDeleted && j.isActive !== false).length,
+      jobs
+    };
+
+    const latestPath = path.join(JOBS_BACKUP_DIR, 'latest_jobs_backup.json');
+    safeWriteJsonSync(latestPath, payload);
+
+    const filePath = path.join(JOBS_BACKUP_DIR, `${snapshotId}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+
+    // Prune older local snapshots beyond 40 files
+    try {
+      const files = fs.readdirSync(JOBS_BACKUP_DIR)
+        .filter(f => f.startsWith('jobs_backup_') && f.endsWith('.json'))
+        .sort();
+      if (files.length > 40) {
+        for (const oldFile of files.slice(0, files.length - 40)) {
+          fs.unlinkSync(path.join(JOBS_BACKUP_DIR, oldFile));
+        }
+      }
+    } catch {}
+
+    if (checkCloudStatus()) {
+      try {
+        await runWithTimeout(
+          setDoc(doc(db, 'jobs_backups', snapshotId), cleanForFirestore(payload)),
+          8000
+        );
+      } catch (cloudSnapErr: any) {
+        console.warn('[JobsBackup] Cloud snapshot deferred:', cloudSnapErr?.message || cloudSnapErr);
+      }
+    }
+  } catch (err) {
+    console.warn('[JobsBackup] Failed to write rolling job snapshot:', err);
+  }
+}
+
+// Get all jobs (merges Firestore + local backup safely; excludes soft-deleted unless includeDeleted=true)
+export async function getJobs(includeDeleted = false): Promise<Job[]> {
   await initializeJobsDatabase();
 
+  const filterVisible = (list: Job[]) =>
+    includeDeleted
+      ? list.filter(j => j.id !== 'job_1794985990412_q7c14')
+      : list.filter(j => !j.isDeleted && j.id !== 'job_1794985990412_q7c14');
+
   // Check in-memory cache first
-  if (dbCache.jobs && (Date.now() - dbCache.jobs.timestamp < CACHE_TTL_MS)) {
-    return dbCache.jobs.data;
+  if (dbCache.jobs && dbCache.jobs.timestamp > 0 && (Date.now() - dbCache.jobs.timestamp < CACHE_TTL_MS)) {
+    return filterVisible(dbCache.jobs.data);
   }
+
+  const localRaw = safeReadJsonSync<Job[]>(JOBS_FILE, []);
+  const localNormalized = localRaw.map(normalizeJobRecord);
 
   if (checkCloudStatus()) {
     try {
       const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 10000);
-      const jobs: Job[] = [];
+      const cloudMap = new Map<string, Job>();
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         if (data) {
-          jobs.push({
-            id: docSnap.id,
-            title: data.title || '',
-            country: data.country || 'Other',
-            salaryRange: data.salaryRange || '',
-            requirement: data.requirement || '',
-            processingFeeMale: data.processingFeeMale || '',
-            processingFeeFemale: data.processingFeeFemale || '',
-            accommodation: data.accommodation || '',
-            ageLimit: data.ageLimit || '',
-            conditions: Array.isArray(data.conditions) ? data.conditions : [],
-            modeOfInterview: data.modeOfInterview || 'Online',
-            applicability: data.applicability || 'Both Male & Female Candidates can Apply',
-            otherTerms: data.otherTerms || '',
-            isActive: data.isActive !== undefined ? Boolean(data.isActive) : true,
-            createdAt: data.createdAt || new Date().toISOString()
-          } as Job);
+          cloudMap.set(docSnap.id, normalizeJobRecord({ ...data, id: docSnap.id }));
         }
       });
-      const sortedJobs = jobs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
-      // Update in-memory cache
+      // Merge any missing or newer local records back into cloud so no edit/upload is ever lost
+      const unsyncedToPush: Job[] = [];
+      for (const localJob of localNormalized) {
+        const cloudJob = cloudMap.get(localJob.id);
+        if (!cloudJob) {
+          if (localJob.id !== 'job_1794985990412_q7c14') {
+            cloudMap.set(localJob.id, localJob);
+            unsyncedToPush.push(localJob);
+          }
+        } else {
+          const localTime = new Date(localJob.updatedAt || localJob.createdAt || 0).getTime();
+          const cloudTime = new Date(cloudJob.updatedAt || cloudJob.createdAt || 0).getTime();
+          if (localTime > cloudTime) {
+            cloudMap.set(localJob.id, localJob);
+            unsyncedToPush.push(localJob);
+          }
+        }
+      }
+
+      if (unsyncedToPush.length > 0) {
+        console.log(`[JobsSync] Healing ${unsyncedToPush.length} local job(s) back to Firestore...`);
+        const healBatch = writeBatch(db);
+        unsyncedToPush.forEach(j => healBatch.set(doc(db, 'jobs', j.id), cleanForFirestore(j)));
+        runWithTimeout(healBatch.commit(), 10000).catch(e =>
+          console.warn('[JobsSync] Heal batch warning:', e?.message || e)
+        );
+      }
+
+      const sortedJobs = Array.from(cloudMap.values()).sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+
       dbCache.jobs = { data: sortedJobs, timestamp: Date.now() };
-
-      // Sync the local file cache with current cloud state so cold-starts are fully populated!
       safeWriteJsonSync(JOBS_FILE, sortedJobs);
 
-      return sortedJobs;
+      return filterVisible(sortedJobs);
     } catch (err: any) {
       console.error('[Firestore Client] Failed to fetch jobs from cloud, falling back to local files:', err);
       handleCloudError(err);
     }
   }
-  const jobs = safeReadJsonSync<Job[]>(JOBS_FILE, []);
-  const sanitized = jobs.map(j => ({
-    id: j.id || `job_${Math.random().toString(36).substring(2, 7)}`,
-    title: j.title || '',
-    country: j.country || 'Other',
-    salaryRange: j.salaryRange || '',
-    requirement: j.requirement || '',
-    processingFeeMale: j.processingFeeMale || '',
-    processingFeeFemale: j.processingFeeFemale || '',
-    accommodation: j.accommodation || '',
-    ageLimit: j.ageLimit || '',
-    conditions: Array.isArray(j.conditions) ? j.conditions : [],
-    modeOfInterview: j.modeOfInterview || 'Online',
-    applicability: j.applicability || 'Both Male & Female Candidates can Apply',
-    otherTerms: j.otherTerms || '',
-    isActive: j.isActive !== undefined ? Boolean(j.isActive) : true,
-    createdAt: j.createdAt || new Date().toISOString()
-  }));
-  const sortedSanitized = sanitized.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
-  // Cache the fallback local values too
+  const sortedSanitized = localNormalized.sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  );
+
   dbCache.jobs = { data: sortedSanitized, timestamp: Date.now() };
-
-  return sortedSanitized;
+  return filterVisible(sortedSanitized);
 }
 
-// Save all jobs
+// Atomic single-job create/update (never wipes or deletes unrelated jobs!)
+export async function upsertSingleJob(job: Job, reason = 'upsert'): Promise<Job> {
+  await initializeJobsDatabase();
+  const existingAll = await getJobs(true);
+  const nowIso = new Date().toISOString();
+  const normalized = normalizeJobRecord({ ...job, updatedAt: nowIso });
+
+  const idx = existingAll.findIndex(j => j.id === normalized.id);
+  const nextAll = [...existingAll];
+  if (idx >= 0) {
+    nextAll[idx] = normalized;
+  } else {
+    nextAll.unshift(normalized);
+  }
+
+  const sorted = nextAll.sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  );
+
+  dbCache.jobs = { data: sorted, timestamp: Date.now() };
+  safeWriteJsonSync(JOBS_FILE, sorted);
+
+  if (checkCloudStatus()) {
+    try {
+      await runWithTimeout(setDoc(doc(db, 'jobs', normalized.id), cleanForFirestore(normalized)), 10000);
+    } catch (err: any) {
+      console.error(`[Firestore Client] Failed to upsert job ${normalized.id}:`, err);
+      handleCloudError(err);
+    }
+  }
+
+  // Rolling snapshot in background
+  saveJobsBackupSnapshot(sorted, `${reason}:${normalized.id}`).catch(() => {});
+
+  return normalized;
+}
+
+// Safe soft-delete (preserves record + WebP image in Archive so nothing can be accidentally erased)
+export async function softDeleteJob(id: string): Promise<boolean> {
+  await initializeJobsDatabase();
+  const existingAll = await getJobs(true);
+  const target = existingAll.find(j => j.id === id);
+  if (!target) return false;
+
+  const updated: Job = {
+    ...target,
+    isDeleted: true,
+    deletedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  await upsertSingleJob(updated, 'soft_delete');
+  return true;
+}
+
+// Restore a previously soft-deleted job from the Archive
+export async function restoreSingleJob(id: string): Promise<Job | null> {
+  await initializeJobsDatabase();
+  const existingAll = await getJobs(true);
+  const target = existingAll.find(j => j.id === id);
+  if (!target) return null;
+
+  const restored: Job = {
+    ...target,
+    isDeleted: false,
+    deletedAt: null,
+    updatedAt: new Date().toISOString()
+  };
+
+  return await upsertSingleJob(restored, 'restore');
+}
+
+// Save all jobs (additive upsert only; never destructively purges cloud documents)
 export async function saveJobs(jobs: Job[]): Promise<void> {
   await initializeJobsDatabase();
-  const validJobs = (jobs || []).filter(j => j && typeof j === 'object' && j.id);
+  const validJobs = (jobs || [])
+    .filter(j => j && typeof j === 'object' && j.id)
+    .map(normalizeJobRecord);
 
-  // Update in-memory cache immediately so changes are instantly reflected on reads
   dbCache.jobs = { data: validJobs, timestamp: Date.now() };
-
-  // Write to local file first so we ALWAYS have a local copy and stay fully functional!
   safeWriteJsonSync(JOBS_FILE, validJobs);
 
   if (checkCloudStatus()) {
-    // Await cloud sync to guarantee data persistence under Cloud Run
     try {
       const batch = writeBatch(db);
       validJobs.forEach(j => {
@@ -2110,20 +2515,6 @@ export async function saveJobs(jobs: Job[]): Promise<void> {
         batch.set(docRef, cleanForFirestore(j));
       });
       await runWithTimeout(batch.commit(), 10000);
-
-      // Delete any removed jobs
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'jobs')), 10000);
-      const deleteBatch = writeBatch(db);
-      let hasDeletes = false;
-      snapshot.forEach(docSnap => {
-        if (!validJobs.some(j => j.id === docSnap.id)) {
-          deleteBatch.delete(docSnap.ref);
-          hasDeletes = true;
-        }
-      });
-      if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 10000);
-      }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save jobs to cloud:', err);
       handleCloudError(err);
@@ -2236,12 +2627,14 @@ export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
   if (checkCloudStatus()) {
     // Await cloud sync to guarantee data persistence under Cloud Run
     try {
-      const batch = writeBatch(db);
-      validUpdates.forEach(u => {
-        const docRef = doc(db, 'updates', u.id);
-        batch.set(docRef, cleanForFirestore(u));
-      });
-      await runWithTimeout(batch.commit(), 10000);
+      if (validUpdates.length > 0) {
+        const batch = writeBatch(db);
+        validUpdates.forEach(u => {
+          const docRef = doc(db, 'updates', u.id);
+          batch.set(docRef, cleanForFirestore(u));
+        });
+        await runWithTimeout(batch.commit(), 10000);
+      }
 
       // Delete any removed updates
       const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 10000);
@@ -2258,9 +2651,45 @@ export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
       }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save updates to cloud:', err);
-      handleCloudError(err);
+      handleCloudError('saveUpdates', err);
+      throw err;
     }
   }
+}
+
+// Delete a single important update cleanly from Firestore, cache, and disk
+export async function deleteUpdateById(id: string): Promise<boolean> {
+  const existing = await getUpdates();
+  const filtered = existing.filter(u => u.id !== id);
+  const existedLocally = filtered.length < existing.length;
+
+  dbCache.updates = { data: filtered, timestamp: Date.now() };
+  safeWriteJsonSync(UPDATES_FILE, filtered);
+
+  if (checkCloudStatus()) {
+    try {
+      await runWithTimeout(deleteDoc(doc(db, 'updates', id)), 10000);
+      // Also sweep any stale docs not in filtered
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 10000);
+      const deleteBatch = writeBatch(db);
+      let hasDeletes = false;
+      snapshot.forEach(docSnap => {
+        if (docSnap.id === id || !filtered.some(u => u.id === docSnap.id)) {
+          deleteBatch.delete(docSnap.ref);
+          hasDeletes = true;
+        }
+      });
+      if (hasDeletes) {
+        await runWithTimeout(deleteBatch.commit(), 10000);
+      }
+    } catch (err: any) {
+      console.error(`[Firestore Client] Failed to delete update ${id} from cloud:`, err);
+      handleCloudError(`deleteUpdateById(${id})`, err);
+      throw err;
+    }
+  }
+
+  return existedLocally;
 }
 
 export interface CgpMetadata {
@@ -2423,8 +2852,8 @@ export async function reconcileWalletsFromLeads(): Promise<Wallet[]> {
     });
   }
 
-  // 1. Read existing local wallets to preserve existing debits and custom manual adjustments
-  const existingWallets = safeReadJsonSync<Wallet[]>(WALLETS_FILE, []);
+  // 1. Read existing local + cloud wallets to preserve existing debits and custom manual adjustments
+  const existingWallets = await getWallets(true, true);
 
   leads.forEach(lead => {
     if (lead.isDeleted) return;
@@ -2771,16 +3200,202 @@ export interface WalletSnapshot {
   wallets: Wallet[];
 }
 
+export interface WalletTombstoneEntry {
+  txId: string;
+  username?: string;
+  leadId?: string;
+  reason?: string;
+  deletedAt: string;
+}
+
+const syncedCloudLedgerTxIds = new Set<string>();
+let cachedTombstones: { entries: WalletTombstoneEntry[]; timestamp: number } | null = null;
+let hasHydratedCloudLedger = false;
+
+function toSafeFirestoreDocId(rawId: string): string {
+  const cleaned = String(rawId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  if (!cleaned) return `doc_${Date.now()}`;
+  return cleaned.length <= 128 ? cleaned : cleaned.substring(0, 128);
+}
+
+function readLocalTombstones(): WalletTombstoneEntry[] {
+  const data = safeReadJsonSync<WalletTombstoneEntry[]>(WALLET_TOMBSTONES_FILE, []);
+  return Array.isArray(data) ? data.filter(e => e && e.txId) : [];
+}
+
+function saveLocalTombstones(entries: WalletTombstoneEntry[]): void {
+  safeWriteJsonSync(WALLET_TOMBSTONES_FILE, entries);
+}
+
+async function getWalletTombstones(forceRefresh = false): Promise<WalletTombstoneEntry[]> {
+  if (!forceRefresh && cachedTombstones && (Date.now() - cachedTombstones.timestamp < 30000)) {
+    return cachedTombstones.entries;
+  }
+
+  const map = new Map<string, WalletTombstoneEntry>();
+  readLocalTombstones().forEach(e => {
+    if (e && e.txId) map.set(e.txId, e);
+  });
+
+  if (checkCloudStatus()) {
+    try {
+      const tombSnap = await runWithTimeout(getDoc(doc(db, 'metadata', 'wallet_tombstones')), 8000);
+      if (tombSnap.exists()) {
+        const data = tombSnap.data();
+        const cloudList = Array.isArray(data?.entries) ? data.entries : [];
+        cloudList.forEach((e: any) => {
+          if (e && e.txId && !map.has(e.txId)) {
+            map.set(e.txId, e as WalletTombstoneEntry);
+          }
+        });
+      }
+    } catch (err: any) {
+      console.warn('[Wallet Tombstones] Cloud read deferred:', err?.message || err);
+    }
+  }
+
+  const merged = Array.from(map.values());
+  saveLocalTombstones(merged);
+  cachedTombstones = { entries: merged, timestamp: Date.now() };
+  return merged;
+}
+
+async function recordWalletTombstones(entries: WalletTombstoneEntry[]): Promise<void> {
+  if (!entries || entries.length === 0) return;
+  const existing = await getWalletTombstones(true);
+  const map = new Map<string, WalletTombstoneEntry>();
+  existing.forEach(e => map.set(e.txId, e));
+  entries.forEach(e => {
+    if (e && e.txId) map.set(e.txId, e);
+  });
+  const merged = Array.from(map.values());
+  saveLocalTombstones(merged);
+  cachedTombstones = { entries: merged, timestamp: Date.now() };
+
+  if (checkCloudStatus()) {
+    try {
+      await runWithTimeout(
+        setDoc(doc(db, 'metadata', 'wallet_tombstones'), cleanForFirestore({ entries: merged, updatedAt: new Date().toISOString() })),
+        10000
+      );
+      const batch = writeBatch(db);
+      entries.forEach(e => {
+        const docRef = doc(db, 'wallet_ledger', toSafeFirestoreDocId(e.txId));
+        batch.set(docRef, cleanForFirestore({
+          id: e.txId,
+          username: e.username || 'unknown',
+          deleted: true,
+          deletedAt: e.deletedAt,
+          reasonDetails: e.reason || 'Deleted by admin'
+        }), { merge: true });
+      });
+      await runWithTimeout(batch.commit(), 10000);
+    } catch (err: any) {
+      console.warn('[Wallet Tombstones] Failed to sync tombstones to cloud:', err?.message || err);
+    }
+  }
+}
+
+function readLocalLedgerEntries(): Array<{ username: string; transaction: WalletTransaction }> {
+  const entries: Array<{ username: string; transaction: WalletTransaction }> = [];
+  try {
+    if (!fs.existsSync(WALLET_LEDGER_FILE)) return entries;
+    const raw = fs.readFileSync(WALLET_LEDGER_FILE, 'utf8');
+    const lines = raw.split('\n').filter(Boolean);
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed && parsed.username && parsed.transaction && parsed.transaction.id) {
+          entries.push({
+            username: String(parsed.username).trim().toLowerCase(),
+            transaction: parsed.transaction as WalletTransaction
+          });
+        }
+      } catch {}
+    }
+  } catch (err) {
+    console.warn('[Wallet Ledger] Failed reading local ledger file:', err);
+  }
+  return entries;
+}
+
+async function fetchCloudLedgerEntries(): Promise<Array<{ username: string; transaction: WalletTransaction; deleted?: boolean }>> {
+  const entries: Array<{ username: string; transaction: WalletTransaction; deleted?: boolean }> = [];
+  if (!checkCloudStatus()) return entries;
+  try {
+    const snap = await runWithTimeout(getDocs(collection(db, 'wallet_ledger')), 15000);
+    snap.forEach(docSnap => {
+      const data = docSnap.data();
+      if (!data) return;
+      if (data.deleted === true) {
+        if (data.id) {
+          syncedCloudLedgerTxIds.add(String(data.id));
+        }
+        return;
+      }
+      const tx = data.transaction as WalletTransaction | undefined;
+      if (tx && tx.id && data.username) {
+        syncedCloudLedgerTxIds.add(tx.id);
+        entries.push({
+          username: normalizeCoordUsername(String(data.username)),
+          transaction: tx,
+          deleted: false
+        });
+      }
+    });
+  } catch (err: any) {
+    console.warn('[Wallet Ledger] Could not read cloud wallet_ledger:', err?.message || err);
+  }
+  return entries;
+}
+
+async function persistTransactionsToCloudLedger(
+  items: Array<{ username: string; transaction: WalletTransaction; reasonDetails?: string }>
+): Promise<void> {
+  if (!checkCloudStatus() || !items || items.length === 0) return;
+
+  const pending = items.filter(it => it && it.transaction && it.transaction.id && !syncedCloudLedgerTxIds.has(it.transaction.id));
+  if (pending.length === 0) return;
+
+  try {
+    const CHUNK_SIZE = 80;
+    for (let i = 0; i < pending.length; i += CHUNK_SIZE) {
+      const chunk = pending.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach(item => {
+        const docId = toSafeFirestoreDocId(item.transaction.id);
+        const docRef = doc(db, 'wallet_ledger', docId);
+        batch.set(docRef, cleanForFirestore({
+          id: item.transaction.id,
+          username: normalizeCoordUsername(item.username),
+          transaction: item.transaction,
+          reasonDetails: item.reasonDetails || item.transaction.reason || 'Recorded transaction',
+          recordedAt: item.transaction.timestamp || new Date().toISOString(),
+          deleted: false
+        }), { merge: true });
+      });
+      await runWithTimeout(batch.commit(), 15000);
+      chunk.forEach(item => syncedCloudLedgerTxIds.add(item.transaction.id));
+    }
+  } catch (err: any) {
+    console.warn('[Wallet Ledger] Failed to persist transactions to cloud wallet_ledger:', err?.message || err);
+  }
+}
+
 export function appendWalletLedgerAudit(transaction: WalletTransaction, username: string, reasonDetails?: string): void {
   try {
+    const cleanUser = normalizeCoordUsername(username);
     const entry = JSON.stringify({
       auditId: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      username,
+      username: cleanUser,
       transaction,
       reasonDetails: reasonDetails || 'Standard transaction recorded',
       recordedAt: new Date().toISOString()
     }) + '\n';
     fs.appendFileSync(WALLET_LEDGER_FILE, entry, 'utf8');
+
+    // Immediately mirror into Firestore immutable wallet_ledger collection
+    persistTransactionsToCloudLedger([{ username: cleanUser, transaction, reasonDetails }]).catch(() => {});
   } catch (err) {
     console.error('[Wallet Ledger Audit] Failed to append to audit ledger:', err);
   }
@@ -2855,7 +3470,7 @@ export async function createWalletSnapshot(reason: string, createdBy = 'Admin Us
 }
 
 export async function listWalletSnapshots(): Promise<Omit<WalletSnapshot, 'wallets'>[]> {
-  const snapshots: Omit<WalletSnapshot, 'wallets'>[] = [];
+  const snapMap = new Map<string, Omit<WalletSnapshot, 'wallets'>>();
   try {
     if (fs.existsSync(WALLET_BACKUPS_DIR)) {
       const files = fs.readdirSync(WALLET_BACKUPS_DIR).filter(f => f.endsWith('.json'));
@@ -2864,7 +3479,7 @@ export async function listWalletSnapshots(): Promise<Omit<WalletSnapshot, 'walle
           const s = safeReadJsonSync<WalletSnapshot>(path.join(WALLET_BACKUPS_DIR, f), null as any);
           if (s && s.id && s.timestamp) {
             const { wallets, ...meta } = s;
-            snapshots.push(meta);
+            snapMap.set(s.id, meta);
           }
         } catch {}
       });
@@ -2873,27 +3488,52 @@ export async function listWalletSnapshots(): Promise<Omit<WalletSnapshot, 'walle
     console.error('[Data Vault] Failed to read local snapshots:', err);
   }
 
+  if (checkCloudStatus()) {
+    try {
+      const q = query(collection(db, 'wallet_backups'), orderBy('timestamp', 'desc'), limit(40));
+      const snap = await runWithTimeout(getDocs(q), 10000);
+      snap.forEach(docSnap => {
+        const s = docSnap.data() as WalletSnapshot;
+        if (s && s.id && s.timestamp && !snapMap.has(s.id)) {
+          const { wallets, ...meta } = s;
+          snapMap.set(s.id, meta);
+        }
+      });
+    } catch (err: any) {
+      console.warn('[Data Vault] Cloud snapshot list notice:', err?.message || err);
+    }
+  }
+
+  const snapshots = Array.from(snapMap.values());
   snapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   return snapshots;
 }
 
 export async function restoreWalletSnapshot(snapshotId: string): Promise<Wallet[]> {
   const filePath = path.join(WALLET_BACKUPS_DIR, `${snapshotId}.json`);
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`Snapshot ${snapshotId} not found in safe storage.`);
+  let snapshot: WalletSnapshot | null = null;
+  if (fs.existsSync(filePath)) {
+    snapshot = safeReadJsonSync<WalletSnapshot>(filePath, null as any);
+  } else if (checkCloudStatus()) {
+    try {
+      const docSnap = await runWithTimeout(getDoc(doc(db, 'wallet_backups', snapshotId)), 10000);
+      if (docSnap.exists()) {
+        snapshot = docSnap.data() as WalletSnapshot;
+      }
+    } catch {}
   }
-  const snapshot = safeReadJsonSync<WalletSnapshot>(filePath, null as any);
+
   if (!snapshot || !Array.isArray(snapshot.wallets)) {
-    throw new Error(`Invalid snapshot content for ${snapshotId}`);
+    throw new Error(`Snapshot ${snapshotId} not found in safe storage.`);
   }
 
   // Backup current state before restoring
-  const current = await getWallets();
+  const current = await getWallets(true);
   createWalletSnapshotInternal(current, `Pre-rollback safeguard before restoring ${snapshotId}`, 'Safety Guard');
 
-  // Restore wallets
+  // Restore wallets (explicit snapshot restore bypasses additive cloud merge)
   const targetWallets = snapshot.wallets;
-  await saveWallets(targetWallets, `Restored from snapshot ${snapshotId} (${snapshot.reason})`);
+  await saveWalletsInternal(targetWallets, `Restored from snapshot ${snapshotId} (${snapshot.reason})`, { bypassCloudMerge: true });
   return targetWallets;
 }
 
@@ -3118,18 +3758,19 @@ export async function getWalletSafetyStatus() {
   const sachinDebits = (sachinWallet?.transactions || []).filter(t => t.type === 'debit').length;
   const priyaWallet = wallets.find(w => w.username === 'priya');
   const priyaDebits = (priyaWallet?.transactions || []).filter(t => t.type === 'debit').length;
-  
-  let ledgerCount = 0;
+
+  const totalTxCount = wallets.reduce((acc, w) => acc + (w.transactions || []).length, 0);
+  let localLedgerCount = 0;
   try {
     if (fs.existsSync(WALLET_LEDGER_FILE)) {
       const content = fs.readFileSync(WALLET_LEDGER_FILE, 'utf8');
-      ledgerCount = content.split('\n').filter(Boolean).length;
+      localLedgerCount = content.split('\n').filter(Boolean).length;
     }
   } catch {}
 
   return {
     vaultStatus: 'ACTIVE_PROTECTED',
-    immutableLedgerCount: ledgerCount,
+    immutableLedgerCount: Math.max(localLedgerCount, syncedCloudLedgerTxIds.size, totalTxCount),
     sachinProtected: false,
     sachinDebitsCount: sachinDebits,
     priyaProtected: true,
@@ -3180,30 +3821,72 @@ export async function initializeWalletsDatabase() {
   }
 }
 
-export async function getWallets(): Promise<Wallet[]> {
+function normalizeAndComputeWallet(w: Wallet, deletedTxIds: Set<string>): Wallet {
+  let txs = Array.isArray(w.transactions) ? w.transactions.filter(t => t && t.id && !deletedTxIds.has(t.id)) : [];
+  if (w.username.toLowerCase() === 'priya') {
+    txs = txs.filter(t => t.type !== 'debit' || t.reason?.toLowerCase().includes('reversal') || t.reason?.toLowerCase().includes('rollback'));
+  }
+  txs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const cr = txs.filter(t => t.type === 'credit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+  const dr = txs.filter(t => t.type === 'debit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+  return {
+    ...w,
+    transactions: txs,
+    balance: Math.max(0, cr - dr)
+  };
+}
+
+export async function getWallets(forceRefresh = false, includeCloudLedger = false): Promise<Wallet[]> {
   await initializeWalletsDatabase();
 
-  if (dbCache.wallets && (Date.now() - dbCache.wallets.timestamp < CACHE_TTL_MS)) {
+  if (!forceRefresh && !includeCloudLedger && hasHydratedCloudLedger && dbCache.wallets && (Date.now() - dbCache.wallets.timestamp < CACHE_TTL_MS)) {
     return dbCache.wallets.data;
   }
 
+  const tombstones = await getWalletTombstones(forceRefresh);
+  const deletedTxIds = new Set(tombstones.map(t => t.txId));
+
   if (checkCloudStatus()) {
     try {
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'wallets')), 10000);
-      const wallets: Wallet[] = [];
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'wallets')), 12000);
+      const cloudWallets: Wallet[] = [];
+      const cloudWalletByUser = new Map<string, Wallet>();
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
-        wallets.push({
+        const cw: Wallet = {
           id: docSnap.id,
           username: data.username || docSnap.id,
           displayName: data.displayName || data.username || docSnap.id,
           balance: Number(data.balance) || 0,
           transactions: Array.isArray(data.transactions) ? data.transactions : [],
           updatedAt: data.updatedAt || new Date().toISOString()
-        });
+        };
+        cloudWallets.push(cw);
+        cloudWalletByUser.set(cw.username.toLowerCase(), cw);
       });
 
       const localWallets = safeReadJsonSync<Wallet[]>(WALLETS_FILE, []);
+      const localCountByUser = new Map<string, number>();
+      localWallets.forEach(lw => localCountByUser.set(lw.username.toLowerCase(), (lw.transactions || []).length));
+
+      // Detect if cloud shrunk relative to local/cache so we always pull wallet_ledger to recover missing txs
+      let cloudShrunk = false;
+      for (const [u, localLen] of localCountByUser.entries()) {
+        const cw = cloudWalletByUser.get(u);
+        const cloudLen = cw ? (cw.transactions || []).length : 0;
+        if (localLen > cloudLen) {
+          cloudShrunk = true;
+          break;
+        }
+      }
+
+      const shouldFetchLedger = !hasHydratedCloudLedger || includeCloudLedger || cloudShrunk;
+      const cloudLedgerEntries = shouldFetchLedger ? await fetchCloudLedgerEntries() : [];
+      if (shouldFetchLedger) {
+        hasHydratedCloudLedger = true;
+      }
+      const localLedgerEntries = readLocalLedgerEntries();
+
       const mergedMap = new Map<string, Wallet>();
 
       // 1. Seed with local wallets
@@ -3214,8 +3897,8 @@ export async function getWallets(): Promise<Wallet[]> {
         });
       });
 
-      // 2. Union with cloud wallets by transaction ID
-      wallets.forEach(cw => {
+      // 2. Non-destructively union with cloud wallets by transaction ID
+      cloudWallets.forEach(cw => {
         const u = cw.username.toLowerCase();
         if (!mergedMap.has(u)) {
           mergedMap.set(u, {
@@ -3225,100 +3908,195 @@ export async function getWallets(): Promise<Wallet[]> {
         } else {
           const target = mergedMap.get(u)!;
           const txMap = new Map<string, WalletTransaction>();
-          // Include local transactions
-          (target.transactions || []).forEach(t => txMap.set(t.id, t));
-          // Include cloud transactions without overwriting local transactions with same ID
+          (target.transactions || []).forEach(t => {
+            if (t && t.id && !deletedTxIds.has(t.id)) txMap.set(t.id, t);
+          });
           (cw.transactions || []).forEach(t => {
-            if (!txMap.has(t.id)) {
+            if (t && t.id && !deletedTxIds.has(t.id) && !txMap.has(t.id)) {
               txMap.set(t.id, t);
+            }
+          });
+          target.transactions = Array.from(txMap.values());
+          if (cw.updatedAt && (!target.updatedAt || cw.updatedAt > target.updatedAt)) {
+            target.updatedAt = cw.updatedAt;
+          }
+        }
+      });
+
+      // 3. Union with immutable wallet_ledger entries (cloud + local audit log), excluding tombstones
+      const allLedgerEntries = [...localLedgerEntries, ...cloudLedgerEntries];
+      for (const entry of allLedgerEntries) {
+        if (!entry || !entry.transaction || !entry.transaction.id) continue;
+        if (deletedTxIds.has(entry.transaction.id)) continue;
+        const u = entry.username.toLowerCase();
+        const target = mergedMap.get(u);
+        if (target) {
+          if (!(target.transactions || []).some(t => t.id === entry.transaction.id)) {
+            target.transactions.push(entry.transaction);
+          }
+        } else {
+          mergedMap.set(u, {
+            id: u,
+            username: u,
+            displayName: entry.username,
+            balance: 0,
+            transactions: [entry.transaction],
+            updatedAt: entry.transaction.timestamp || new Date().toISOString()
+          });
+        }
+      }
+
+      const dirtyCloudWallets: Wallet[] = [];
+      const unsyncedLedgerEntries: Array<{ username: string; transaction: WalletTransaction }> = [];
+
+      const effectiveWallets = Array.from(mergedMap.values()).map(w => {
+        const normalized = normalizeAndComputeWallet(w, deletedTxIds);
+        const cw = cloudWalletByUser.get(normalized.username.toLowerCase());
+        const cloudTxIds = new Set((cw?.transactions || []).map(t => t.id));
+        const hasMissingInCloud = !cw || normalized.transactions.some(t => !cloudTxIds.has(t.id)) || cw.balance !== normalized.balance;
+        if (hasMissingInCloud) {
+          normalized.updatedAt = new Date().toISOString();
+          dirtyCloudWallets.push(normalized);
+        }
+        normalized.transactions.forEach(t => {
+          if (!syncedCloudLedgerTxIds.has(t.id)) {
+            unsyncedLedgerEntries.push({ username: normalized.username, transaction: t });
+          }
+        });
+        return normalized;
+      });
+
+      dbCache.wallets = { data: effectiveWallets, timestamp: Date.now() };
+      safeWriteJsonSync(WALLETS_FILE, effectiveWallets);
+
+      // ONLY write to Cloud Firestore when cloud was actually missing recovered transactions or stale balance!
+      if (dirtyCloudWallets.length > 0 && checkCloudStatus()) {
+        console.log(`[Wallet Self-Heal] Syncing ${dirtyCloudWallets.length} recovered/updated wallets to Cloud Firestore...`);
+        const batch = writeBatch(db);
+        dirtyCloudWallets.forEach(w => {
+          const docRef = doc(db, 'wallets', w.id);
+          batch.set(docRef, cleanForFirestore(w));
+        });
+        batch.commit().catch(e => console.warn('[Firestore] Background wallet recovery sync warning:', e?.message || e));
+      }
+      if (unsyncedLedgerEntries.length > 0 && shouldFetchLedger) {
+        persistTransactionsToCloudLedger(unsyncedLedgerEntries).catch(() => {});
+      }
+
+      return effectiveWallets;
+    } catch (err: any) {
+      console.error('[Firestore Client] Failed to fetch wallets from cloud, falling back to local + audit ledger:', err);
+      handleCloudError(err);
+    }
+  }
+
+  // Offline / Local fallback: also union WALLET_LEDGER_FILE so local audit entries are never dropped
+  const localWallets = safeReadJsonSync<Wallet[]>(WALLETS_FILE, []);
+  const ledgerMap = new Map<string, Wallet>();
+  localWallets.forEach(lw => ledgerMap.set(lw.username.toLowerCase(), { ...lw, transactions: [...(lw.transactions || [])] }));
+  for (const entry of readLocalLedgerEntries()) {
+    if (deletedTxIds.has(entry.transaction.id)) continue;
+    const u = entry.username.toLowerCase();
+    const target = ledgerMap.get(u);
+    if (target && !target.transactions.some(t => t.id === entry.transaction.id)) {
+      target.transactions.push(entry.transaction);
+    }
+  }
+  const wallets = Array.from(ledgerMap.values()).map(w => normalizeAndComputeWallet(w, deletedTxIds));
+  dbCache.wallets = { data: wallets, timestamp: Date.now() };
+  return wallets;
+}
+
+async function saveWalletsInternal(
+  wallets: Wallet[],
+  snapshotReason = 'Automatic state sync',
+  options?: { deletedTxIds?: string[]; bypassCloudMerge?: boolean }
+): Promise<void> {
+  await initializeWalletsDatabase();
+
+  const tombstones = await getWalletTombstones();
+  const deletedTxIds = new Set<string>(tombstones.map(t => t.txId));
+  if (Array.isArray(options?.deletedTxIds)) {
+    options!.deletedTxIds.forEach(id => deletedTxIds.add(id));
+  }
+
+  const mergedMap = new Map<string, Wallet>();
+  wallets.forEach(w => {
+    mergedMap.set(w.username.toLowerCase(), {
+      ...w,
+      transactions: Array.isArray(w.transactions) ? [...w.transactions] : []
+    });
+  });
+
+  // CRITICAL ANTI-OVERWRITE GUARD: Always pull fresh cloud wallets before writing unless explicitly doing a snapshot rollback
+  if (!options?.bypassCloudMerge && checkCloudStatus()) {
+    try {
+      const snapshot = await runWithTimeout(getDocs(collection(db, 'wallets')), 10000);
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        const u = String(data?.username || docSnap.id).toLowerCase();
+        const cloudTxs: WalletTransaction[] = Array.isArray(data?.transactions) ? data.transactions : [];
+        const target = mergedMap.get(u);
+        if (!target) {
+          mergedMap.set(u, {
+            id: docSnap.id,
+            username: data?.username || docSnap.id,
+            displayName: data?.displayName || data?.username || docSnap.id,
+            balance: Number(data?.balance) || 0,
+            transactions: cloudTxs.filter(t => t && t.id && !deletedTxIds.has(t.id)),
+            updatedAt: data?.updatedAt || new Date().toISOString()
+          });
+        } else {
+          const txMap = new Map<string, WalletTransaction>();
+          target.transactions.forEach(t => {
+            if (t && t.id && !deletedTxIds.has(t.id)) txMap.set(t.id, t);
+          });
+          cloudTxs.forEach(ct => {
+            if (ct && ct.id && !deletedTxIds.has(ct.id) && !txMap.has(ct.id)) {
+              txMap.set(ct.id, ct);
             }
           });
           target.transactions = Array.from(txMap.values());
         }
       });
-
-      const effectiveWallets = Array.from(mergedMap.values());
-
-      // 3. Sort transactions descending and recompute accurate balances
-      effectiveWallets.forEach(w => {
-        if (w.username.toLowerCase() === 'priya') {
-          w.transactions = (w.transactions || []).filter(t => t.type !== 'debit' || t.reason?.toLowerCase().includes('reversal') || t.reason?.toLowerCase().includes('rollback'));
-        }
-        w.transactions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        const cr = w.transactions.filter(t => t.type === 'credit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-        const dr = w.transactions.filter(t => t.type === 'debit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-        w.balance = Math.max(0, cr - dr);
-        w.updatedAt = new Date().toISOString();
-      });
-
-      // Update cache & sync merged state
-      dbCache.wallets = { data: effectiveWallets, timestamp: Date.now() };
-      safeWriteJsonSync(WALLETS_FILE, effectiveWallets);
-
-      // Async sync back to cloud if needed to keep Firestore up to date
-      if (checkCloudStatus()) {
-        const batch = writeBatch(db);
-        effectiveWallets.forEach(w => {
-          const docRef = doc(db, 'wallets', w.id);
-          batch.set(docRef, cleanForFirestore(w));
-        });
-        batch.commit().catch(e => console.warn('[Firestore] Background wallet sync warning:', e?.message || e));
-      }
-
-      return effectiveWallets;
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to fetch wallets from cloud, falling back to local files:', err);
-      handleCloudError(err);
+    } catch (mergeErr: any) {
+      console.warn('[SaveWallets Guard] Pre-write cloud union deferred:', mergeErr?.message || mergeErr);
     }
   }
 
-  let wallets = safeReadJsonSync<Wallet[]>(WALLETS_FILE, []);
-  
-  // Invariant: Ensure Priya has 0 unauthorized payout debits (reversals/rollbacks permitted)
-  wallets.forEach(w => {
-    if (w.username.toLowerCase() === 'priya') {
-      w.transactions = (w.transactions || []).filter(t => t.type !== 'debit' || t.reason?.toLowerCase().includes('reversal') || t.reason?.toLowerCase().includes('rollback'));
-      const cr = w.transactions.filter(t => t.type === 'credit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-      const dr = w.transactions.filter(t => t.type === 'debit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-      w.balance = Math.max(0, cr - dr);
-    }
-  });
-
-  dbCache.wallets = { data: wallets, timestamp: Date.now() };
-  return wallets;
-}
-
-async function saveWalletsInternal(wallets: Wallet[], snapshotReason = 'Automatic state sync'): Promise<void> {
-  await initializeWalletsDatabase();
-
-  // Safety Invariant: Priya MUST NEVER have unauthorized payout debits! (Reversals/rollbacks permitted, Sachin Saha withdrawals enabled)
-  wallets.forEach(w => {
-    if (w.username.toLowerCase() === 'priya') {
-      w.transactions = (w.transactions || []).filter(t => t.type !== 'debit' || t.reason?.toLowerCase().includes('reversal') || t.reason?.toLowerCase().includes('rollback'));
-      const cr = w.transactions.filter(t => t.type === 'credit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-      const dr = w.transactions.filter(t => t.type === 'debit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-      w.balance = Math.max(0, cr - dr);
-    }
-  });
+  const finalWallets = Array.from(mergedMap.values()).map(w => normalizeAndComputeWallet(w, deletedTxIds));
 
   // Create automatic rolling snapshot in the Data Vault
   try {
-    createWalletSnapshotInternal(wallets, snapshotReason);
+    createWalletSnapshotInternal(finalWallets, snapshotReason);
   } catch (err) {
     console.warn('[Data Vault] Warning: Failed to write rolling snapshot:', err);
   }
 
-  dbCache.wallets = { data: wallets, timestamp: Date.now() };
-  safeWriteJsonSync(WALLETS_FILE, wallets);
+  dbCache.wallets = { data: finalWallets, timestamp: Date.now() };
+  safeWriteJsonSync(WALLETS_FILE, finalWallets);
 
   if (checkCloudStatus()) {
     try {
       const batch = writeBatch(db);
-      wallets.forEach(w => {
+      finalWallets.forEach(w => {
         const docRef = doc(db, 'wallets', w.id);
         batch.set(docRef, cleanForFirestore(w));
       });
-      await runWithTimeout(batch.commit(), 10000);
+      await runWithTimeout(batch.commit(), 15000);
+
+      // Persist any new transactions individually to Firestore wallet_ledger
+      const ledgerItems: Array<{ username: string; transaction: WalletTransaction }> = [];
+      finalWallets.forEach(w => {
+        (w.transactions || []).forEach(t => {
+          if (!syncedCloudLedgerTxIds.has(t.id)) {
+            ledgerItems.push({ username: w.username, transaction: t });
+          }
+        });
+      });
+      if (ledgerItems.length > 0) {
+        await persistTransactionsToCloudLedger(ledgerItems);
+      }
     } catch (err: any) {
       console.error('[Firestore Client] Failed to save wallets to cloud:', err);
       handleCloudError(err);
@@ -3330,9 +4108,9 @@ export async function saveWallets(wallets: Wallet[], snapshotReason = 'Automatic
   return dbMutex.run(() => saveWalletsInternal(wallets, snapshotReason));
 }
 
-export async function getWalletByUsername(username: string): Promise<Wallet> {
-  const wallets = await getWallets();
-  const cleanUser = String(username).trim().toLowerCase();
+export async function getWalletByUsername(username: string, forceRefresh = false): Promise<Wallet> {
+  const wallets = await getWallets(forceRefresh);
+  const cleanUser = normalizeCoordUsername(String(username).trim().toLowerCase());
   let wallet = wallets.find(w => w.username.toLowerCase() === cleanUser);
   
   if (!wallet) {
@@ -3360,10 +4138,11 @@ export async function addWalletTransaction(
   type: 'credit' | 'debit', 
   amount: number, 
   reason: string, 
-  leadId?: string
+  leadId?: string,
+  options?: { txId?: string; timestamp?: string; reasonDetails?: string }
 ): Promise<Wallet> {
   return dbMutex.run(async () => {
-    const cleanUser = String(username).trim().toLowerCase();
+    const cleanUser = normalizeCoordUsername(String(username).trim().toLowerCase());
     if (cleanUser === 'priya' && type === 'debit') {
       const isReversal = reason.toLowerCase().includes('reversal') || reason.toLowerCase().includes('rollback');
       if (!isReversal) {
@@ -3371,18 +4150,39 @@ export async function addWalletTransaction(
       }
     }
 
-    const wallet = await getWalletByUsername(cleanUser);
-    
+    // ALWAYS force-refresh from cloud inside mutex so stale 20s cache never causes lost updates
+    const wallets = await getWallets(true);
+    let wallet = wallets.find(w => w.username.toLowerCase() === cleanUser);
+    if (!wallet) {
+      const coords = await getCoordinators();
+      const coord = coords.find(c => c.username.toLowerCase() === cleanUser);
+      wallet = {
+        id: cleanUser,
+        username: cleanUser,
+        displayName: coord ? coord.displayName : username,
+        balance: 0,
+        transactions: [],
+        updatedAt: new Date().toISOString()
+      };
+      wallets.push(wallet);
+    }
+
+    if (!wallet.transactions) wallet.transactions = [];
+
+    const txId = options?.txId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    if (wallet.transactions.some(t => t.id === txId)) {
+      return wallet; // Idempotent guard
+    }
+
     const transaction: WalletTransaction = {
-      id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: txId,
       type,
       amount: Number(amount),
       reason,
       leadId,
-      timestamp: new Date().toISOString()
+      timestamp: options?.timestamp || new Date().toISOString()
     };
 
-    if (!wallet.transactions) wallet.transactions = [];
     wallet.transactions.unshift(transaction); // Add to beginning for newest first
     
     const totalCredits = (wallet.transactions || []).filter(t => t.type === 'credit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
@@ -3390,42 +4190,278 @@ export async function addWalletTransaction(
     wallet.balance = Math.max(0, totalCredits - totalDebits);
     wallet.updatedAt = new Date().toISOString();
     
-    // Save to database with snapshot
-    const wallets = await getWallets();
-    const idx = wallets.findIndex(w => w.id === wallet.id);
-    if (idx !== -1) {
-      wallets[idx] = wallet;
-    } else {
-      wallets.push(wallet);
-    }
-    await saveWalletsInternal(wallets, `Manual ${type.toUpperCase()} adjustment of INR ${amount} for ${cleanUser}`);
+    // Persist to immutable local + cloud ledger AND wallets collection
+    appendWalletLedgerAudit(transaction, cleanUser, options?.reasonDetails || reason);
+    await saveWalletsInternal(wallets, `${type.toUpperCase()} INR ${amount} for ${cleanUser}: ${reason}`);
     
-    // Permanently record in immutable audit ledger
-    appendWalletLedgerAudit(transaction, cleanUser, reason);
     return wallet;
   });
 }
 
 export async function deleteWalletTransaction(username: string, txId: string): Promise<Wallet> {
   return dbMutex.run(async () => {
-    const wallets = await getWallets();
-    const cleanUser = String(username).trim().toLowerCase();
+    const wallets = await getWallets(true);
+    const cleanUser = normalizeCoordUsername(String(username).trim().toLowerCase());
     const wallet = wallets.find(w => w.username.toLowerCase() === cleanUser);
     if (!wallet) throw new Error('Wallet not found');
 
-    const initialLen = (wallet.transactions || []).length;
-    wallet.transactions = (wallet.transactions || []).filter(t => t.id !== txId);
-    if (wallet.transactions.length === initialLen) {
+    const targetTx = (wallet.transactions || []).find(t => t.id === txId);
+    if (!targetTx) {
       throw new Error('Transaction not found');
     }
+
+    wallet.transactions = (wallet.transactions || []).filter(t => t.id !== txId);
 
     const totalCredits = (wallet.transactions || []).filter(t => t.type === 'credit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
     const totalDebits = (wallet.transactions || []).filter(t => t.type === 'debit').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
     wallet.balance = Math.max(0, totalCredits - totalDebits);
     wallet.updatedAt = new Date().toISOString();
 
-    await saveWalletsInternal(wallets, `Deleted transaction ${txId} for ${cleanUser}`);
+    await recordWalletTombstones([{
+      txId,
+      username: cleanUser,
+      leadId: targetTx.leadId,
+      reason: targetTx.reason,
+      deletedAt: new Date().toISOString()
+    }]);
+
+    await saveWalletsInternal(wallets, `Deleted transaction ${txId} for ${cleanUser}`, { deletedTxIds: [txId] });
     return wallet;
+  });
+}
+
+/**
+ * Automatic Startup & Sync Self-Healing Engine:
+ * Guarantees that if Firestore/local `wallets` ever drops or fails to save a Won lead's incentive
+ * or a tracked post-Nov-12 milestone (while `leads` survived in Firestore), the exact missing transactions
+ * are deterministically restored without duplicating any existing credits or overriding admin deletions.
+ */
+export async function ensureWalletIntegrityFromLeads(): Promise<{ healedCount: number; healedDetails: string[] }> {
+  return dbMutex.run(async () => {
+    const leads = await getLeads();
+    const wallets = await getWallets(true, true);
+    const coordinators = await getCoordinators();
+    const tombstones = await getWalletTombstones(true);
+    const deletedTxIds = new Set(tombstones.map(t => t.txId));
+
+    const walletsMap = new Map<string, Wallet>();
+    wallets.forEach(w => walletsMap.set(w.username.toLowerCase(), w));
+
+    const ensureWalletObj = (uRaw: string): Wallet => {
+      const u = normalizeCoordUsername(uRaw);
+      if (walletsMap.has(u)) return walletsMap.get(u)!;
+      const found = coordinators.find(c => c.username.toLowerCase() === u);
+      const nw: Wallet = {
+        id: u,
+        username: u,
+        displayName: found ? found.displayName : uRaw,
+        balance: 0,
+        transactions: [],
+        updatedAt: new Date().toISOString()
+      };
+      wallets.push(nw);
+      walletsMap.set(u, nw);
+      return nw;
+    };
+
+    const getCoordDisplay = (u: string): string => {
+      const found = coordinators.find(c => c.username.toLowerCase() === u);
+      return found ? found.displayName : u.charAt(0).toUpperCase() + u.slice(1);
+    };
+
+    let healedCount = 0;
+    const healedDetails: string[] = [];
+    const newlyCreatedLedgerItems: Array<{ username: string; transaction: WalletTransaction; reasonDetails: string }> = [];
+
+    for (const lead of leads) {
+      if (!lead || lead.isDeleted) continue;
+      const rawCoord = (lead.assignedTo || '').trim();
+      if (!rawCoord || rawCoord.toLowerCase() === 'unassigned' || rawCoord.toLowerCase() === 'all') continue;
+      const normCoord = normalizeCoordUsername(rawCoord);
+
+      // 1. Check active WON leads: if ZERO Won transactions exist across all wallets and NOT intentionally deleted, heal!
+      if (lead.stage === 'won') {
+        const hasAnyWonTxAcrossWallets = wallets.some(w =>
+          (w.transactions || []).some(t =>
+            t.leadId === lead.id &&
+            (t.reason?.includes('Closed Won') || t.reason?.includes('Won Share') || t.reason?.includes('Override Bonus') || t.reason?.includes('Reversal: Closed Won'))
+          )
+        );
+        const wasWonManuallyDeleted = tombstones.some(t =>
+          t.leadId === lead.id && (t.reason?.includes('Closed Won') || t.reason?.includes('Won Share'))
+        );
+
+        if (!hasAnyWonTxAcrossWallets && !wasWonManuallyDeleted) {
+          const stageHist = [...(lead.stageHistory || [])].reverse().find(s => s.newStage === 'won');
+          const timelineHist = [...(lead.timeline || [])].reverse().find(t => t.text && t.text.includes('Closed Won'));
+          const wonDate = stageHist?.changedAt || timelineHist?.timestamp || lead.updatedAt || lead.createdAt || new Date().toISOString();
+          const isNewPolicy = new Date(wonDate).getTime() >= new Date('2026-11-04T00:00:00.000Z').getTime();
+
+          const pName = lead.project || 'General';
+          const cName = lead.country || 'Unknown';
+          const coordDisplay = getCoordDisplay(normCoord);
+          const toCredit: Array<{ username: string; amount: number; reason: string; txId: string }> = [];
+
+          if (isNewPolicy) {
+            if (TEAM_ROLES.TELECALLERS.includes(normCoord)) {
+              toCredit.push(
+                {
+                  username: normCoord,
+                  amount: 400,
+                  reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
+                  txId: toSafeFirestoreDocId(`tx_won_${lead.id}_${normCoord}`)
+                },
+                {
+                  username: 'shreya',
+                  amount: 200,
+                  reason: `TL Closed Won Share (Telecaller sale by: ${coordDisplay}) for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
+                  txId: toSafeFirestoreDocId(`tx_share_${lead.id}_shreya`)
+                },
+                {
+                  username: 'edenla',
+                  amount: 200,
+                  reason: `Manager Closed Won Share (Telecaller sale by: ${coordDisplay}) for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
+                  txId: toSafeFirestoreDocId(`tx_share_${lead.id}_edenla`)
+                },
+                {
+                  username: 'sachinsaha',
+                  amount: 200,
+                  reason: `Digital Marketer Closed Won Share (Telecaller sale by: ${coordDisplay}) for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
+                  txId: toSafeFirestoreDocId(`tx_share_${lead.id}_sachinsaha`)
+                }
+              );
+            } else {
+              toCredit.push({
+                username: normCoord,
+                amount: 400,
+                reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
+                txId: toSafeFirestoreDocId(`tx_won_${lead.id}_${normCoord}`)
+              });
+              if (normCoord !== 'sachinsaha') {
+                toCredit.push({
+                  username: 'sachinsaha',
+                  amount: 200,
+                  reason: `Digital Marketer Closed Won Share (Sale by: ${coordDisplay}) for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
+                  txId: toSafeFirestoreDocId(`tx_share_${lead.id}_sachinsaha`)
+                });
+              }
+            }
+          } else {
+            const cLower = String(lead.country || '').trim().toLowerCase();
+            const baseAmt = ['japan', 'albania', 'europe', 'malta', 'greece'].includes(cLower) ? 1000 : 400;
+            toCredit.push({
+              username: normCoord,
+              amount: baseAmt,
+              reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
+              txId: toSafeFirestoreDocId(`tx_won_${lead.id}_${normCoord}`)
+            });
+            if (normCoord !== 'sachinsaha') {
+              toCredit.push({
+                username: 'sachinsaha',
+                amount: baseAmt === 1000 ? 200 : 100,
+                reason: `Sachin Saha Override Bonus (Sale by: ${coordDisplay}) for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
+                txId: toSafeFirestoreDocId(`tx_share_${lead.id}_sachinsaha`)
+              });
+            }
+          }
+
+          for (const item of toCredit) {
+            if (deletedTxIds.has(item.txId)) continue;
+            const w = ensureWalletObj(item.username);
+            if (!w.transactions.some(t => t.id === item.txId)) {
+              const tx: WalletTransaction = {
+                id: item.txId,
+                type: 'credit',
+                amount: item.amount,
+                reason: item.reason,
+                timestamp: wonDate,
+                leadId: lead.id
+              };
+              w.transactions.unshift(tx);
+              healedCount++;
+              healedDetails.push(`Won +${item.amount} -> @${item.username} (${lead.name})`);
+              newlyCreatedLedgerItems.push({ username: item.username, transaction: tx, reasonDetails: 'Auto-healed Won incentive from lead state' });
+              appendWalletLedgerAudit(tx, item.username, 'Auto-healed Won incentive from lead state');
+            }
+          }
+        }
+      }
+
+      // 2. Check tracked Office Visited milestone (JOISHI_LEPCHA_12-11-2026 & any lead stamped with docOfficeVisitedAt)
+      if (lead.docOfficeVisited && (lead.docOfficeVisitedAt || lead.id === 'JOISHI_LEPCHA_12-11-2026')) {
+        const hasOvTx = wallets.some(w =>
+          (w.transactions || []).some(t =>
+            t.leadId === lead.id && (t.reason?.includes('Office Visited Incentive') || t.reason?.includes('Interview Attended / Office Visited'))
+          )
+        );
+        const wasOvDeleted = tombstones.some(t => t.leadId === lead.id && t.reason?.includes('Office Visited'));
+        const ovTxId = toSafeFirestoreDocId(`tx_ov_${lead.id}`);
+        if (!hasOvTx && !wasOvDeleted && !deletedTxIds.has(ovTxId)) {
+          const w = ensureWalletObj(normCoord);
+          const ovTimestamp = lead.docOfficeVisitedAt || lead.updatedAt || new Date().toISOString();
+          const tx: WalletTransaction = {
+            id: ovTxId,
+            type: 'credit',
+            amount: 11,
+            reason: `Office Visited Incentive for candidate: ${lead.name}`,
+            timestamp: ovTimestamp,
+            leadId: lead.id
+          };
+          w.transactions.unshift(tx);
+          healedCount++;
+          healedDetails.push(`Office Visited +11 -> @${normCoord} (${lead.name})`);
+          newlyCreatedLedgerItems.push({ username: normCoord, transaction: tx, reasonDetails: 'Auto-healed Office Visited milestone' });
+          appendWalletLedgerAudit(tx, normCoord, 'Auto-healed Office Visited milestone');
+        }
+      }
+
+      // 3. Check tracked Interview Attended milestone (any lead stamped with docInterviewAttendedAt)
+      if (lead.docInterviewAttended && lead.docInterviewAttendedAt) {
+        const hasIaTx = wallets.some(w =>
+          (w.transactions || []).some(t =>
+            t.leadId === lead.id && (t.reason?.includes('Interview Attended Incentive') || t.reason?.includes('Interview Attended / Office Visited'))
+          )
+        );
+        const wasIaDeleted = tombstones.some(t => t.leadId === lead.id && t.reason?.includes('Interview Attended'));
+        const iaTxId = toSafeFirestoreDocId(`tx_ia_${lead.id}`);
+        if (!hasIaTx && !wasIaDeleted && !deletedTxIds.has(iaTxId)) {
+          const w = ensureWalletObj(normCoord);
+          const tx: WalletTransaction = {
+            id: iaTxId,
+            type: 'credit',
+            amount: 11,
+            reason: `Interview Attended Incentive for candidate: ${lead.name}`,
+            timestamp: lead.docInterviewAttendedAt,
+            leadId: lead.id
+          };
+          w.transactions.unshift(tx);
+          healedCount++;
+          healedDetails.push(`Interview Attended +11 -> @${normCoord} (${lead.name})`);
+          newlyCreatedLedgerItems.push({ username: normCoord, transaction: tx, reasonDetails: 'Auto-healed Interview Attended milestone' });
+          appendWalletLedgerAudit(tx, normCoord, 'Auto-healed Interview Attended milestone');
+        }
+      }
+    }
+
+    if (healedCount > 0) {
+      console.log(`[Wallet Integrity] Healed ${healedCount} missing wallet transactions:`, healedDetails);
+      await saveWalletsInternal(wallets, `Wallet Integrity Auto-Heal (${healedCount} missing txs restored)`);
+    }
+
+    // Also ensure all existing transactions across wallets are mirrored in cloud wallet_ledger
+    const allUnsynced: Array<{ username: string; transaction: WalletTransaction }> = [];
+    wallets.forEach(w => {
+      (w.transactions || []).forEach(t => {
+        if (!syncedCloudLedgerTxIds.has(t.id)) {
+          allUnsynced.push({ username: w.username, transaction: t });
+        }
+      });
+    });
+    if (allUnsynced.length > 0) {
+      await persistTransactionsToCloudLedger(allUnsynced);
+    }
+
+    return { healedCount, healedDetails };
   });
 }
 
@@ -4035,8 +5071,10 @@ export async function generateFullXLSXBuffer(): Promise<Buffer> {
   // 6. Sheet: "Job Openings"
   const jobsData = jobs.map(j => ({
     'Job ID': j.id,
-    'Title': j.title,
-    'Country': j.country,
+    'Service Charge': j.serviceCharge || '',
+    'Creative Image': j.imageUrl || '',
+    'Title': j.title || '',
+    'Country': j.country || '',
     'Salary Range': j.salaryRange || '',
     'Requirements': j.requirement || '',
     'Age Limit': j.ageLimit || '',
@@ -4450,13 +5488,13 @@ export async function backupFileToFirestore(safeName: string, filePath: string):
       
       if (base64Data.length <= maxSingleDocLength) {
         // Save in a single document for simplicity and performance
-        await setDoc(docRef, {
+        await runWithTimeout(setDoc(docRef, {
           fileName: safeName,
           fileType,
           chunks: [base64Data],
           isMultipart: false,
           uploadedAt: new Date().toISOString()
-        });
+        }), 15000);
         console.log(`[FileBackup System] 🛡️ Permanent cloud backup created in Firestore: ${safeName} (Single document).`);
       } else {
         // Multipart chunking for files larger than 750KB
@@ -4469,21 +5507,21 @@ export async function backupFileToFirestore(safeName: string, filePath: string):
         console.log(`[FileBackup System] 📦 File "${safeName}" is large (${base64Data.length} chars base64). Chunking into ${chunks.length} parts to bypass Firestore 1MB limits...`);
 
         // Write master document first
-        await setDoc(docRef, {
+        await runWithTimeout(setDoc(docRef, {
           fileName: safeName,
           fileType,
           isMultipart: true,
           chunkCount: chunks.length,
           uploadedAt: new Date().toISOString()
-        });
+        }), 15000);
 
         // Write chunk documents to a subcollection
         for (let i = 0; i < chunks.length; i++) {
           const chunkDocRef = doc(db, 'file_backups', safeName, 'file_chunks', `chunk_${i}`);
-          await setDoc(chunkDocRef, {
+          await runWithTimeout(setDoc(chunkDocRef, {
             index: i,
             chunk: chunks[i]
-          });
+          }), 15000);
         }
         console.log(`[FileBackup System] 🛡️ Multipart permanent cloud backup created in Firestore: ${safeName} (${chunks.length} chunks saved in subcollection).`);
       }

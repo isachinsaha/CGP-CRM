@@ -38,9 +38,17 @@ service cloud.firestore {
     match /jobs/{id} {
       allow read: if true;
       allow create, update: if isValidId(id)
-        && request.resource.data.title is string
-        && request.resource.data.title.size() <= 200
-        && request.resource.data.country is string;
+        && (!('title' in request.resource.data) || (request.resource.data.title is string && request.resource.data.title.size() <= 200))
+        && (!('country' in request.resource.data) || (request.resource.data.country is string && request.resource.data.country.size() <= 100))
+        && (!('serviceCharge' in request.resource.data) || (request.resource.data.serviceCharge is string && request.resource.data.serviceCharge.size() <= 500))
+        && (!('imageUrl' in request.resource.data) || (request.resource.data.imageUrl is string && request.resource.data.imageUrl.size() <= 500));
+      allow delete: if false;
+    }
+
+    // Jobs point-in-time backups collection
+    match /jobs_backups/{id} {
+      allow read: if true;
+      allow create, update: if isValidId(id);
       allow delete: if false;
     }
 
@@ -50,23 +58,28 @@ service cloud.firestore {
       allow create, update: if isValidId(id)
         && request.resource.data.text is string
         && request.resource.data.text.size() <= 5000;
-      allow delete: if false;
+      allow delete: if isValidId(id);
     }
 
     // Wallets collection
     match /wallets/{id} {
       allow read: if true;
-      allow write: if isValidId(id);
+      allow create, update: if isValidId(id);
+      allow delete: if false;
     }
 
     // Wallet backups & point-in-time snapshots
     match /wallet_backups/{id} {
-      allow read, write: if isValidId(id);
+      allow read: if true;
+      allow create, update: if isValidId(id);
+      allow delete: if false;
     }
 
     // Wallet immutable audit ledger
     match /wallet_ledger/{id} {
-      allow read, write: if isValidId(id);
+      allow read: if true;
+      allow create, update: if isValidId(id);
+      allow delete: if false;
     }
 
     // Incentive rules collection
@@ -74,7 +87,7 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if isValidId(id)
         && request.resource.data.projectName is string;
-      allow delete: if false;
+      allow delete: if isValidId(id);
     }
 
     // WhatsApp templates collection
@@ -114,12 +127,16 @@ service cloud.firestore {
 
     // Metadata collection
     match /metadata/{id} {
-      allow read, write: if isValidId(id);
+      allow read: if true;
+      allow create, update: if isValidId(id);
+      allow delete: if false;
     }
 
     // Settings collection (e.g. WhatsApp auto-reply, system configurations)
     match /settings/{id} {
-      allow read, write: if isValidId(id);
+      allow read: if true;
+      allow create, update: if isValidId(id);
+      allow delete: if false;
     }
   }
 }

@@ -325,7 +325,7 @@ Current CRM Real-Time Snapshot:
 - Stagnant in Discussion (> 3 days): ${overview.stagnantCount}
 
 Active Demand Jobs in System:
-${jobs.slice(0, 5).map(j => `* ${j.title} (${j.country}) - ${(j as any).openings || j.positions?.length || 'Multiple'} openings, Salary: ${j.salaryRange || 'Competitive'}`).join('\n')}
+${jobs.slice(0, 5).map(j => `* ${j.title || j.serviceCharge || 'Job Demand Creative'}${j.country ? ` (${j.country})` : ''} - Service Charge: ${j.serviceCharge || j.processingFeeMale || 'N/A'}, Salary: ${j.salaryRange || 'See creative'}`).join('\n')}
 
 Coordinator Workloads:
 ${overview.coordinatorWorkloads.map(c => `* ${c.name}: ${c.activeLeads} total, ${c.inDiscussion} in discussion, ${c.stagnantLeads} stagnant. Status: ${c.status}`).join('\n')}

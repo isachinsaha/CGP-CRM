@@ -17,6 +17,9 @@ interface MultiSearchableSelectProps {
   className?: string;
   dropdownClassName?: string;
   badgeColor?: string;
+  activeTextClass?: string;
+  activeBorderClass?: string;
+  align?: 'left' | 'right';
 }
 
 export function MultiSearchableSelect({
@@ -27,7 +30,10 @@ export function MultiSearchableSelect({
   allLabel = 'All',
   className = '',
   dropdownClassName = '',
-  badgeColor = 'bg-indigo-600'
+  badgeColor = 'bg-indigo-600',
+  activeTextClass = 'text-indigo-300',
+  activeBorderClass = 'border-indigo-500/80 ring-1 ring-indigo-500/30',
+  align = 'left'
 }: MultiSearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -58,7 +64,11 @@ export function MultiSearchableSelect({
     }
   }, [isOpen]);
 
-  // Filter options based on search term (excluding 'All' from search list)
+  // All option (if provided) and real options list (excluding 'All')
+  const allOption = useMemo(() => {
+    return (options || []).find(opt => opt && opt.value === 'All');
+  }, [options]);
+
   const realOptions = useMemo(() => {
     return (options || []).filter(opt => opt && opt.value !== 'All');
   }, [options]);
@@ -97,17 +107,29 @@ export function MultiSearchableSelect({
     onChange([]);
   };
 
-  // Label text on the button
+  // Label text & icon on the button
+  const selectedSingleOption = useMemo(() => {
+    if (values.length === 1) {
+      return realOptions.find(o => o.value === values[0]);
+    }
+    return undefined;
+  }, [values, realOptions]);
+
   const buttonLabel = useMemo(() => {
     if (isAllSelected) {
-      return allLabel;
+      return allOption?.label || allLabel;
     }
     if (values.length === 1) {
-      const opt = realOptions.find(o => o.value === values[0]);
-      return opt ? opt.label : values[0];
+      return selectedSingleOption ? selectedSingleOption.label : values[0];
     }
     return `${values.length} Selected`;
-  }, [isAllSelected, values, realOptions, allLabel]);
+  }, [isAllSelected, values, selectedSingleOption, allOption, allLabel]);
+
+  const triggerTooltip = useMemo(() => {
+    if (isAllSelected) return allOption?.label || allLabel;
+    const labels = values.map(v => realOptions.find(o => o.value === v)?.label || v);
+    return labels.join(', ');
+  }, [isAllSelected, values, realOptions, allOption, allLabel]);
 
   const isFullWidth = className.includes('w-full');
 
@@ -116,7 +138,8 @@ export function MultiSearchableSelect({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center justify-between gap-1.5 min-w-0 ${className} ${!isAllSelected ? 'border-indigo-500/80 ring-1 ring-indigo-500/30' : ''}`}
+        title={triggerTooltip}
+        className={`flex items-center justify-between gap-1.5 min-w-0 ${className} ${!isAllSelected ? activeBorderClass : ''}`}
       >
         <span className="flex items-center gap-1.5 min-w-0 truncate">
           {!isAllSelected && (
@@ -124,7 +147,13 @@ export function MultiSearchableSelect({
               {values.length}
             </span>
           )}
-          <span className={`truncate text-left font-extrabold ${!isAllSelected ? 'text-indigo-300' : ''}`}>
+          {isAllSelected && allOption?.icon && (
+            <span className="shrink-0 flex items-center">{allOption.icon}</span>
+          )}
+          {!isAllSelected && values.length === 1 && selectedSingleOption?.icon && (
+            <span className="shrink-0 flex items-center">{selectedSingleOption.icon}</span>
+          )}
+          <span className={`truncate text-left font-extrabold ${!isAllSelected ? activeTextClass : ''}`}>
             {buttonLabel}
           </span>
         </span>
@@ -133,7 +162,7 @@ export function MultiSearchableSelect({
 
       {isOpen && (
         <div
-          className={`absolute left-0 mt-1 w-72 rounded-xl border border-slate-700/80 bg-slate-900 p-2.5 shadow-2xl z-50 focus:outline-none ${dropdownClassName}`}
+          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} mt-1 w-72 rounded-xl border border-slate-700/80 bg-slate-900 p-2.5 shadow-2xl z-50 focus:outline-none ${dropdownClassName}`}
         >
           {/* Search Input */}
           <div className="relative mb-2">
@@ -143,14 +172,14 @@ export function MultiSearchableSelect({
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search / filter list..."
+              placeholder={placeholder}
               className="w-full rounded-lg bg-slate-950 border border-slate-800 py-1.5 pl-8 pr-7 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
             />
             {searchTerm && (
               <button
                 type="button"
                 onClick={() => setSearchTerm('')}
-                className="absolute right-2 top-2 text-slate-400 hover:text-white"
+                className="absolute right-2 top-2 text-slate-400 hover:text-white cursor-pointer"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -199,7 +228,10 @@ export function MultiSearchableSelect({
                 ) : (
                   <Square className="h-3.5 w-3.5 text-slate-500 shrink-0" />
                 )}
-                <span className="truncate">{allLabel}</span>
+                {allOption?.icon && (
+                  <span className="shrink-0 flex items-center">{allOption.icon}</span>
+                )}
+                <span className="truncate">{allOption?.label || allLabel}</span>
               </span>
               {isAllSelected && <span className="text-[9px] font-mono bg-indigo-500/20 text-indigo-300 px-1.5 py-0.2 rounded font-black">ACTIVE</span>}
             </button>
@@ -227,6 +259,9 @@ export function MultiSearchableSelect({
                         <CheckSquare className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
                       ) : (
                         <Square className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                      )}
+                      {opt.icon && (
+                        <span className="shrink-0 flex items-center">{opt.icon}</span>
                       )}
                       <span className="truncate">{opt.label}</span>
                     </span>

@@ -184,6 +184,13 @@ html.light, .light {
   color: #0f172a;
 }
 
+/* Auto-fit laptop viewports (e.g., 15.6" at 1280x720, 1366x768, 1536x864) cleanly at 100% browser zoom while keeping 27" (>=1720px) at strict 16px */
+@media (min-width: 1024px) and (max-width: 1719px) {
+  html {
+    font-size: clamp(12px, min(0.835vw, 1.74vh), 15px);
+  }
+}
+
 body {
   background-color: var(--color-slate-950);
   color: var(--color-slate-100);

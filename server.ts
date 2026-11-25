@@ -2,10 +2,11 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import dotenv from 'dotenv';
 import * as XLSX from 'xlsx';
 import cron from 'node-cron';
+import sharp from 'sharp';
 
 // Load environment variables
 dotenv.config();
@@ -22,9 +23,13 @@ import {
   saveCoordinators, 
   initializeCoordinatorsDatabase, 
   getJobs, 
-  saveJobs, 
+  saveJobs,
+  upsertSingleJob,
+  softDeleteJob,
+  restoreSingleJob,
   getUpdates, 
   saveUpdates, 
+  deleteUpdateById,
   getMetadata, 
   saveMetadata, 
   getWallets, 
@@ -33,6 +38,7 @@ import {
   addWalletTransaction, 
   deleteWalletTransaction,
   reconcileWalletsFromLeads,
+  ensureWalletIntegrityFromLeads,
   TEAM_ROLES,
   normalizeCoordUsername,
   createWalletSnapshot,
@@ -65,7 +71,8 @@ import {
   getNotifications,
   saveNotifications,
   mergeTasksList,
-  getDatabaseVersion
+  getDatabaseVersion,
+  getLeadChangesSince
 } from './src/server/db.ts';
 import type { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem, AppNotification } from './src/types.ts';
 import type { FullDatabaseBackup } from './src/server/db.ts';
@@ -76,6 +83,7 @@ import { computeSentinelOverview, askAiCopilot, getLeadSpecificAiSuggestions } f
 import compression from 'compression';
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(compression());
@@ -353,12 +361,10 @@ app.post('/api/upload', async (req, res) => {
     const filePath = path.join(UPLOADS_DIR, safeName);
     fs.writeFileSync(filePath, buffer);
 
-    // Guaranteed cloud backup to Firestore
-    try {
-      await backupFileToFirestore(safeName, filePath);
-    } catch (backupErr) {
+    // Non-blocking background cloud backup to Firestore (never block the HTTP upload response!)
+    backupFileToFirestore(safeName, filePath).catch(backupErr => {
       console.error(`[UploadSystem] Cloud backup trigger failed for ${safeName}:`, backupErr);
-    }
+    });
 
     const fileUrl = `/uploads/${safeName}`;
     console.log(`[UploadSystem] File uploaded & secured: ${safeName} (${buffer.length} bytes)`);
@@ -487,21 +493,29 @@ async function safeGenerateContent(
     config?: any;
   }
 ): Promise<any> {
+  const normalizedRequested =
+    params.model === 'gemini-3.5-flash' || params.model === 'gemini-3.8-flash' || params.model === 'gemini-2.5-flash'
+      ? 'gemini-4-hydrogen'
+      : params.model;
   const modelsToTry = [
-    params.model,
-    'gemini-3.8-flash',
-    'gemini-2.5-flash'
+    normalizedRequested,
+    'gemini-4-hydrogen',
+    'gemini-3.1-flash-lite'
   ];
   const uniqueModels = Array.from(new Set(modelsToTry.filter(Boolean)));
   let lastError: any = null;
 
   for (const modelAttempt of uniqueModels) {
     try {
+      const attemptConfig = params.config ? { ...params.config } : undefined;
+      if (modelAttempt === 'gemini-3.1-flash-lite' && attemptConfig?.thinkingConfig) {
+        attemptConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+      }
       console.log(`[Gemini API] Attempting generateContent with model: "${modelAttempt}"`);
       const response = await ai.models.generateContent({
         model: modelAttempt,
         contents: params.contents,
-        config: params.config
+        config: attemptConfig
       });
       console.log(`[Gemini API] Success using model: "${modelAttempt}"`);
       return response;
@@ -766,6 +780,84 @@ app.get('/api/backup/download-file', async (req, res) => {
   }
 });
 
+let cachedLeadMeta: {
+  version: number;
+  showDeleted: boolean;
+  meta: { countries: string[]; projects: string[]; positions: string[]; tags: string[] };
+} | null = null;
+
+function compactLeadMessages(msgs: Message[] = []): Message[] {
+  if (!Array.isArray(msgs) || msgs.length === 0) return [];
+  const realMsgs = msgs.filter(m => m && (!m.text || !m.text.includes('Lead enrolled manually in CGP system database')));
+  if (realMsgs.length === 0) return [];
+
+  let lastInbound: Message | null = null;
+  let lastOutbound: Message | null = null;
+  const unreadInbound: Message[] = [];
+
+  for (let i = 0; i < realMsgs.length; i++) {
+    const m = realMsgs[i];
+    if (m.sender === 'lead') {
+      lastInbound = m;
+      if (m.status !== 'read') unreadInbound.push(m);
+    } else {
+      lastOutbound = m;
+    }
+  }
+
+  const picked: Message[] = [];
+  const seen = new Set<Message>();
+  const addMsg = (m: Message | null) => {
+    if (m && !seen.has(m)) {
+      seen.add(m);
+      picked.push(m);
+    }
+  };
+
+  realMsgs.slice(-2).forEach(addMsg);
+  addMsg(lastInbound);
+  addMsg(lastOutbound);
+  unreadInbound.forEach(addMsg);
+
+  // Preserve chronological order and trim heavy media/caption bloat while preserving 24h window & unread badges
+  return realMsgs
+    .filter(m => seen.has(m))
+    .map(m => ({
+      id: m.id,
+      sender: m.sender,
+      text: typeof m.text === 'string' && m.text.length > 240 ? `${m.text.slice(0, 240)}...` : (m.text || ''),
+      timestamp: m.timestamp,
+      status: m.status,
+      ...(m.type ? { type: m.type } : {})
+    }));
+}
+
+function projectLeadForTab(l: Lead, activeTab: string, fullDetails: boolean) {
+  if (fullDetails) return l;
+  const {
+    cvTextContent: _cv,
+    deletedDocuments: _del,
+    summary: _sum,
+    nextAction: _na,
+    requirements: _req,
+    ...rest
+  } = l as any;
+
+  if (activeTab === 'analytics') {
+    return {
+      ...rest,
+      messages: compactLeadMessages(l.messages)
+    };
+  }
+
+  // Board / Spreadsheet / WhatsApp Chats list: omit megabytes of historical timelines until LeadModal opens
+  const { timeline: _tl, stageHistory: _sh, coordinatorHistory: _ch, ...leanRest } = rest;
+  return {
+    ...leanRest,
+    messages: compactLeadMessages(l.messages)
+  };
+}
+
 // GET all leads with server-side pagination, searching, and filtering
 app.get('/api/leads', async (req, res) => {
   try {
@@ -773,9 +865,11 @@ app.get('/api/leads', async (req, res) => {
     const showDeleted = req.query.showDeleted === 'true';
     const fullDetails = req.query.fullDetails === 'true';
 
-    // Fast HTTP 304 Not Modified validation: if CRM version hasn't changed, return 304 instantly with 0 bandwidth!
+    // Fast HTTP 304 Not Modified validation: include query parameters hash so different views don't collide
     const clientEtag = req.headers['if-none-match'];
-    const currentVer = `"${getDatabaseVersion()}"`;
+    const queryString = new URLSearchParams(req.query as Record<string, string>).toString();
+    const queryHash = Buffer.from(queryString).toString('base64url').slice(0, 16);
+    const currentVer = `"${getDatabaseVersion()}-${queryHash}"`;
     res.setHeader('ETag', currentVer);
     res.setHeader('Cache-Control', 'private, no-cache');
 
@@ -787,59 +881,67 @@ app.get('/api/leads', async (req, res) => {
       getLeads(forceRefresh),
       getCoordinators()
     ]);
-    rawLeads.forEach(lead => backfillLeadHistory(lead));
 
-    // 1. Compute dynamic metadata from all unfiltered active leads (excluding soft-deleted)
-    const countriesMap = new Map<string, string>(); // lowercase -> original casing
-    const projectsMap = new Map<string, string>();
-    const tagsMap = new Map<string, string>();
-    const positionsMap = new Map<string, string>();
+    const currentDbVer = getDatabaseVersion();
+    let meta: { countries: string[]; projects: string[]; positions: string[]; tags: string[] };
+    if (cachedLeadMeta && cachedLeadMeta.version === currentDbVer && cachedLeadMeta.showDeleted === showDeleted) {
+      meta = cachedLeadMeta.meta;
+    } else {
+      rawLeads.forEach(lead => backfillLeadHistory(lead));
 
-    rawLeads.forEach(l => {
-      if (!showDeleted && l.isDeleted) return;
-      if (showDeleted && !l.isDeleted) return;
+      // 1. Compute dynamic metadata from all unfiltered active leads (excluding soft-deleted)
+      const countriesMap = new Map<string, string>(); // lowercase -> original casing
+      const projectsMap = new Map<string, string>();
+      const tagsMap = new Map<string, string>();
+      const positionsMap = new Map<string, string>();
 
-      if (l.country && l.country.trim()) {
-        const trimmed = l.country.trim();
-        const lower = trimmed.toLowerCase();
-        // Prefer Title/Pascal casing over ALL-CAPS if both exist in the DB
-        if (!countriesMap.has(lower) || (trimmed !== trimmed.toUpperCase() && countriesMap.get(lower) === countriesMap.get(lower)?.toUpperCase())) {
-          countriesMap.set(lower, trimmed);
-        }
-      }
-      if (l.project && l.project.trim()) {
-        const trimmed = l.project.trim();
-        const lower = trimmed.toLowerCase();
-        if (!projectsMap.has(lower) || (trimmed !== trimmed.toUpperCase() && projectsMap.get(lower) === projectsMap.get(lower)?.toUpperCase())) {
-          projectsMap.set(lower, trimmed);
-        }
-      }
-      if (l.position && l.position.trim()) {
-        const trimmed = l.position.trim();
-        const lower = trimmed.toLowerCase();
-        if (!positionsMap.has(lower) || (trimmed !== trimmed.toUpperCase() && positionsMap.get(lower) === positionsMap.get(lower)?.toUpperCase())) {
-          positionsMap.set(lower, trimmed);
-        }
-      }
-      if (l.tags && Array.isArray(l.tags)) {
-        l.tags.forEach(t => {
-          if (t && t.trim()) {
-            const trimmed = t.trim();
-            const lower = trimmed.toLowerCase();
-            if (!tagsMap.has(lower) || (trimmed !== trimmed.toUpperCase() && tagsMap.get(lower) === tagsMap.get(lower)?.toUpperCase())) {
-              tagsMap.set(lower, trimmed);
-            }
+      rawLeads.forEach(l => {
+        if (!showDeleted && l.isDeleted) return;
+        if (showDeleted && !l.isDeleted) return;
+
+        if (l.country && l.country.trim()) {
+          const trimmed = l.country.trim();
+          const lower = trimmed.toLowerCase();
+          // Prefer Title/Pascal casing over ALL-CAPS if both exist in the DB
+          if (!countriesMap.has(lower) || (trimmed !== trimmed.toUpperCase() && countriesMap.get(lower) === countriesMap.get(lower)?.toUpperCase())) {
+            countriesMap.set(lower, trimmed);
           }
-        });
-      }
-    });
+        }
+        if (l.project && l.project.trim()) {
+          const trimmed = l.project.trim();
+          const lower = trimmed.toLowerCase();
+          if (!projectsMap.has(lower) || (trimmed !== trimmed.toUpperCase() && projectsMap.get(lower) === projectsMap.get(lower)?.toUpperCase())) {
+            projectsMap.set(lower, trimmed);
+          }
+        }
+        if (l.position && l.position.trim()) {
+          const trimmed = l.position.trim();
+          const lower = trimmed.toLowerCase();
+          if (!positionsMap.has(lower) || (trimmed !== trimmed.toUpperCase() && positionsMap.get(lower) === positionsMap.get(lower)?.toUpperCase())) {
+            positionsMap.set(lower, trimmed);
+          }
+        }
+        if (l.tags && Array.isArray(l.tags)) {
+          l.tags.forEach(t => {
+            if (t && t.trim()) {
+              const trimmed = t.trim();
+              const lower = trimmed.toLowerCase();
+              if (!tagsMap.has(lower) || (trimmed !== trimmed.toUpperCase() && tagsMap.get(lower) === tagsMap.get(lower)?.toUpperCase())) {
+                tagsMap.set(lower, trimmed);
+              }
+            }
+          });
+        }
+      });
 
-    const meta = {
-      countries: Array.from(countriesMap.values()).sort((a, b) => a.localeCompare(b)),
-      projects: Array.from(projectsMap.values()).sort((a, b) => a.localeCompare(b)),
-      positions: Array.from(positionsMap.values()).sort((a, b) => a.localeCompare(b)),
-      tags: Array.from(tagsMap.values()).sort((a, b) => a.localeCompare(b))
-    };
+      meta = {
+        countries: Array.from(countriesMap.values()).sort((a, b) => a.localeCompare(b)),
+        projects: Array.from(projectsMap.values()).sort((a, b) => a.localeCompare(b)),
+        positions: Array.from(positionsMap.values()).sort((a, b) => a.localeCompare(b)),
+        tags: Array.from(tagsMap.values()).sort((a, b) => a.localeCompare(b))
+      };
+      cachedLeadMeta = { version: currentDbVer, showDeleted, meta };
+    }
 
     // 2. Parse query parameters
     const {
@@ -868,6 +970,27 @@ app.get('/api/leads', async (req, res) => {
     const pageNum = parseInt(page, 10) || 1;
     const limitNum = parseInt(limit, 10) || 100;
 
+    const parseMultiParam = (val: unknown): string[] => {
+      if (!val) return [];
+      const arr = Array.isArray(val)
+        ? val.flatMap(v => String(v).split('||'))
+        : String(val).split('||');
+      return arr
+        .map(s => s.trim())
+        .filter(s => s !== '' && s.toLowerCase() !== 'all');
+    };
+
+    const countryFilters = parseMultiParam(country);
+    const projectFilters = parseMultiParam(project);
+    const positionFilters = parseMultiParam(position);
+    const fitScoreFilters = parseMultiParam(fitScore);
+    const tagFilters = parseMultiParam(tag);
+    const coordinatorFilters = parseMultiParam(coordinator);
+    const stageFilters = parseMultiParam(stage);
+    const dateFilters = parseMultiParam(dateFilter);
+    const genderFilters = parseMultiParam(gender);
+    const remarksFilters = parseMultiParam(remarksFilter);
+
     // 3. Apply multi-layer filters
     let filteredLeads = rawLeads.filter(lead => {
       // Filter by deletion status
@@ -878,10 +1001,10 @@ app.get('/api/leads', async (req, res) => {
         return false;
       }
 
-      // Filter out unassigned leads in stage 'new' (Requesting chats in WhatsApp menu)
-      // OR leads that have not been intaken yet (intake === false)
-      // unless we are specifically inside the 'messages' (WhatsApp Chats) tab view or actively searching!
-      if (activeTab !== 'messages' && !search) {
+      // Filter out un-intaken leads ONLY when doing paginated server-side spreadsheet retrieval (all !== 'true')
+      // Client views (LeadBoard, LeadList) already handle client-side filtering for intake candidates.
+      // This ensures full CRM client state has access to unassigned/requesting inbound WhatsApp leads.
+      if (all !== 'true' && activeTab !== 'messages' && !search) {
         if (!getEffectiveIntake(lead)) {
           return false;
         }
@@ -913,142 +1036,148 @@ app.get('/api/leads', async (req, res) => {
         if (!matchesSearch) return false;
       }
 
-      // C. Country Interest filter
-      if (country && country !== 'All') {
-        if (!lead.country || lead.country.trim().toLowerCase() !== country.trim().toLowerCase()) return false;
+      // C. Country Interest multi-select filter
+      if (countryFilters.length > 0) {
+        if (!lead.country || !countryFilters.some(cf => lead.country!.trim().toLowerCase() === cf.toLowerCase())) {
+          return false;
+        }
       }
 
-      // D. Project filter
-      if (project && project !== 'All') {
-        if (!lead.project || lead.project.trim().toLowerCase() !== project.trim().toLowerCase()) return false;
+      // D. Project multi-select filter
+      if (projectFilters.length > 0) {
+        if (!lead.project || !projectFilters.some(pf => lead.project!.trim().toLowerCase() === pf.toLowerCase())) {
+          return false;
+        }
       }
 
-      // D.5 Target Job Position filter
-      if (position && position !== 'All') {
-        if (!lead.position || lead.position.trim().toLowerCase() !== position.trim().toLowerCase()) return false;
+      // D.5 Target Job Position multi-select filter
+      if (positionFilters.length > 0) {
+        if (!lead.position || !positionFilters.some(pf => lead.position!.trim().toLowerCase() === pf.toLowerCase())) {
+          return false;
+        }
       }
 
-      // E. Fit score filter
-      if (fitScore && fitScore !== 'All') {
-        if (!lead.fitScore || lead.fitScore.trim().toLowerCase() !== fitScore.trim().toLowerCase()) return false;
+      // E. Fit score multi-select filter
+      if (fitScoreFilters.length > 0) {
+        if (!lead.fitScore || !fitScoreFilters.some(ff => lead.fitScore!.trim().toLowerCase() === ff.toLowerCase())) {
+          return false;
+        }
       }
 
-      // F. Tag filter
-      if (tag && tag !== 'All') {
-        if (!lead.tags || !lead.tags.some(t => t.trim().toLowerCase() === tag.trim().toLowerCase())) return false;
+      // F. Tag multi-select filter
+      if (tagFilters.length > 0) {
+        if (!lead.tags || !tagFilters.some(tf => lead.tags!.some(t => t.trim().toLowerCase() === tf.toLowerCase()))) {
+          return false;
+        }
       }
 
-      // G. Coordinator / Telecaller filter
-      if (coordinator && coordinator !== 'All') {
-        if (!isCoordinatorMatch(lead.assignedTo, coordinator, coordinators)) return false;
+      // G. Coordinator / Telecaller multi-select filter
+      if (coordinatorFilters.length > 0) {
+        if (!coordinatorFilters.some(cf => isCoordinatorMatch(lead.assignedTo, cf, coordinators))) {
+          return false;
+        }
       }
 
-      // H. Pipeline Stage filter
-      if (stage && stage !== 'All') {
-        if (lead.stage !== stage) return false;
+      // H. Pipeline Stage multi-select filter (with legacy alias support)
+      if (stageFilters.length > 0) {
+        const s = lead.stage || 'new';
+        const matchesStage = stageFilters.some(sf => {
+          if (sf === 'negotiating' || sf === 'in_discussion') {
+            return s === 'negotiating' || s === 'in_discussion';
+          }
+          if (sf === 'office_visited' || sf === 'proposal') {
+            return s === 'office_visited' || s === 'proposal';
+          }
+          if (sf === 'cold_leads' || sf === 'rotations') {
+            return s === 'cold_leads' || s === 'rotations';
+          }
+          return s === sf;
+        });
+        if (!matchesStage) return false;
       }
 
-      // I. Date wise filter
-      if (dateFilter && dateFilter !== 'All') {
+      // I. Date wise multi-select filter
+      if (dateFilters.length > 0) {
         const leadTime = new Date(lead.createdAt).getTime();
-        if (isNaN(leadTime)) return true; // fallback to include
+        if (!isNaN(leadTime)) {
+          const startOfDay = (d: Date) => {
+            const r = new Date(d);
+            r.setHours(0, 0, 0, 0);
+            return r.getTime();
+          };
+          const endOfDay = (d: Date) => {
+            const r = new Date(d);
+            r.setHours(23, 59, 59, 999);
+            return r.getTime();
+          };
 
-        const startOfDay = (d: Date) => {
-          const r = new Date(d);
-          r.setHours(0, 0, 0, 0);
-          return r.getTime();
-        };
-        const endOfDay = (d: Date) => {
-          const r = new Date(d);
-          r.setHours(23, 59, 59, 999);
-          return r.getTime();
-        };
-
-        const today = new Date();
-        if (dateFilter === 'Today') {
-          const start = startOfDay(today);
-          const end = endOfDay(today);
-          if (leadTime < start || leadTime > end) return false;
-        } else if (dateFilter === 'Yesterday') {
-          const yesterday = new Date();
-          yesterday.setDate(today.getDate() - 1);
-          const start = startOfDay(yesterday);
-          const end = endOfDay(yesterday);
-          if (leadTime < start || leadTime > end) return false;
-        } else if (dateFilter === 'Last7Days') {
-          const sevenDaysAgo = new Date();
-          sevenDaysAgo.setDate(today.getDate() - 7);
-          const start = startOfDay(sevenDaysAgo);
-          const end = endOfDay(today);
-          if (leadTime < start || leadTime > end) return false;
-        } else if (dateFilter === 'Last30Days') {
-          const thirtyDaysAgo = new Date();
-          thirtyDaysAgo.setDate(today.getDate() - 30);
-          const start = startOfDay(thirtyDaysAgo);
-          const end = endOfDay(today);
-          if (leadTime < start || leadTime > end) return false;
-        } else if (dateFilter === 'Custom') {
-          const start = customStartDate ? startOfDay(new Date(customStartDate)) : 0;
-          const end = customEndDate ? endOfDay(new Date(customEndDate)) : Infinity;
-          if (leadTime < start || leadTime > end) return false;
+          const today = new Date();
+          const matchesAnyDate = dateFilters.some(df => {
+            if (df === 'Today') {
+              return leadTime >= startOfDay(today) && leadTime <= endOfDay(today);
+            } else if (df === 'Yesterday') {
+              const yesterday = new Date();
+              yesterday.setDate(today.getDate() - 1);
+              return leadTime >= startOfDay(yesterday) && leadTime <= endOfDay(yesterday);
+            } else if (df === 'Last7Days') {
+              const sevenDaysAgo = new Date();
+              sevenDaysAgo.setDate(today.getDate() - 7);
+              return leadTime >= startOfDay(sevenDaysAgo) && leadTime <= endOfDay(today);
+            } else if (df === 'Last30Days') {
+              const thirtyDaysAgo = new Date();
+              thirtyDaysAgo.setDate(today.getDate() - 30);
+              return leadTime >= startOfDay(thirtyDaysAgo) && leadTime <= endOfDay(today);
+            } else if (df === 'Custom') {
+              const start = customStartDate ? startOfDay(new Date(customStartDate)) : 0;
+              const end = customEndDate ? endOfDay(new Date(customEndDate)) : Infinity;
+              return leadTime >= start && leadTime <= end;
+            }
+            return true;
+          });
+          if (!matchesAnyDate) return false;
         }
       }
 
-      // J. Gender-wise filter
-      if (gender && gender !== 'All') {
+      // J. Gender-wise multi-select filter
+      if (genderFilters.length > 0) {
         const g = String(lead.gender || '').toUpperCase().trim();
-        const filterG = String(gender).toUpperCase().trim();
-        if (filterG === 'MALE' || filterG === 'M') {
-          if (g !== 'M' && g !== 'MALE') return false;
-        } else if (filterG === 'FEMALE' || filterG === 'F') {
-          if (g !== 'F' && g !== 'FEMALE') return false;
-        }
+        const matchesGender = genderFilters.some(gf => {
+          const filterG = String(gf).toUpperCase().trim();
+          if (filterG === 'MALE' || filterG === 'M') {
+            return g === 'M' || g === 'MALE';
+          } else if (filterG === 'FEMALE' || filterG === 'F') {
+            return g === 'F' || g === 'FEMALE';
+          }
+          return g === filterG;
+        });
+        if (!matchesGender) return false;
       }
 
-      // K. Remarks-wise filter
-      if (remarksFilter && remarksFilter !== 'All') {
+      // K. Remarks-wise multi-select filter
+      if (remarksFilters.length > 0) {
         const r1 = !!(lead.remarks1 && lead.remarks1.trim());
         const r2 = !!(lead.remarks2 && lead.remarks2.trim());
         const r3 = !!(lead.remarks3 && lead.remarks3.trim());
 
-        if (remarksFilter === 'remarks1') {
-          if (!r1) return false;
-        } else if (remarksFilter === 'remarks2') {
-          if (!r2) return false;
-        } else if (remarksFilter === 'remarks3') {
-          if (!r3) return false;
-        } else if (remarksFilter === 'remarks1Only') {
-          if (!r1 || r2 || r3) return false;
-        } else if (remarksFilter === 'remarks2Only') {
-          if (!r2 || r1 || r3) return false;
-        } else if (remarksFilter === 'remarks3Only') {
-          if (!r3 || r1 || r2) return false;
-        } else if (remarksFilter === 'noRemarks') {
-          if (r1 || r2 || r3) return false;
-        } else if (remarksFilter === 'allRemarks') {
-          if (!r1 || !r2 || !r3) return false;
-        }
+        const matchesRemarks = remarksFilters.some(rf => {
+          if (rf === 'remarks1') return r1;
+          if (rf === 'remarks2') return r2;
+          if (rf === 'remarks3') return r3;
+          if (rf === 'remarks1Only') return r1 && !r2 && !r3;
+          if (rf === 'remarks2Only') return r2 && !r1 && !r3;
+          if (rf === 'remarks3Only') return r3 && !r1 && !r2;
+          if (rf === 'noRemarks') return !r1 && !r2 && !r3;
+          if (rf === 'allRemarks') return r1 && r2 && r3;
+          return true;
+        });
+        if (!matchesRemarks) return false;
       }
 
       return true;
     });
 
     // Helper to produce fast, lightweight leads without megabytes of historical timeline clutter
-    const toLightweightLead = (l: Lead) => {
-      if (fullDetails) return l;
-      const { cvTextContent, ...rest } = l;
-      const msgs = l.messages || [];
-      const lastMsgs = msgs.slice(-2);
-      const unreadMsgs = msgs.filter(m => m.sender === 'lead' && m.status !== 'read');
-      const previewMsgs = Array.from(new Set([...lastMsgs, ...unreadMsgs]));
-      return {
-        ...rest,
-        messages: previewMsgs,
-        timeline: (l.timeline || []).slice(-3),
-        stageHistory: (l.stageHistory || []).slice(-2),
-        coordinatorHistory: (l.coordinatorHistory || []).slice(-2)
-      };
-    };
+    const toLightweightLead = (l: Lead) => projectLeadForTab(l, activeTab, fullDetails);
 
     // 4. Return complete or paginated payload
     if (all === 'true') {
@@ -1082,6 +1211,76 @@ app.get('/api/leads', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
+});
+
+// GET incremental delta changes since a known version (<1KB instead of multi-MB full reload)
+app.get('/api/leads/changes', async (req, res) => {
+  try {
+    const sinceVersion = Number(req.query.sinceVersion || 0);
+    const userRole = String(req.query.userRole || '');
+    const agentId = String(req.query.agentId || '');
+    const activeTab = String(req.query.activeTab || 'board');
+    const fullDetails = req.query.fullDetails === 'true';
+
+    const delta = getLeadChangesSince(sinceVersion);
+    if (delta.fullSyncRequired) {
+      return res.json({
+        version: delta.version,
+        fullSyncRequired: true,
+        changedLeads: [],
+        removedIds: []
+      });
+    }
+
+    if (delta.changedIds.length === 0) {
+      return res.json({
+        version: delta.version,
+        fullSyncRequired: false,
+        changedLeads: [],
+        removedIds: []
+      });
+    }
+
+    const [rawLeads, coordinators] = await Promise.all([
+      getLeads(),
+      getCoordinators()
+    ]);
+
+    const changedSet = new Set(delta.changedIds);
+    const changedLeads: any[] = [];
+    const removedIds: string[] = [];
+
+    for (const l of rawLeads) {
+      if (!changedSet.has(l.id)) continue;
+      if (l.isDeleted) {
+        removedIds.push(l.id);
+        continue;
+      }
+      if (userRole === 'agent' && !isCoordinatorMatch(l.assignedTo, agentId, coordinators)) {
+        removedIds.push(l.id);
+        continue;
+      }
+      changedLeads.push(projectLeadForTab(l, activeTab, fullDetails));
+    }
+
+    res.json({
+      version: delta.version,
+      fullSyncRequired: false,
+      changedLeads,
+      removedIds
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET ultra-lightweight database version check (<40 bytes) to eliminate polling bandwidth & Cloud Armor rate limits
+app.get('/api/sync/version', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store');
+  res.json({
+    version: getDatabaseVersion(),
+    timestamp: Date.now()
+  });
 });
 
 // POST manual lead creation (Admin power)
@@ -1926,9 +2125,16 @@ app.post('/api/tasks/resolve-overdue', async (req, res) => {
 
 
 
-// GET statistics summary
+// GET statistics summary (ETag + 304 cached per version)
 app.get('/api/stats', async (req, res) => {
   try {
+    const etag = `"stats-${getDatabaseVersion()}"`;
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, no-cache');
+    if (req.headers['if-none-match'] === etag) {
+      res.status(304).end();
+      return;
+    }
     const stats = await getStats();
     res.json(stats);
   } catch (err) {
@@ -1936,7 +2142,7 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
-// GET single lead by ID
+// GET single lead by ID (with ETag & 304 support for high efficiency)
 app.get('/api/leads/:id', async (req, res) => {
   try {
     const lead = await getLeadById(req.params.id);
@@ -1944,6 +2150,17 @@ app.get('/api/leads/:id', async (req, res) => {
       res.status(404).json({ error: 'Lead not found' });
       return;
     }
+    const msgs = lead.messages || [];
+    const lastMsgTime = msgs.length > 0 ? (msgs[msgs.length - 1].timestamp || '') : '';
+    const etag = `"${lead.updatedAt || ''}_${msgs.length}_${lastMsgTime}"`;
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, no-cache');
+
+    if (req.headers['if-none-match'] === etag) {
+      res.status(304).end();
+      return;
+    }
+
     res.json(lead);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -2040,7 +2257,7 @@ async function awardWonIncentivesForLead(
   // Credit each beneficiary only if they do not already have an unreversed Won credit for this lead
   for (const b of beneficiaries) {
     try {
-      const wallet = await getWalletByUsername(b.username);
+      const wallet = await getWalletByUsername(b.username, true);
       const wonCredits = (wallet.transactions || []).filter(
         tx => tx.leadId === leadId && tx.type === 'credit' && (
           tx.reason.includes('Closed Won') || tx.reason.includes('Won Share') || tx.reason.includes('Override Bonus')
@@ -2082,7 +2299,7 @@ async function rollbackWonIncentivesForLead(
   actionReason: string
 ): Promise<void> {
   try {
-    const allWallets = await getWallets();
+    const allWallets = await getWallets(true);
     for (const w of allWallets) {
       const txs = w.transactions || [];
       const wonCredits = txs.filter(
@@ -2127,54 +2344,54 @@ app.put('/api/leads/:id', async (req, res) => {
       passportCopyUrl, passportCopyName, resumeUrl, resumeName, deletedDocuments,
       isBlocked, blockedReason, blockedBy, blockedAt
     } = req.body;
-    const leads = await getLeads();
-    let idx = leads.findIndex(l => l.id === req.params.id);
-    let lead = idx !== -1 ? { ...leads[idx] } : null;
 
-    if (!lead) {
-      const fallbackLead = await getLeadById(req.params.id);
-      if (fallbackLead) {
-        lead = { ...fallbackLead };
-        leads.push(fallbackLead);
-      } else {
-        res.status(404).json({ error: 'Lead not found in CRM database' });
-        return;
-      }
+    const leads = await getLeads();
+    const existingIdx = leads.findIndex(l => l.id === req.params.id);
+    const snapshotLead = existingIdx !== -1 ? { ...leads[existingIdx] } : await getLeadById(req.params.id);
+
+    if (!snapshotLead) {
+      res.status(404).json({ error: 'Lead not found in CRM database' });
+      return;
     }
 
     // Strict duplicate phone validation ONLY against active leads if phone or alternateNo is actually being changed to a new number
-    if (phone && (!lead.phone || !arePhonesMatching(lead.phone, phone))) {
+    if (phone && (!snapshotLead.phone || !arePhonesMatching(snapshotLead.phone, phone))) {
       const dup = leads.find(l => !l.isDeleted && l.id !== req.params.id && (arePhonesMatching(l.phone, phone) || (l.alternateNo && arePhonesMatching(l.alternateNo, phone))));
       if (dup) {
         res.status(400).json({ error: `Phone number already exists in CRM (Duplicate number detected: matches lead ${dup.serialNo || dup.id} - ${dup.name})` });
         return;
       }
     }
-    if (alternateNo && (!lead.alternateNo || !arePhonesMatching(lead.alternateNo, alternateNo))) {
+    if (alternateNo && (!snapshotLead.alternateNo || !arePhonesMatching(snapshotLead.alternateNo, alternateNo))) {
       const dup = leads.find(l => !l.isDeleted && l.id !== req.params.id && (arePhonesMatching(l.phone, alternateNo) || (l.alternateNo && arePhonesMatching(l.alternateNo, alternateNo))));
       if (dup) {
         res.status(400).json({ error: `Alternate phone number already exists in CRM (Duplicate number detected: matches lead ${dup.serialNo || dup.id} - ${dup.name})` });
         return;
       }
     }
-    const isNewResumeUploaded = !!(resumeUrl && resumeUrl.trim() !== '' && resumeUrl !== lead.resumeUrl);
+    const isNewResumeUploaded = !!(resumeUrl && resumeUrl.trim() !== '' && resumeUrl !== snapshotLead.resumeUrl);
+
+    let nextDocOfficeVisitedAt = snapshotLead.docOfficeVisitedAt;
+    let shouldUpdateOfficeVisitedAt = false;
+    let nextDocInterviewAttendedAt = snapshotLead.docInterviewAttendedAt;
+    let shouldUpdateInterviewAttendedAt = false;
 
     // Check wallet incentive triggers
-    const coordinatorToIncentivize = assignedTo !== undefined ? assignedTo : lead.assignedTo;
+    const coordinatorToIncentivize = assignedTo !== undefined ? assignedTo : snapshotLead.assignedTo;
     if (coordinatorToIncentivize) {
       const cleanCoord = String(coordinatorToIncentivize).trim().toLowerCase();
-      const prevCoord = lead.assignedTo ? String(lead.assignedTo).trim().toLowerCase() : cleanCoord;
+      const prevCoord = snapshotLead.assignedTo ? String(snapshotLead.assignedTo).trim().toLowerCase() : cleanCoord;
       
       // 1. Closed Won Trigger
-      const isClosedWonTransition = (stage === 'won' && lead.stage !== 'won');
+      const isClosedWonTransition = (stage === 'won' && snapshotLead.stage !== 'won');
       if (isClosedWonTransition) {
         try {
           await awardWonIncentivesForLead(
-            lead.id,
+            snapshotLead.id,
             coordinatorToIncentivize,
-            name || lead.name,
-            project !== undefined ? project : lead.project,
-            country !== undefined ? country : lead.country
+            name || snapshotLead.name,
+            project !== undefined ? project : snapshotLead.project,
+            country !== undefined ? country : snapshotLead.country
           );
         } catch (walletErr) {
           console.error('Failed to auto-credit Closed Won incentive:', walletErr);
@@ -2182,12 +2399,12 @@ app.put('/api/leads/:id', async (req, res) => {
       }
 
       // 2. Closed Won Reversal (Debit) Trigger
-      const isClosedWonReversal = (lead.stage === 'won' && stage !== undefined && stage !== 'won');
+      const isClosedWonReversal = (snapshotLead.stage === 'won' && stage !== undefined && stage !== 'won');
       if (isClosedWonReversal) {
         try {
           await rollbackWonIncentivesForLead(
-            lead.id,
-            name || lead.name,
+            snapshotLead.id,
+            name || snapshotLead.name,
             `moved to ${stage}`
           );
         } catch (walletErr) {
@@ -2197,7 +2414,7 @@ app.put('/api/leads/:id', async (req, res) => {
 
       // 2b. Won lead reassignment Trigger (Rollback previous team credits, award new team credits)
       const isWonReassignment = (
-        lead.stage === 'won' &&
+        snapshotLead.stage === 'won' &&
         (stage === undefined || stage === 'won') &&
         assignedTo !== undefined &&
         cleanCoord !== prevCoord
@@ -2205,16 +2422,16 @@ app.put('/api/leads/:id', async (req, res) => {
       if (isWonReassignment) {
         try {
           await rollbackWonIncentivesForLead(
-            lead.id,
-            name || lead.name,
+            snapshotLead.id,
+            name || snapshotLead.name,
             `reassigned from ${prevCoord} to ${cleanCoord}`
           );
           await awardWonIncentivesForLead(
-            lead.id,
+            snapshotLead.id,
             cleanCoord,
-            name || lead.name,
-            project !== undefined ? project : lead.project,
-            country !== undefined ? country : lead.country
+            name || snapshotLead.name,
+            project !== undefined ? project : snapshotLead.project,
+            country !== undefined ? country : snapshotLead.country
           );
         } catch (reassignErr) {
           console.error('Failed to reassign Won lead incentives:', reassignErr);
@@ -2222,27 +2439,30 @@ app.put('/api/leads/:id', async (req, res) => {
       }
 
       // 3. Office Visited Checkbox Trigger & Reversal (Independent INR 11)
-      const wasOfficeVisitedActive = !!lead.docOfficeVisited;
+      const wasOfficeVisitedActive = !!snapshotLead.docOfficeVisited;
       const isOfficeVisitedActiveNow = !!(
-        docOfficeVisited !== undefined ? docOfficeVisited : lead.docOfficeVisited
+        docOfficeVisited !== undefined ? docOfficeVisited : snapshotLead.docOfficeVisited
       );
 
       const isOfficeVisitedTransition = !wasOfficeVisitedActive && isOfficeVisitedActiveNow;
       const isOfficeVisitedReversal = wasOfficeVisitedActive && !isOfficeVisitedActiveNow;
 
       if (isOfficeVisitedTransition) {
+        nextDocOfficeVisitedAt = new Date().toISOString();
+        shouldUpdateOfficeVisitedAt = true;
         try {
-          const wallet = await getWalletByUsername(cleanCoord);
+          const wallet = await getWalletByUsername(cleanCoord, true);
           const alreadyCredited = (wallet.transactions || []).some(
-            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Office Visited Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
+            tx => tx.leadId === snapshotLead.id && tx.type === 'credit' && (tx.reason.includes('Office Visited Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
           );
           if (!alreadyCredited) {
             await addWalletTransaction(
               cleanCoord,
               'credit',
               11,
-              `Office Visited Incentive for candidate: ${name || lead.name}`,
-              lead.id
+              `Office Visited Incentive for candidate: ${name || snapshotLead.name}`,
+              snapshotLead.id,
+              { timestamp: nextDocOfficeVisitedAt }
             );
           }
         } catch (walletErr) {
@@ -2251,21 +2471,23 @@ app.put('/api/leads/:id', async (req, res) => {
       }
 
       if (isOfficeVisitedReversal) {
+        nextDocOfficeVisitedAt = undefined;
+        shouldUpdateOfficeVisitedAt = true;
         try {
-          const wallet = await getWalletByUsername(prevCoord);
+          const wallet = await getWalletByUsername(prevCoord, true);
           const creditsForLead = (wallet.transactions || []).filter(
-            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Office Visited Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
+            tx => tx.leadId === snapshotLead.id && tx.type === 'credit' && (tx.reason.includes('Office Visited Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
           );
           const reversalsForLead = (wallet.transactions || []).filter(
-            tx => tx.leadId === lead.id && tx.type === 'debit' && (tx.reason.includes('Reversal: Office Visited Incentive') || tx.reason.includes('Reversal: Interview Attended / Office Visited milestone removed'))
+            tx => tx.leadId === snapshotLead.id && tx.type === 'debit' && (tx.reason.includes('Reversal: Office Visited Incentive') || tx.reason.includes('Reversal: Interview Attended / Office Visited milestone removed'))
           );
           if (creditsForLead.length > reversalsForLead.length && prevCoord !== 'priya') {
             await addWalletTransaction(
               prevCoord,
               'debit',
               11,
-              `Reversal: Office Visited Incentive removed. Candidate: ${name || lead.name}`,
-              lead.id
+              `Reversal: Office Visited Incentive removed. Candidate: ${name || snapshotLead.name}`,
+              snapshotLead.id
             );
           }
         } catch (walletErr) {
@@ -2274,27 +2496,30 @@ app.put('/api/leads/:id', async (req, res) => {
       }
 
       // 3b. Interview Attended Checkbox Trigger & Reversal (Independent INR 11)
-      const wasInterviewAttendedActive = !!lead.docInterviewAttended;
+      const wasInterviewAttendedActive = !!snapshotLead.docInterviewAttended;
       const isInterviewAttendedActiveNow = !!(
-        docInterviewAttended !== undefined ? docInterviewAttended : lead.docInterviewAttended
+        docInterviewAttended !== undefined ? docInterviewAttended : snapshotLead.docInterviewAttended
       );
 
       const isInterviewAttendedTransition = !wasInterviewAttendedActive && isInterviewAttendedActiveNow;
       const isInterviewAttendedReversal = wasInterviewAttendedActive && !isInterviewAttendedActiveNow;
 
       if (isInterviewAttendedTransition) {
+        nextDocInterviewAttendedAt = new Date().toISOString();
+        shouldUpdateInterviewAttendedAt = true;
         try {
-          const wallet = await getWalletByUsername(cleanCoord);
+          const wallet = await getWalletByUsername(cleanCoord, true);
           const alreadyCredited = (wallet.transactions || []).some(
-            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Interview Attended Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
+            tx => tx.leadId === snapshotLead.id && tx.type === 'credit' && (tx.reason.includes('Interview Attended Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
           );
           if (!alreadyCredited) {
             await addWalletTransaction(
               cleanCoord,
               'credit',
               11,
-              `Interview Attended Incentive for candidate: ${name || lead.name}`,
-              lead.id
+              `Interview Attended Incentive for candidate: ${name || snapshotLead.name}`,
+              snapshotLead.id,
+              { timestamp: nextDocInterviewAttendedAt }
             );
           }
         } catch (walletErr) {
@@ -2303,21 +2528,23 @@ app.put('/api/leads/:id', async (req, res) => {
       }
 
       if (isInterviewAttendedReversal) {
+        nextDocInterviewAttendedAt = undefined;
+        shouldUpdateInterviewAttendedAt = true;
         try {
-          const wallet = await getWalletByUsername(prevCoord);
+          const wallet = await getWalletByUsername(prevCoord, true);
           const creditsForLead = (wallet.transactions || []).filter(
-            tx => tx.leadId === lead.id && tx.type === 'credit' && (tx.reason.includes('Interview Attended Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
+            tx => tx.leadId === snapshotLead.id && tx.type === 'credit' && (tx.reason.includes('Interview Attended Incentive') || tx.reason.includes('Interview Attended / Office Visited incentive'))
           );
           const reversalsForLead = (wallet.transactions || []).filter(
-            tx => tx.leadId === lead.id && tx.type === 'debit' && (tx.reason.includes('Reversal: Interview Attended Incentive') || tx.reason.includes('Reversal: Interview Attended / Office Visited milestone removed'))
+            tx => tx.leadId === snapshotLead.id && tx.type === 'debit' && (tx.reason.includes('Reversal: Interview Attended Incentive') || tx.reason.includes('Reversal: Interview Attended / Office Visited milestone removed'))
           );
           if (creditsForLead.length > reversalsForLead.length && prevCoord !== 'priya') {
             await addWalletTransaction(
               prevCoord,
               'debit',
               11,
-              `Reversal: Interview Attended Incentive removed. Candidate: ${name || lead.name}`,
-              lead.id
+              `Reversal: Interview Attended Incentive removed. Candidate: ${name || snapshotLead.name}`,
+              snapshotLead.id
             );
           }
         } catch (walletErr) {
@@ -2325,289 +2552,326 @@ app.put('/api/leads/:id', async (req, res) => {
         }
       }
     }
-    
-    // Ensure lists exist
-    if (!lead.timeline) lead.timeline = [];
-    if (!lead.tasks) lead.tasks = [];
-    if (!lead.stageHistory) lead.stageHistory = [];
-    if (!lead.coordinatorHistory) lead.coordinatorHistory = [];
 
-    // Actor context
+    const clearedRemarksList: string[] | null = Array.isArray(req.body.clearedRemarks) ? req.body.clearedRemarks : null;
+    const canClearField = (field: string): boolean => {
+      if (clearedRemarksList) return clearedRemarksList.includes(field);
+      return req.body.allowClearRemarks === true;
+    };
+
     const actorRole = req.headers['x-user-role'] || 'user';
-    const rawAgentId = (req.headers['x-agent-id'] as string) || lead.assignedTo || 'System';
-    const cleanAgent = String(rawAgentId).trim().toUpperCase();
-    const actor = actorRole === 'admin'
-      ? (cleanAgent && cleanAgent !== 'UNASSIGNED' && !cleanAgent.includes('ADMIN') ? `Admin (${cleanAgent})` : 'Administrator')
-      : `Coordinator ${cleanAgent || 'UNASSIGNED'}`;
+    const rawAgentIdHeader = (req.headers['x-agent-id'] as string) || '';
 
-    // Log Stage transitions
-    if (stage !== undefined && lead.stage !== stage) {
-      const fromLabel = getStageLabel(lead.stage);
-      const toLabel = getStageLabel(stage);
-      lead.timeline.push({
-        id: `tl_${Date.now()}_stage`,
-        type: 'status',
-        text: `Pipeline stage changed from "${fromLabel}" to "${toLabel}"`,
-        actor,
-        timestamp: new Date().toISOString()
-      });
+    // Perform all field mutations atomically on the freshest `current` record inside dbMutex.run
+    const savedLead = await updateSingleLead(req.params.id, (current) => {
+      const lead = { ...current };
 
-      lead.stageHistory.push({
-        candidateId: lead.id,
-        previousStage: lead.stage,
-        newStage: stage as LeadStage,
-        changedBy: actor,
-        coordinatorId: lead.assignedTo || 'unassigned',
-        changedAt: new Date().toISOString(),
-        project: lead.project || project || 'General',
-        country: lead.country || country || 'Unknown'
-      });
-
-      lead.stage = stage as LeadStage;
-    }
-
-    // Log Coordinator assignments
-    let isAssignDateSetByServer = false;
-    if (assignedTo !== undefined && lead.assignedTo !== assignedTo) {
-      const isFromWa = assignedFrom === 'whatsapp_chat_menu' || req.headers['x-assigned-from'] === 'whatsapp_chat_menu';
-      const suffix = isFromWa ? ' via WhatsApp Chat Menu' : '';
-      lead.timeline.push({
-        id: `tl_${Date.now()}_assign`,
-        type: 'assignment',
-        text: `Assigned coordinator changed from "${lead.assignedTo || 'Unassigned'}" to "${assignedTo || 'Unassigned'}"${suffix}`,
-        actor,
-        timestamp: new Date().toISOString()
-      });
-
-      lead.coordinatorHistory.push({
-        candidateId: lead.id,
-        previousCoordinator: lead.assignedTo || 'unassigned',
-        newCoordinator: assignedTo || 'unassigned',
-        changedBy: actor,
-        changedAt: new Date().toISOString()
-      });
-
-      lead.assignedTo = assignedTo;
-      lead.assignDate = new Date().toISOString().split('T')[0];
-      isAssignDateSetByServer = true;
-      if (isFromWa) {
-        lead.assignedFrom = 'whatsapp_chat_menu';
+      if (shouldUpdateOfficeVisitedAt) {
+        lead.docOfficeVisitedAt = nextDocOfficeVisitedAt;
+      }
+      if (shouldUpdateInterviewAttendedAt) {
+        lead.docInterviewAttendedAt = nextDocInterviewAttendedAt;
       }
 
-      // Automatically set intake to true and generate serialNo when assigned to a real coordinator
-      const hasRealCoordinator = assignedTo && assignedTo.trim() !== '' && assignedTo.toLowerCase() !== 'unassigned' && assignedTo.toLowerCase() !== 'all';
-      if (hasRealCoordinator) {
-        lead.intake = true;
-        if (!lead.serialNo) {
-          const sequence = leads.filter(l => l.intake && l.serialNo).length + 1;
-          lead.serialNo = `INQ-${1000 + sequence}`;
-        }
-      }
-    }
+      // Ensure lists exist (preserving any concurrent timeline/messages added during awaits)
+      lead.timeline = Array.isArray(lead.timeline) ? [...lead.timeline] : [];
+      lead.tasks = Array.isArray(lead.tasks) ? [...lead.tasks] : [];
+      lead.stageHistory = Array.isArray(lead.stageHistory) ? [...lead.stageHistory] : [];
+      lead.coordinatorHistory = Array.isArray(lead.coordinatorHistory) ? [...lead.coordinatorHistory] : [];
 
-    // Auto-move stage from 'new' (New Inbound) to 'negotiating' (In Discussion) when the 1'st remark is logged
-    if (lead.stage === 'new') {
-      const isAddingRemark = 
-        (remarks1 !== undefined && remarks1.trim() !== '' && !lead.remarks1) ||
-        (remarks2 !== undefined && remarks2.trim() !== '' && !lead.remarks2) ||
-        (remarks3 !== undefined && remarks3.trim() !== '' && !lead.remarks3);
-      if (isAddingRemark) {
+      const rawAgentId = rawAgentIdHeader || lead.assignedTo || 'System';
+      const cleanAgent = String(rawAgentId).trim().toUpperCase();
+      const actor = actorRole === 'admin'
+        ? (cleanAgent && cleanAgent !== 'UNASSIGNED' && !cleanAgent.includes('ADMIN') ? `Admin (${cleanAgent})` : 'Administrator')
+        : `Coordinator ${cleanAgent || 'UNASSIGNED'}`;
+
+      // Log Stage transitions
+      if (stage !== undefined && lead.stage !== stage) {
+        const fromLabel = getStageLabel(lead.stage);
+        const toLabel = getStageLabel(stage);
+        lead.timeline.push({
+          id: `tl_${Date.now()}_stage`,
+          type: 'status',
+          text: `Pipeline stage changed from "${fromLabel}" to "${toLabel}"`,
+          actor,
+          timestamp: new Date().toISOString()
+        });
+
         lead.stageHistory.push({
           candidateId: lead.id,
-          previousStage: 'new',
-          newStage: 'negotiating' as LeadStage,
-          changedBy: 'System (Auto-Stage)',
+          previousStage: lead.stage,
+          newStage: stage as LeadStage,
+          changedBy: actor,
           coordinatorId: lead.assignedTo || 'unassigned',
           changedAt: new Date().toISOString(),
           project: lead.project || project || 'General',
           country: lead.country || country || 'Unknown'
         });
-        lead.stage = 'negotiating';
+
+        lead.stage = stage as LeadStage;
+      }
+
+      // Log Coordinator assignments
+      let isAssignDateSetByServer = false;
+      if (assignedTo !== undefined && lead.assignedTo !== assignedTo) {
+        const isFromWa = assignedFrom === 'whatsapp_chat_menu' || req.headers['x-assigned-from'] === 'whatsapp_chat_menu';
+        const suffix = isFromWa ? ' via WhatsApp Chat Menu' : '';
         lead.timeline.push({
-          id: `tl_${Date.now()}_auto_stage`,
-          type: 'status',
-          text: `Pipeline stage auto-moved to "In Discussion" due to first call remark logged`,
+          id: `tl_${Date.now()}_assign`,
+          type: 'assignment',
+          text: `Assigned coordinator changed from "${lead.assignedTo || 'Unassigned'}" to "${assignedTo || 'Unassigned'}"${suffix}`,
           actor,
           timestamp: new Date().toISOString()
         });
-      }
-    }
 
-    // Non-destructive Remarks Preservation: Never blank out remarks on empty inputs unless allowClearRemarks is true
-    if (remarks1 !== undefined) {
-      const cleanRem1 = String(remarks1).trim();
-      if (cleanRem1 !== '' || !lead.remarks1 || req.body.allowClearRemarks === true) {
-        if (lead.remarks1 !== cleanRem1) {
+        lead.coordinatorHistory.push({
+          candidateId: lead.id,
+          previousCoordinator: lead.assignedTo || 'unassigned',
+          newCoordinator: assignedTo || 'unassigned',
+          changedBy: actor,
+          changedAt: new Date().toISOString()
+        });
+
+        lead.assignedTo = assignedTo;
+        lead.assignDate = new Date().toISOString().split('T')[0];
+        isAssignDateSetByServer = true;
+        if (isFromWa) {
+          lead.assignedFrom = 'whatsapp_chat_menu';
+        }
+
+        // Automatically set intake to true and generate serialNo when assigned to a real coordinator
+        const hasRealCoordinator = assignedTo && assignedTo.trim() !== '' && assignedTo.toLowerCase() !== 'unassigned' && assignedTo.toLowerCase() !== 'all';
+        if (hasRealCoordinator) {
+          lead.intake = true;
+          if (!lead.serialNo) {
+            const sequence = leads.filter(l => l.intake && l.serialNo).length + 1;
+            lead.serialNo = `INQ-${1000 + sequence}`;
+          }
+        }
+      }
+
+      // Auto-move stage from 'new' (New Inbound) to 'negotiating' (In Discussion) when the 1'st remark is logged
+      if (lead.stage === 'new') {
+        const isAddingRemark = 
+          (remarks1 !== undefined && String(remarks1).trim() !== '' && !lead.remarks1) ||
+          (remarks2 !== undefined && String(remarks2).trim() !== '' && !lead.remarks2) ||
+          (remarks3 !== undefined && String(remarks3).trim() !== '' && !lead.remarks3);
+        if (isAddingRemark) {
+          lead.stageHistory.push({
+            candidateId: lead.id,
+            previousStage: 'new',
+            newStage: 'negotiating' as LeadStage,
+            changedBy: 'System (Auto-Stage)',
+            coordinatorId: lead.assignedTo || 'unassigned',
+            changedAt: new Date().toISOString(),
+            project: lead.project || project || 'General',
+            country: lead.country || country || 'Unknown'
+          });
+          lead.stage = 'negotiating';
           lead.timeline.push({
-            id: `tl_${Date.now()}_rem1`,
-            type: 'remark',
-            text: `Updated 1st Remarks: "${cleanRem1 || 'cleared'}"`,
+            id: `tl_${Date.now()}_auto_stage`,
+            type: 'status',
+            text: `Pipeline stage auto-moved to "In Discussion" due to first call remark logged`,
             actor,
             timestamp: new Date().toISOString()
           });
-          lead.remarks1 = cleanRem1;
         }
       }
-    }
-    if (remarks2 !== undefined) {
-      const cleanRem2 = String(remarks2).trim();
-      if (cleanRem2 !== '' || !lead.remarks2 || req.body.allowClearRemarks === true) {
-        if (lead.remarks2 !== cleanRem2) {
-          lead.timeline.push({
-            id: `tl_${Date.now()}_rem2`,
-            type: 'remark',
-            text: `Updated 2nd Remarks: "${cleanRem2 || 'cleared'}"`,
-            actor,
-            timestamp: new Date().toISOString()
-          });
-          lead.remarks2 = cleanRem2;
+
+      // Non-destructive Remarks Preservation: Never blank out remarks unless explicitly marked cleared by the user
+      if (remarks1 !== undefined) {
+        const cleanRem1 = String(remarks1).trim();
+        if (cleanRem1 !== '' || !lead.remarks1 || canClearField('remarks1')) {
+          if (lead.remarks1 !== cleanRem1) {
+            lead.timeline.push({
+              id: `tl_${Date.now()}_rem1`,
+              type: 'remark',
+              text: `Updated 1st Remarks: "${cleanRem1 || 'cleared'}"`,
+              actor,
+              timestamp: new Date().toISOString()
+            });
+            lead.remarks1 = cleanRem1;
+          }
         }
       }
-    }
-    if (remarks3 !== undefined) {
-      const cleanRem3 = String(remarks3).trim();
-      if (cleanRem3 !== '' || !lead.remarks3 || req.body.allowClearRemarks === true) {
-        if (lead.remarks3 !== cleanRem3) {
-          lead.timeline.push({
-            id: `tl_${Date.now()}_rem3`,
-            type: 'remark',
-            text: `Updated 3rd Remarks: "${cleanRem3 || 'cleared'}"`,
-            actor,
-            timestamp: new Date().toISOString()
-          });
-          lead.remarks3 = cleanRem3;
+      if (remarks2 !== undefined) {
+        const cleanRem2 = String(remarks2).trim();
+        if (cleanRem2 !== '' || !lead.remarks2 || canClearField('remarks2')) {
+          if (lead.remarks2 !== cleanRem2) {
+            lead.timeline.push({
+              id: `tl_${Date.now()}_rem2`,
+              type: 'remark',
+              text: `Updated 2nd Remarks: "${cleanRem2 || 'cleared'}"`,
+              actor,
+              timestamp: new Date().toISOString()
+            });
+            lead.remarks2 = cleanRem2;
+          }
         }
       }
-    }
-
-    if (adminRemarks !== undefined) {
-      const cleanAdminRem = String(adminRemarks).trim();
-      if (cleanAdminRem !== '' || !lead.adminRemarks || req.body.allowClearRemarks === true) {
-        if (lead.adminRemarks !== cleanAdminRem) {
-          lead.timeline.push({
-            id: `tl_${Date.now()}_adminrem`,
-            type: 'remark',
-            text: `Updated Admin Remarks: "${cleanAdminRem || 'cleared'}"`,
-            actor,
-            timestamp: new Date().toISOString()
-          });
-          lead.adminRemarks = cleanAdminRem;
+      if (remarks3 !== undefined) {
+        const cleanRem3 = String(remarks3).trim();
+        if (cleanRem3 !== '' || !lead.remarks3 || canClearField('remarks3')) {
+          if (lead.remarks3 !== cleanRem3) {
+            lead.timeline.push({
+              id: `tl_${Date.now()}_rem3`,
+              type: 'remark',
+              text: `Updated 3rd Remarks: "${cleanRem3 || 'cleared'}"`,
+              actor,
+              timestamp: new Date().toISOString()
+            });
+            lead.remarks3 = cleanRem3;
+          }
         }
       }
-    }
 
-    if (callConnected !== undefined && lead.callConnected !== callConnected) {
-      const connLabel = callConnected === 'connected' ? 'Connected 💬' : 'Not Connected ❌';
-      lead.timeline.push({
-        id: `tl_${Date.now()}_call`,
-        type: 'remark',
-        text: `Call Status updated: "${connLabel}"`,
-        actor,
-        timestamp: new Date().toISOString()
-      });
-      lead.callConnected = callConnected;
-    }
-
-    // Standard fields
-    if (notes !== undefined) {
-      const cleanNotes = String(notes).trim();
-      if (cleanNotes !== '' || !lead.notes || req.body.allowClearRemarks === true) {
-        lead.notes = cleanNotes;
+      if (adminRemarks !== undefined) {
+        const cleanAdminRem = String(adminRemarks).trim();
+        const wasPlaceholder = String(lead.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry';
+        if (cleanAdminRem !== '' || !lead.adminRemarks || canClearField('adminRemarks') || wasPlaceholder) {
+          if (lead.adminRemarks !== cleanAdminRem) {
+            lead.timeline.push({
+              id: `tl_${Date.now()}_adminrem`,
+              type: 'remark',
+              text: `Updated Admin Remarks: "${cleanAdminRem || 'cleared'}"`,
+              actor,
+              timestamp: new Date().toISOString()
+            });
+            lead.adminRemarks = cleanAdminRem;
+          }
+        }
       }
-    }
-    if (name !== undefined) lead.name = name;
-    if (phone !== undefined) lead.phone = phone;
-    if (email !== undefined) lead.email = email;
-    if (budget !== undefined) lead.budget = Number(budget);
-    if (fitScore !== undefined) lead.fitScore = fitScore as FitScore;
-    if (campaign !== undefined) lead.campaign = campaign;
-    if (assignedFrom !== undefined) lead.assignedFrom = assignedFrom;
 
-    // Career Growth Placement Custom Attributes
-    if (alternateNo !== undefined) lead.alternateNo = alternateNo;
-    if (serialNo !== undefined) lead.serialNo = serialNo;
-    if (entryDate !== undefined) lead.entryDate = entryDate;
-    if (assignDate !== undefined && !isAssignDateSetByServer) lead.assignDate = assignDate;
-    if (gender !== undefined) lead.gender = gender;
-    if (age !== undefined) lead.age = age;
-    if (origin !== undefined) lead.origin = origin;
-    if (country !== undefined) lead.country = country;
-    if (position !== undefined) lead.position = position;
-    if (experience !== undefined) lead.experience = experience;
-    if (qualification !== undefined) lead.qualification = qualification;
-    if (importance !== undefined) lead.importance = Number(importance);
-    if (source !== undefined) lead.source = source;
-    if (project !== undefined) lead.project = project;
-    if (callConnected !== undefined) lead.callConnected = callConnected;
-
-    // Document received status flags
-    if (docPassportCopy !== undefined) lead.docPassportCopy = Boolean(docPassportCopy);
-    if (passportCopyUrl !== undefined) lead.passportCopyUrl = passportCopyUrl;
-    if (passportCopyName !== undefined) lead.passportCopyName = passportCopyName;
-    if (docResume !== undefined) lead.docResume = Boolean(docResume);
-    if (resumeUrl !== undefined) lead.resumeUrl = resumeUrl;
-    if (resumeName !== undefined) lead.resumeName = resumeName;
-    if (deletedDocuments !== undefined) lead.deletedDocuments = deletedDocuments;
-    if (docOfficeVisited !== undefined) lead.docOfficeVisited = Boolean(docOfficeVisited);
-    if (docOthers !== undefined) lead.docOthers = Boolean(docOthers);
-    if (docInterviewAttended !== undefined) lead.docInterviewAttended = Boolean(docInterviewAttended);
-    if (docEcrPassport !== undefined) lead.docEcrPassport = Boolean(docEcrPassport);
-    if (reminderEnabled !== undefined) lead.reminderEnabled = Boolean(reminderEnabled);
-    if (autoReplySent !== undefined) lead.autoReplySent = Boolean(autoReplySent);
-    if (intake !== undefined) {
-      lead.intake = Boolean(intake);
-      if (Boolean(intake) && !lead.serialNo) {
-        const sequence = leads.filter(l => l.intake && l.serialNo).length + 1;
-        lead.serialNo = `INQ-${1000 + sequence}`;
+      if (callConnected !== undefined && lead.callConnected !== callConnected) {
+        const connLabel = callConnected === 'connected' ? 'Connected 💬' : 'Not Connected ❌';
+        lead.timeline.push({
+          id: `tl_${Date.now()}_call`,
+          type: 'remark',
+          text: `Call Status updated: "${connLabel}"`,
+          actor,
+          timestamp: new Date().toISOString()
+        });
+        lead.callConnected = callConnected;
       }
-    }
 
-    if (isBlocked !== undefined) {
-      lead.isBlocked = Boolean(isBlocked);
-      if (Boolean(isBlocked)) {
-        lead.blockedAt = blockedAt || new Date().toISOString();
-        lead.blockedReason = blockedReason || lead.blockedReason || 'No passport / Disqualified / Spam';
-        lead.blockedBy = blockedBy || lead.blockedBy || actor;
-      } else {
-        lead.blockedAt = undefined;
-        lead.blockedReason = undefined;
-        lead.blockedBy = undefined;
+      // Standard fields
+      if (notes !== undefined) {
+        const cleanNotes = String(notes).trim();
+        if (cleanNotes !== '' || !lead.notes || canClearField('notes')) {
+          lead.notes = cleanNotes;
+        }
       }
-    }
+      if (name !== undefined) lead.name = name;
+      if (phone !== undefined) lead.phone = phone;
+      if (email !== undefined) lead.email = email;
+      if (budget !== undefined) lead.budget = Number(budget);
+      if (fitScore !== undefined) lead.fitScore = fitScore as FitScore;
+      if (campaign !== undefined) lead.campaign = campaign;
+      if (assignedFrom !== undefined) lead.assignedFrom = assignedFrom;
 
-    // Direct overrides for tasks and custom timelines (non-destructive task merging)
-    if (tasks !== undefined && Array.isArray(tasks)) {
-      lead.tasks = mergeTasksList(lead.tasks || [], tasks);
-      if (lead.tasks.some(t => !t.completed)) {
-        lead.reminderEnabled = true;
+      // Career Growth Placement Custom Attributes
+      if (alternateNo !== undefined) lead.alternateNo = alternateNo;
+      if (serialNo !== undefined) lead.serialNo = serialNo;
+      if (entryDate !== undefined) lead.entryDate = entryDate;
+      if (assignDate !== undefined && !isAssignDateSetByServer) lead.assignDate = assignDate;
+      if (gender !== undefined) lead.gender = gender;
+      if (age !== undefined) lead.age = age;
+      if (origin !== undefined) lead.origin = origin;
+      if (country !== undefined) lead.country = country;
+      if (position !== undefined) lead.position = position;
+      if (experience !== undefined) lead.experience = experience;
+      if (qualification !== undefined) lead.qualification = qualification;
+      if (importance !== undefined) lead.importance = Number(importance);
+      if (source !== undefined) lead.source = source;
+      if (project !== undefined) lead.project = project;
+      if (callConnected !== undefined) lead.callConnected = callConnected;
+
+      // Document received status flags
+      if (docPassportCopy !== undefined) lead.docPassportCopy = Boolean(docPassportCopy);
+      if (passportCopyUrl !== undefined) lead.passportCopyUrl = passportCopyUrl;
+      if (passportCopyName !== undefined) lead.passportCopyName = passportCopyName;
+      if (docResume !== undefined) lead.docResume = Boolean(docResume);
+      if (resumeUrl !== undefined) lead.resumeUrl = resumeUrl;
+      if (resumeName !== undefined) lead.resumeName = resumeName;
+      if (deletedDocuments !== undefined) lead.deletedDocuments = deletedDocuments;
+      if (docOfficeVisited !== undefined) lead.docOfficeVisited = Boolean(docOfficeVisited);
+      if (docOthers !== undefined) lead.docOthers = Boolean(docOthers);
+      if (docInterviewAttended !== undefined) lead.docInterviewAttended = Boolean(docInterviewAttended);
+      if (docEcrPassport !== undefined) lead.docEcrPassport = Boolean(docEcrPassport);
+      if (reminderEnabled !== undefined) lead.reminderEnabled = Boolean(reminderEnabled);
+      if (autoReplySent !== undefined) lead.autoReplySent = Boolean(autoReplySent);
+      if (intake !== undefined) {
+        lead.intake = Boolean(intake);
+        if (Boolean(intake) && !lead.serialNo) {
+          const sequence = leads.filter(l => l.intake && l.serialNo).length + 1;
+          lead.serialNo = `INQ-${1000 + sequence}`;
+        }
       }
-    }
-    if (timeline !== undefined) lead.timeline = timeline;
-    if (tags !== undefined) lead.tags = tags;
 
-    // Auto-update experience from telecaller remarks if experience was not filled or is default
-    if (isDefaultExperience(lead.experience)) {
-      const autoExp = getEffectiveExperience(lead);
-      if (!isDefaultExperience(autoExp)) {
-        lead.experience = autoExp;
+      if (isBlocked !== undefined) {
+        lead.isBlocked = Boolean(isBlocked);
+        if (Boolean(isBlocked)) {
+          lead.blockedAt = blockedAt || new Date().toISOString();
+          lead.blockedReason = blockedReason || lead.blockedReason || 'No passport / Disqualified / Spam';
+          lead.blockedBy = blockedBy || lead.blockedBy || actor;
+        } else {
+          lead.blockedAt = undefined;
+          lead.blockedReason = undefined;
+          lead.blockedBy = undefined;
+        }
       }
-    }
 
-    // Self-healing fallback: Ensure leads with active coordinators always have a valid assignDate
-    if (lead.assignedTo && lead.assignedTo.trim() !== '' && lead.assignedTo.toLowerCase() !== 'unassigned' && (!lead.assignDate || lead.assignDate.trim() === '')) {
-      lead.assignDate = (lead.createdAt || new Date().toISOString()).split('T')[0];
-    }
+      // Direct overrides for tasks and custom timelines (non-destructive task merging)
+      if (tasks !== undefined && Array.isArray(tasks)) {
+        lead.tasks = mergeTasksList(lead.tasks || [], tasks);
+        if (lead.tasks.some(t => !t.completed)) {
+          lead.reminderEnabled = true;
+        }
+      }
+      if (timeline !== undefined && Array.isArray(timeline)) {
+        // Merge existing server timeline IDs with incoming custom events so concurrent remark logs aren't lost
+        const existingMap = new Map<string, any>();
+        lead.timeline.forEach(ev => {
+          if (ev && ev.id) existingMap.set(ev.id, ev);
+        });
+        timeline.forEach((ev: any) => {
+          if (ev && ev.id) existingMap.set(ev.id, ev);
+        });
+        lead.timeline = Array.from(existingMap.values()).sort(
+          (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
+        );
+      }
+      if (tags !== undefined) lead.tags = tags;
 
-    lead.updatedAt = new Date().toISOString();
-    const savedLead = await updateSingleLead(req.params.id, () => lead);
+      // Auto-update experience from telecaller remarks if experience was not filled or is default
+      if (isDefaultExperience(lead.experience)) {
+        const autoExp = getEffectiveExperience(lead);
+        if (!isDefaultExperience(autoExp)) {
+          lead.experience = autoExp;
+        }
+      }
+
+      // Self-healing fallback: Ensure leads with active coordinators always have a valid assignDate
+      if (lead.assignedTo && lead.assignedTo.trim() !== '' && lead.assignedTo.toLowerCase() !== 'unassigned' && (!lead.assignDate || lead.assignDate.trim() === '')) {
+        lead.assignDate = (lead.createdAt || new Date().toISOString()).split('T')[0];
+      }
+
+      lead.updatedAt = new Date().toISOString();
+      return lead;
+    });
+
+    if (!savedLead) {
+      res.status(404).json({ error: 'Lead not found in CRM database' });
+      return;
+    }
 
     if (isNewResumeUploaded) {
-      runBackgroundResumeScanner(lead.id).catch(err => {
+      runBackgroundResumeScanner(savedLead.id).catch(err => {
         console.error('[Background Scanner] Error initiating background CV parse:', err);
       });
     }
 
-    res.json(savedLead || lead);
+    res.json(savedLead);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -3499,10 +3763,24 @@ app.post('/api/leads/:id/messages', async (req, res) => {
     const userRole = req.headers['x-user-role'] || 'user';
     const agentId = (req.headers['x-agent-id'] as string) || senderName || 'Coordinator';
 
-    // Build absolute URL for Meta Cloud API to download if it's a local/relative URL
+    // Ensure local upload exists on disk (restore from Firestore if needed) and build HTTPS-safe URL
     let absoluteMediaUrl = mediaUrl;
-    if (mediaUrl && mediaUrl.startsWith('/')) {
-      absoluteMediaUrl = `${req.protocol}://${req.get('host')}${mediaUrl}`;
+    if (mediaUrl) {
+      const cleanMediaPath = String(mediaUrl).split('?')[0];
+      const uploadsMarkerIdx = cleanMediaPath.indexOf('/uploads/');
+      if (uploadsMarkerIdx !== -1) {
+        const localSafeName = path.basename(cleanMediaPath.substring(uploadsMarkerIdx + '/uploads/'.length));
+        const localFilePath = path.join(UPLOADS_DIR, localSafeName);
+        if (localSafeName && (!fs.existsSync(localFilePath) || fs.statSync(localFilePath).size === 0)) {
+          await restoreSingleFileFromFirestore(localSafeName).catch(() => false);
+        }
+      }
+      if (mediaUrl.startsWith('/')) {
+        const host = req.get('host') || '';
+        const forwardedProto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim();
+        const proto = forwardedProto || (host.includes('ai.studio') || host.includes('run.app') ? 'https' : req.protocol);
+        absoluteMediaUrl = `${proto}://${host}${mediaUrl}`;
+      }
     }
 
     // Dispatch directly via Meta Cloud API or Sandbox Engine
@@ -3729,507 +4007,807 @@ function isAlreadyProcessedWhatsAppId(id: string): boolean {
   return false;
 }
 
-// POST webhook listener for incoming Meta WhatsApp Cloud API / Webhook events
-app.post('/api/whatsapp/webhook', (req, res) => {
-  // CRITICAL: Immediately acknowledge receipt to Meta within <20ms to prevent Meta webhook retries and duplicate barrage!
-  res.status(200).json({ success: true, received: true });
+// Resilient Webhook Spooling and Processing Engine for Meta Ads & AiSensy
+export async function processInboundWebhookPayload(payload: any): Promise<{ newCount: number; updatedCount: number; statusesCount: number }> {
+  let newCount = 0;
+  let updatedCount = 0;
+  let statusesCount = 0;
 
-  // Process asynchronously in background
-  setImmediate(async () => {
+  try {
+    if (!payload || typeof payload !== 'object') {
+      return { newCount, updatedCount, statusesCount };
+    }
+
+    // Persist raw webhook payload to disk for audit & catch-up spooling
     try {
-      const payload = req.body || {};
-      console.log(`[Meta Webhook POST] Received payload:`, JSON.stringify(payload, null, 2));
+      const logDir = path.join(process.cwd(), 'data');
+      if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+      fs.appendFileSync(
+        path.join(logDir, 'webhooks.log'),
+        `[${new Date().toISOString()}] ${JSON.stringify(payload)}\n`,
+        'utf8'
+      );
+      fs.appendFileSync(
+        path.join(logDir, 'webhooks_inbox.jsonl'),
+        JSON.stringify({ timestamp: new Date().toISOString(), payload, processed: true }) + '\n',
+        'utf8'
+      );
+    } catch (logErr) {
+      console.warn('Failed to log webhook payload:', logErr);
+    }
 
-      // Persist webhook payloads to a local file for live diagnostics
-      try {
-        const logDir = path.join(process.cwd(), 'data');
-        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-        fs.appendFileSync(
-          path.join(logDir, 'webhooks.log'),
-          `[${new Date().toISOString()}] ${JSON.stringify(payload)}\n`,
-          'utf8'
-        );
-      } catch (logErr) {
-        console.warn('Failed to write webhook to webhooks.log:', logErr);
-      }
+    // 1. Collect all status updates (sent, delivered, read, failed)
+    const statusesToProcess: { id: string; status: string; recipient_id?: string; errorDetails?: string }[] = [];
 
-      // 1. Collect all status updates (sent, delivered, read, failed)
-      const statusesToProcess: { id: string; status: string; recipient_id?: string; errorDetails?: string }[] = [];
-
-      if (payload.entry && Array.isArray(payload.entry)) {
-        for (const entry of payload.entry) {
-          if (entry.changes && Array.isArray(entry.changes)) {
-            for (const change of entry.changes) {
-              const val = change.value;
-              if (val && val.statuses && Array.isArray(val.statuses)) {
-                for (const s of val.statuses) {
-                  if (s.id && s.status) {
-                    const statusKey = `status_${s.id}_${s.status}`;
-                    if (isAlreadyProcessedWhatsAppId(statusKey)) {
-                      continue;
-                    }
-                    let errStr: string | undefined = undefined;
-                    if (s.errors && Array.isArray(s.errors) && s.errors[0]) {
-                      const e = s.errors[0];
-                      errStr = `[Code ${e.code}] ${e.message || e.title || 'Error'}`;
-                    }
-                    statusesToProcess.push({
-                      id: String(s.id),
-                      status: String(s.status),
-                      recipient_id: s.recipient_id ? String(s.recipient_id) : undefined,
-                      errorDetails: errStr
-                    });
+    if (payload.entry && Array.isArray(payload.entry)) {
+      for (const entry of payload.entry) {
+        if (entry.changes && Array.isArray(entry.changes)) {
+          for (const change of entry.changes) {
+            const val = change.value;
+            if (val && val.statuses && Array.isArray(val.statuses)) {
+              for (const s of val.statuses) {
+                if (s.id && s.status) {
+                  const statusKey = `status_${s.id}_${s.status}`;
+                  if (isAlreadyProcessedWhatsAppId(statusKey)) continue;
+                  let errStr: string | undefined = undefined;
+                  if (s.errors && Array.isArray(s.errors) && s.errors[0]) {
+                    const e = s.errors[0];
+                    errStr = `[Code ${e.code}] ${e.message || e.title || 'Error'}`;
                   }
+                  statusesToProcess.push({
+                    id: String(s.id),
+                    status: String(s.status),
+                    recipient_id: s.recipient_id ? String(s.recipient_id) : undefined,
+                    errorDetails: errStr
+                  });
                 }
               }
             }
           }
         }
       }
+    }
 
-      // Secondary check for flat status updates
-      const flatStatusRaw = payload.status || payload.messageStatus || payload.eventStatus || payload.state || payload.event;
-      const flatId = payload.messageId || payload.id || payload.wamid || payload.msgId || payload.msg_id;
-      const flatPhone = payload.phone || payload.recipient || payload.to || payload.from || payload.mobile || payload.recipient_id;
+    // Secondary check for flat status updates
+    const flatStatusRaw = payload.status || payload.messageStatus || payload.eventStatus || payload.state || payload.event;
+    const flatId = payload.messageId || payload.id || payload.wamid || payload.msgId || payload.msg_id;
+    const flatPhone = payload.phone || payload.recipient || payload.to || payload.from || payload.mobile || payload.recipient_id;
 
-      if (flatStatusRaw && flatId && !payload.text && !payload.message && !payload.body) {
-        let flatStatus = String(flatStatusRaw).toLowerCase();
-        if (flatStatus.includes('read')) flatStatus = 'read';
-        else if (flatStatus.includes('deliver')) flatStatus = 'delivered';
-        else if (flatStatus.includes('sent')) flatStatus = 'sent';
-        else if (flatStatus.includes('fail')) flatStatus = 'failed';
+    if (flatStatusRaw && flatId && !payload.text && !payload.message && !payload.body && !payload.data) {
+      let flatStatus = String(flatStatusRaw).toLowerCase();
+      if (flatStatus.includes('read')) flatStatus = 'read';
+      else if (flatStatus.includes('deliver')) flatStatus = 'delivered';
+      else if (flatStatus.includes('sent')) flatStatus = 'sent';
+      else if (flatStatus.includes('fail')) flatStatus = 'failed';
 
-        const validStatuses = ['sent', 'delivered', 'read', 'failed'];
-        if (validStatuses.includes(flatStatus)) {
-          const statusKey = `status_${flatId}_${flatStatus}`;
-          if (!isAlreadyProcessedWhatsAppId(statusKey)) {
-            const flatError = payload.error || payload.reason || payload.errorMessage || payload.error_message || payload.errorDetails || payload.error_details;
-            statusesToProcess.push({
-              id: String(flatId),
-              status: flatStatus,
-              recipient_id: flatPhone ? String(flatPhone) : undefined,
-              errorDetails: flatError ? String(flatError) : undefined
-            });
-          }
+      const validStatuses = ['sent', 'delivered', 'read', 'failed'];
+      if (validStatuses.includes(flatStatus)) {
+        const statusKey = `status_${flatId}_${flatStatus}`;
+        if (!isAlreadyProcessedWhatsAppId(statusKey)) {
+          const flatError = payload.error || payload.reason || payload.errorMessage || payload.error_message || payload.errorDetails || payload.error_details;
+          statusesToProcess.push({
+            id: String(flatId),
+            status: flatStatus,
+            recipient_id: flatPhone ? String(flatPhone) : undefined,
+            errorDetails: flatError ? String(flatError) : undefined
+          });
         }
       }
+    }
 
-      // 2. Collect all inbound messages
-      interface ExtractedWebhookMsg {
-        id: string;
-        fromNumber: string;
-        messageBody: string;
-        mediaUrl?: string;
-        mediaType: 'text' | 'image' | 'pdf' | 'document';
-        fileName?: string;
-        fileSize?: string;
-        timestamp?: string;
-      }
-      const messagesToProcess: ExtractedWebhookMsg[] = [];
+    // 2. Collect all inbound messages
+    interface ExtractedWebhookMsg {
+      id: string;
+      fromNumber: string;
+      senderName?: string;
+      messageBody: string;
+      mediaUrl?: string;
+      mediaType: 'text' | 'image' | 'pdf' | 'document';
+      fileName?: string;
+      fileSize?: string;
+      timestamp?: string;
+      campaignHint?: string;
+      tags?: string[];
+    }
+    const messagesToProcess: ExtractedWebhookMsg[] = [];
 
-      if (payload.entry && Array.isArray(payload.entry)) {
-        for (const entry of payload.entry) {
-          if (entry.changes && Array.isArray(entry.changes)) {
-            for (const change of entry.changes) {
-              const val = change.value;
-              if (val && val.messages && Array.isArray(val.messages)) {
-                for (const m of val.messages) {
-                  const mId = String(m.id || `m_hook_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
-                  if (isAlreadyProcessedWhatsAppId(`msg_${mId}`)) {
-                    console.log(`[Meta Webhook] Duplicate message ID "${mId}" already processed. Skipping duplicate webhook.`);
-                    continue;
-                  }
+    // Path A: Meta Cloud API structure
+    if (payload.entry && Array.isArray(payload.entry)) {
+      for (const entry of payload.entry) {
+        if (entry.changes && Array.isArray(entry.changes)) {
+          for (const change of entry.changes) {
+            const val = change.value;
+            const contacts = val?.contacts || [];
+            if (val && val.messages && Array.isArray(val.messages)) {
+              for (const m of val.messages) {
+                const mId = String(m.id || `m_hook_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
+                if (isAlreadyProcessedWhatsAppId(`msg_${mId}`)) {
+                  console.log(`[Meta Webhook] Duplicate message ID "${mId}" already processed. Skipping duplicate webhook.`);
+                  continue;
+                }
 
-                  let body = '';
-                  let mType: 'text' | 'image' | 'pdf' | 'document' = 'text';
-                  let mUrl: string | undefined = undefined;
-                  let fName: string | undefined = undefined;
-                  let fSize: string | undefined = undefined;
+                let body = '';
+                let mType: 'text' | 'image' | 'pdf' | 'document' = 'text';
+                let mUrl: string | undefined = undefined;
+                let fName: string | undefined = undefined;
+                let fSize: string | undefined = undefined;
 
-                  if (m.type === 'text' && m.text) {
-                    body = m.text.body;
-                  } else if (m.type === 'image' && m.image) {
-                    mType = 'image';
-                    body = m.image.caption || 'Sent an image';
-                    mUrl = m.image.url || m.image.link || m.image.id;
-                    fName = m.image.filename || 'image.jpg';
-                  } else if (m.type === 'document' && m.document) {
-                    const isPdf = m.document.mime_type === 'application/pdf' || String(m.document.filename || '').toLowerCase().endsWith('.pdf');
-                    mType = isPdf ? 'pdf' : 'document';
-                    body = m.document.caption || m.document.filename || 'Sent a document';
-                    mUrl = m.document.url || m.document.link || m.document.id;
-                    fName = m.document.filename || 'document';
-                    fSize = m.document.file_size ? `${(Number(m.document.file_size) / (1024 * 1024)).toFixed(2)} MB` : undefined;
-                  } else if (m.type === 'video' && m.video) {
-                    mType = 'document';
-                    body = m.video.caption || 'Sent a video';
-                    mUrl = m.video.url || m.video.link || m.video.id;
-                    fName = m.video.filename || 'video.mp4';
-                    fSize = m.video.file_size ? `${(Number(m.video.file_size) / (1024 * 1024)).toFixed(2)} MB` : undefined;
-                  } else if (m.type === 'audio' && m.audio) {
-                    mType = 'document';
-                    body = 'Sent an audio message';
-                    mUrl = m.audio.url || m.audio.link || m.audio.id;
-                    fName = m.audio.filename || 'audio.mp3';
-                    fSize = m.audio.file_size ? `${(Number(m.audio.file_size) / (1024 * 1024)).toFixed(2)} MB` : undefined;
-                  } else if (m.type === 'button') {
-                    body = m.button?.text || m.button?.payload || '';
-                  } else if (m.type === 'interactive') {
-                    body = m.interactive?.button_reply?.title || m.interactive?.list_reply?.title || 'Interactive response';
-                  }
+                if (m.type === 'text' && m.text) {
+                  body = m.text.body;
+                } else if (m.type === 'image' && m.image) {
+                  mType = 'image';
+                  body = m.image.caption || 'Sent an image';
+                  mUrl = m.image.url || m.image.link || m.image.id;
+                  fName = m.image.filename || 'image.jpg';
+                } else if (m.type === 'document' && m.document) {
+                  const isPdf = m.document.mime_type === 'application/pdf' || String(m.document.filename || '').toLowerCase().endsWith('.pdf');
+                  mType = isPdf ? 'pdf' : 'document';
+                  body = m.document.caption || m.document.filename || 'Sent a document';
+                  mUrl = m.document.url || m.document.link || m.document.id;
+                  fName = m.document.filename || 'document';
+                  fSize = m.document.file_size ? `${(Number(m.document.file_size) / (1024 * 1024)).toFixed(2)} MB` : undefined;
+                } else if (m.type === 'video' && m.video) {
+                  mType = 'document';
+                  body = m.video.caption || 'Sent a video';
+                  mUrl = m.video.url || m.video.link || m.video.id;
+                  fName = m.video.filename || 'video.mp4';
+                  fSize = m.video.file_size ? `${(Number(m.video.file_size) / (1024 * 1024)).toFixed(2)} MB` : undefined;
+                } else if (m.type === 'audio' && m.audio) {
+                  mType = 'document';
+                  body = 'Sent an audio message';
+                  mUrl = m.audio.url || m.audio.link || m.audio.id;
+                  fName = m.audio.filename || 'audio.mp3';
+                  fSize = m.audio.file_size ? `${(Number(m.audio.file_size) / (1024 * 1024)).toFixed(2)} MB` : undefined;
+                } else if (m.type === 'button') {
+                  body = m.button?.text || m.button?.payload || '';
+                } else if (m.type === 'interactive') {
+                  body = m.interactive?.button_reply?.title || m.interactive?.list_reply?.title || 'Interactive response';
+                }
 
-                  if (m.from && (body || mUrl)) {
-                    messagesToProcess.push({
-                      id: mId,
-                      fromNumber: String(m.from),
-                      messageBody: body,
-                      mediaUrl: mUrl,
-                      mediaType: mType,
-                      fileName: fName,
-                      fileSize: fSize,
-                      timestamp: m.timestamp ? new Date(Number(m.timestamp) * 1000).toISOString() : new Date().toISOString()
-                    });
-                  }
+                const contactObj = contacts.find((c: any) => c.wa_id === m.from);
+                const contactName = contactObj?.profile?.name;
+
+                if (m.from && (body || mUrl)) {
+                  messagesToProcess.push({
+                    id: mId,
+                    fromNumber: String(m.from),
+                    senderName: contactName,
+                    messageBody: body,
+                    mediaUrl: mUrl,
+                    mediaType: mType,
+                    fileName: fName,
+                    fileSize: fSize,
+                    timestamp: m.timestamp ? new Date(Number(m.timestamp) * 1000).toISOString() : new Date().toISOString()
+                  });
                 }
               }
             }
           }
         }
       }
+    }
 
-      // Secondary parsing for flattened formats
-      if (messagesToProcess.length === 0 && (payload.destination || payload.from || payload.phone || payload.mobile)) {
-        const flatMsgId = String(payload.messageId || payload.id || payload.wamid || payload.msgId || `m_hook_${Date.now()}`);
+    // Path B: AiSensy & Flattened Webhook structures
+    if (messagesToProcess.length === 0) {
+      // AiSensy standard event fields
+      const aisensyUser = payload.data?.user || payload.user || {};
+      const aisensyMsg = payload.data?.message || payload.message_data || {};
+      
+      const fNum = payload.destination || payload.from || payload.phone || payload.mobile || payload.waNumber || payload.contact_number || aisensyUser.phone || aisensyUser.mobile;
+      const sName = payload.userName || payload.name || payload.contact_name || aisensyUser.name || aisensyUser.userName;
+      const body = payload.text || payload.message || payload.body || payload.caption || aisensyMsg.text || aisensyMsg.body || '';
+      const campaign = payload.campaign || payload.campaignName || payload.campaign_name || payload.ad_name || payload.data?.campaign;
+      const tags = Array.isArray(payload.tags) ? payload.tags : (Array.isArray(payload.data?.tags) ? payload.data.tags : []);
+
+      if (fNum) {
+        const flatMsgId = String(payload.messageId || payload.id || payload.wamid || payload.msgId || `m_hook_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
         if (!isAlreadyProcessedWhatsAppId(`msg_${flatMsgId}`)) {
-          let fNum = payload.destination || payload.from || payload.phone || payload.mobile;
-          let body = payload.text || payload.message || payload.body || payload.caption || '';
-          let mUrl = payload.mediaUrl || payload.fileUrl || payload.imageUrl || payload.url;
+          let mUrl = payload.mediaUrl || payload.fileUrl || payload.imageUrl || payload.url || aisensyMsg.url;
           let mType: 'text' | 'image' | 'pdf' | 'document' = 'text';
-          let fName = payload.fileName || payload.filename;
+          let fName = payload.fileName || payload.filename || aisensyMsg.filename;
           let fSize = payload.fileSize || payload.filesize;
 
           if (payload.type === 'image' || payload.messageType === 'image') mType = 'image';
           else if (payload.type === 'pdf' || payload.messageType === 'pdf') mType = 'pdf';
           else if (payload.type === 'document' || payload.messageType === 'document' || payload.type === 'file') mType = 'document';
 
-          if (!body && mUrl) {
-            body = mType === 'image' ? 'Sent an image' : (mType === 'pdf' ? 'Sent a PDF document' : 'Sent a document');
+          let resolvedBody = String(body || '').trim();
+          if (!resolvedBody && mUrl) {
+            resolvedBody = mType === 'image' ? 'Sent an image' : (mType === 'pdf' ? 'Sent a PDF document' : 'Sent a document');
+          }
+          if (!resolvedBody) {
+            resolvedBody = campaign ? `Inbound ad inquiry for ${campaign}` : 'Inbound WhatsApp inquiry';
           }
 
-          if (fNum && (body || mUrl)) {
-            messagesToProcess.push({
-              id: flatMsgId,
-              fromNumber: String(fNum),
-              messageBody: String(body),
-              mediaUrl: mUrl ? String(mUrl) : undefined,
-              mediaType: mType,
-              fileName: fName ? String(fName) : undefined,
-              fileSize: fSize ? String(fSize) : undefined,
-              timestamp: new Date().toISOString()
-            });
+          messagesToProcess.push({
+            id: flatMsgId,
+            fromNumber: String(fNum),
+            senderName: sName ? String(sName).trim() : undefined,
+            messageBody: resolvedBody,
+            mediaUrl: mUrl ? String(mUrl) : undefined,
+            mediaType: mType,
+            fileName: fName ? String(fName) : undefined,
+            fileSize: fSize ? String(fSize) : undefined,
+            timestamp: payload.timestamp ? new Date(payload.timestamp).toISOString() : new Date().toISOString(),
+            campaignHint: campaign ? String(campaign).trim() : undefined,
+            tags
+          });
+        }
+      }
+    }
+
+    if (statusesToProcess.length === 0 && messagesToProcess.length === 0) {
+      return { newCount, updatedCount, statusesCount };
+    }
+
+    const leads = await getLeads();
+    const touchedLeadMutations = new Map<string, {
+      statusUpdates: Array<{ wamid?: string; status: 'sent' | 'delivered' | 'read' | 'failed'; errorDetails?: string; fallbackLatestOutbound?: boolean }>;
+      inboundMessages: Array<{ msg: Message; timelineEntry: any; updatedAt: string }>;
+    }>();
+    const ensureMutation = (leadId: string) => {
+      let entry = touchedLeadMutations.get(leadId);
+      if (!entry) {
+        entry = { statusUpdates: [], inboundMessages: [] };
+        touchedLeadMutations.set(leadId, entry);
+      }
+      return entry;
+    };
+
+    // 3. Process Status Updates
+    for (const s of statusesToProcess) {
+      statusesCount++;
+      const wamid = s.id;
+      const newStatus = s.status as 'sent' | 'delivered' | 'read' | 'failed';
+      const recipientId = s.recipient_id;
+      let matched = false;
+
+      for (let i = 0; i < leads.length; i++) {
+        const lead = leads[i];
+        if (Array.isArray(lead.messages)) {
+          const mIdx = lead.messages.findIndex(m => m.id === wamid || m.wamid === wamid);
+          if (mIdx !== -1) {
+            matched = true;
+            const oldStatus = lead.messages[mIdx].status;
+            const statusPriority = { 'sent': 1, 'delivered': 2, 'read': 3, 'failed': 0 };
+            const oldPriority = statusPriority[oldStatus as keyof typeof statusPriority] || 0;
+            const newPriority = statusPriority[newStatus as keyof typeof statusPriority] || 0;
+
+            if (newPriority > oldPriority || newStatus === 'failed') {
+              ensureMutation(lead.id).statusUpdates.push({
+                wamid,
+                status: newStatus,
+                errorDetails: s.errorDetails
+              });
+            }
+            break;
           }
         }
       }
 
-      if (statusesToProcess.length === 0 && messagesToProcess.length === 0) {
-        return;
-      }
-
-      const leads = await getLeads(true);
-      let leadsUpdated = false;
-
-      // 3. Process Status Updates
-      for (const s of statusesToProcess) {
-        const wamid = s.id;
-        const newStatus = s.status;
-        const recipientId = s.recipient_id;
-        let matched = false;
-
-        for (let i = 0; i < leads.length; i++) {
-          const lead = leads[i];
-          if (Array.isArray(lead.messages)) {
-            const mIdx = lead.messages.findIndex(m => m.id === wamid || m.wamid === wamid);
-            if (mIdx !== -1) {
-              matched = true;
-              const oldStatus = lead.messages[mIdx].status;
-              const statusPriority = { 'sent': 1, 'delivered': 2, 'read': 3, 'failed': 0 };
-              const oldPriority = statusPriority[oldStatus as keyof typeof statusPriority] || 0;
-              const newPriority = statusPriority[newStatus as keyof typeof statusPriority] || 0;
-
-              if (newPriority > oldPriority || newStatus === 'failed') {
-                lead.messages[mIdx].status = newStatus as 'sent' | 'delivered' | 'read' | 'failed';
-                if (s.errorDetails) {
-                  lead.messages[mIdx].errorDetails = s.errorDetails;
-                }
-                if (lead.campaign && lead.campaign.toLowerCase().startsWith('reactivation -')) {
-                  if (newStatus === 'failed') {
-                    lead.reactivationStatus = 'failed';
-                  } else if (lead.reactivationStatus === 'failed') {
-                    lead.reactivationStatus = 'sent';
+      if (!matched && recipientId) {
+        const cleanRecipient = String(recipientId).replace(/\D/g, '');
+        if (cleanRecipient) {
+          for (let i = 0; i < leads.length; i++) {
+            const lead = leads[i];
+            const leadDigits = String(lead.phone || '').replace(/\D/g, '');
+            if (leadDigits && (leadDigits.includes(cleanRecipient) || cleanRecipient.includes(leadDigits) || (leadDigits.length >= 10 && cleanRecipient.endsWith(leadDigits.slice(-10))))) {
+              if (Array.isArray(lead.messages) && lead.messages.length > 0) {
+                for (let mIdx = lead.messages.length - 1; mIdx >= 0; mIdx--) {
+                  const m = lead.messages[mIdx];
+                  if (m && m.sender !== 'lead') {
+                    ensureMutation(lead.id).statusUpdates.push({
+                      wamid: m.id,
+                      status: newStatus,
+                      errorDetails: s.errorDetails,
+                      fallbackLatestOutbound: true
+                    });
+                    break;
                   }
-                }
-                leadsUpdated = true;
-                
-                if (newStatus === 'read' && oldStatus !== 'read') {
-                  if (!Array.isArray(lead.timeline)) lead.timeline = [];
-                  const snippet = (lead.messages[mIdx].text || '').substring(0, 50);
-                  lead.timeline.push({
-                    id: `tl_${Date.now()}_read_${Math.random().toString(36).substring(2, 5)}`,
-                    type: 'message',
-                    text: `Candidate read message: "${snippet}..."`,
-                    actor: lead.name,
-                    timestamp: new Date().toISOString()
-                  });
                 }
               }
               break;
             }
           }
         }
-
-        if (!matched && recipientId) {
-          const cleanRecipient = String(recipientId).replace(/\D/g, '');
-          if (cleanRecipient) {
-            for (let i = 0; i < leads.length; i++) {
-              const lead = leads[i];
-              const leadDigits = String(lead.phone || '').replace(/\D/g, '');
-              if (leadDigits && (leadDigits.includes(cleanRecipient) || cleanRecipient.includes(leadDigits) || (leadDigits.length >= 10 && cleanRecipient.endsWith(leadDigits.slice(-10))))) {
-                if (Array.isArray(lead.messages) && lead.messages.length > 0) {
-                  let updatedAny = false;
-                  const statusPriority = { 'sent': 1, 'delivered': 2, 'read': 3, 'failed': 0 };
-                  const newPriority = statusPriority[newStatus as keyof typeof statusPriority] || 0;
-
-                  for (let mIdx = lead.messages.length - 1; mIdx >= 0; mIdx--) {
-                    const m = lead.messages[mIdx];
-                    if (m && m.sender !== 'lead') {
-                      const oldStatus = m.status;
-                      const oldPriority = statusPriority[oldStatus as keyof typeof statusPriority] || 0;
-                      const isFailedTransition = newStatus === 'failed' && (oldStatus === 'sent' || !oldStatus || oldStatus === 'delivered');
-                      
-                      if (newPriority > oldPriority || isFailedTransition) {
-                        m.status = newStatus as 'sent' | 'delivered' | 'read' | 'failed';
-                        if (s.errorDetails) {
-                          m.errorDetails = s.errorDetails;
-                        }
-                        if (lead.campaign && lead.campaign.toLowerCase().startsWith('reactivation -')) {
-                          if (newStatus === 'failed') {
-                            lead.reactivationStatus = 'failed';
-                          } else if (lead.reactivationStatus === 'failed') {
-                            lead.reactivationStatus = 'sent';
-                          }
-                        }
-                        updatedAny = true;
-
-                        if (newStatus === 'read' && oldStatus !== 'read') {
-                          if (!Array.isArray(lead.timeline)) lead.timeline = [];
-                          const snippet = (m.text || '').substring(0, 50);
-                          lead.timeline.push({
-                            id: `tl_${Date.now()}_read_${Math.random().toString(36).substring(2, 5)}`,
-                            type: 'message',
-                            text: `Candidate read message: "${snippet}..."`,
-                            actor: lead.name,
-                            timestamp: new Date().toISOString()
-                          });
-                        }
-                        break;
-                      }
-                    }
-                  }
-
-                  if (updatedAny) {
-                    leadsUpdated = true;
-                  }
-                }
-                break;
-              }
-            }
-          }
-        }
       }
-
-      // 4. Process Inbound Messages (with multi-tier deduplication)
-      for (const inMsg of messagesToProcess) {
-        const cleanPhone = String(inMsg.fromNumber).replace(/\D/g, '');
-        if (!cleanPhone) continue;
-
-        let parsedMediaUrl = inMsg.mediaUrl;
-        const extractedId = extractMetaMediaId(inMsg.mediaUrl);
-        if (extractedId) {
-          parsedMediaUrl = `/api/whatsapp/media/${extractedId}`;
-        } else if (inMsg.mediaUrl && !inMsg.mediaUrl.startsWith('http') && !inMsg.mediaUrl.startsWith('/')) {
-          parsedMediaUrl = `/api/whatsapp/media/${inMsg.mediaUrl}`;
-        }
-
-        const matchIdx = leads.findIndex(l => {
-          if (l.isDeleted) return false;
-          const leadDigits = String(l.phone || '').replace(/\D/g, '');
-          if (!leadDigits) return false;
-          return leadDigits.includes(cleanPhone) || cleanPhone.includes(leadDigits) ||
-            (leadDigits.length >= 10 && cleanPhone.endsWith(leadDigits.slice(-10))) ||
-            (cleanPhone.length >= 10 && leadDigits.endsWith(cleanPhone.slice(-10)));
-        });
-
-        if (matchIdx !== -1) {
-          const lead = leads[matchIdx];
-
-          // 🛡️ BLOCK SHIELD: If candidate is blocked, reject and drop incoming message
-          if (lead.isBlocked) {
-            console.log(`[Meta Webhook] Inbound message dropped: Candidate "${lead.name}" (${lead.phone}) is BLOCKED. Reason: "${lead.blockedReason || 'Blocked'}".`);
-            if (!Array.isArray(lead.timeline)) lead.timeline = [];
-            lead.timeline.push({
-              id: `tl_${Date.now()}_blocked_attempt`,
-              type: 'message',
-              text: `Blocked inbound message rejected from candidate: "${String(inMsg.messageBody).substring(0, 50)}..."`,
-              actor: 'System (Shield)',
-              timestamp: inMsg.timestamp || new Date().toISOString()
-            });
-            lead.updatedAt = new Date().toISOString();
-            leads[matchIdx] = lead;
-            leadsUpdated = true;
-            continue; // Do not append message to messages array, do not trigger auto-reply or chatbot!
-          }
-
-          if (!Array.isArray(lead.messages)) lead.messages = [];
-
-          // DEDUPLICATION CHECK 1: Existing Message ID / wamid in lead
-          const alreadyHasMsg = lead.messages.some(m => m && (m.id === inMsg.id || m.wamid === inMsg.id));
-          if (alreadyHasMsg) {
-            console.log(`[Meta Webhook] Candidate "${lead.name}" already has message ID "${inMsg.id}". Skipping duplicate delivery.`);
-            continue;
-          }
-
-          // DEDUPLICATION CHECK 2: Rapid Network Retry & Webhook Echo Filter
-          // Only drop if identical message was sent within 15 seconds without coordinator reply (transient Meta webhook re-delivery)
-          const lastInbound = lead.messages.filter(m => m && m.sender === 'lead').slice(-1)[0];
-          if (lastInbound && lastInbound.text && inMsg.messageBody) {
-            const isIdentical = lastInbound.text.trim().toLowerCase() === inMsg.messageBody.trim().toLowerCase();
-            const timeDiff = Math.abs(new Date(inMsg.timestamp || Date.now()).getTime() - new Date(lastInbound.timestamp).getTime());
-            const hasCoordinatorReplySince = lead.messages.slice(lead.messages.indexOf(lastInbound)).some(m => m && m.sender !== 'lead');
-
-            if (isIdentical && !hasCoordinatorReplySince && timeDiff < 15000) {
-              console.log(`[Meta Webhook] Duplicate inbound text echo detected within ${timeDiff}ms for "${lead.name}": "${inMsg.messageBody}". Dropping network replay.`);
-              continue;
-            }
-          }
-
-          const incomingMsg: Message = {
-            id: inMsg.id,
-            wamid: inMsg.id,
-            sender: 'lead',
-            senderName: lead.name,
-            text: String(inMsg.messageBody),
-            timestamp: inMsg.timestamp || new Date().toISOString(),
-            status: 'delivered',
-            channel: 'whatsapp',
-            ...(inMsg.mediaUrl ? {
-              type: inMsg.mediaType,
-              mediaUrl: String(parsedMediaUrl),
-              fileName: inMsg.fileName ? String(inMsg.fileName) : undefined,
-              fileSize: inMsg.fileSize ? String(inMsg.fileSize) : undefined
-            } : {})
-          };
-
-          // Mark previous outbound messages as read
-          lead.messages.forEach(m => {
-            if (m && m.sender !== 'lead') {
-              m.status = 'read';
-            }
-          });
-          lead.messages.push(incomingMsg);
-
-          if (!Array.isArray(lead.timeline)) lead.timeline = [];
-          lead.timeline.push({
-            id: `tl_${Date.now()}_hook`,
-            type: 'message',
-            text: `Inbound Meta WhatsApp received: "${String(inMsg.messageBody).substring(0, 75)}"`,
-            actor: lead.name,
-            timestamp: inMsg.timestamp || new Date().toISOString()
-          });
-
-          lead.updatedAt = new Date().toISOString();
-          leads[matchIdx] = lead;
-          leadsUpdated = true;
-          console.log(`[Meta Webhook] Successfully appended unique message "${inMsg.id}" to candidate "${lead.name}".`);
-
-          // Trigger auto-reply or reactivation chatbot
-          if (lead.campaign && lead.campaign.startsWith('Reactivation -')) {
-            handleReactivationChatbot(lead.id, String(inMsg.messageBody));
-          } else {
-            handleAutoReplyIfEnabled(lead.id, lead.phone, lead.name);
-          }
-        } else {
-          // Candidate not found: Create inquiry
-          const cleanNameId = `CONTACT_${cleanPhone.slice(-10)}`;
-          const newLeadId = generateUniqueLeadId(leads, cleanNameId);
-          
-          const newLead: Lead = {
-            id: newLeadId,
-            serialNo: '',
-            entryDate: new Date().toISOString().split('T')[0],
-            assignDate: '',
-            name: `WhatsApp Lead ${cleanPhone.slice(-10)}`,
-            phone: `+${cleanPhone}`,
-            gender: 'Not defined',
-            age: '',
-            origin: '',
-            country: '',
-            position: '',
-            experience: '',
-            adminRemarks: '',
-            notes: '',
-            assignedTo: 'unassigned',
-            importance: 3,
-            remarks1: '',
-            remarks2: '',
-            remarks3: '',
-            stage: 'new',
-            budget: 0,
-            budgetRaw: 'N/A',
-            summary: `Inbound WhatsApp message received: "${inMsg.messageBody}"`,
-            requirements: ['WhatsApp Inbound'],
-            fitScore: 'medium',
-            nextAction: 'Qualify credentials and documents.',
-            campaign: 'Direct WhatsApp',
-            createdAt: inMsg.timestamp || new Date().toISOString(),
-            updatedAt: inMsg.timestamp || new Date().toISOString(),
-            intake: false,
-            messages: [
-              {
-                id: inMsg.id,
-                wamid: inMsg.id,
-                sender: 'lead',
-                senderName: `WhatsApp Lead ${cleanPhone.slice(-10)}`,
-                text: String(inMsg.messageBody),
-                timestamp: inMsg.timestamp || new Date().toISOString(),
-                status: 'delivered',
-                channel: 'whatsapp',
-                ...(inMsg.mediaUrl ? {
-                  type: inMsg.mediaType,
-                  mediaUrl: String(parsedMediaUrl),
-                  fileName: inMsg.fileName ? String(inMsg.fileName) : undefined,
-                  fileSize: inMsg.fileSize ? String(inMsg.fileSize) : undefined
-                } : {})
-              }
-            ]
-          };
-
-          clearLeadsCache();
-          await addLead(newLead);
-          console.log(`[Meta Webhook POST] Created new active lead ID="${newLeadId}" for inbound message.`);
-
-          handleAutoReplyIfEnabled(newLead.id, newLead.phone, newLead.name);
-        }
-      }
-
-      if (leadsUpdated) {
-        clearLeadsCache();
-        await saveLeads(leads);
-        console.log(`[Meta Webhook POST] Saved message updates to database.`);
-      }
-    } catch (err) {
-      console.error('[Meta Webhook Async Error]:', err);
     }
+
+    // 4. Process Inbound Messages
+    for (const inMsg of messagesToProcess) {
+      const cleanPhone = String(inMsg.fromNumber).replace(/\D/g, '');
+      if (!cleanPhone || cleanPhone.length < 7) continue;
+
+      let parsedMediaUrl = inMsg.mediaUrl;
+      const extractedId = extractMetaMediaId(inMsg.mediaUrl);
+      if (extractedId) {
+        parsedMediaUrl = `/api/whatsapp/media/${extractedId}`;
+      } else if (inMsg.mediaUrl && !inMsg.mediaUrl.startsWith('http') && !inMsg.mediaUrl.startsWith('/')) {
+        parsedMediaUrl = `/api/whatsapp/media/${inMsg.mediaUrl}`;
+      }
+
+      const matchIdx = leads.findIndex(l => {
+        if (l.isDeleted) return false;
+        const leadDigits = String(l.phone || '').replace(/\D/g, '');
+        if (!leadDigits) return false;
+        return leadDigits.includes(cleanPhone) || cleanPhone.includes(leadDigits) ||
+          (leadDigits.length >= 10 && cleanPhone.endsWith(leadDigits.slice(-10))) ||
+          (cleanPhone.length >= 10 && leadDigits.endsWith(cleanPhone.slice(-10)));
+      });
+
+      if (matchIdx !== -1) {
+        const lead = leads[matchIdx];
+
+        if (lead.isBlocked) {
+          console.log(`[Webhook] Inbound message dropped: Candidate "${lead.name}" (${lead.phone}) is BLOCKED.`);
+          continue;
+        }
+
+        const existingMessages = Array.isArray(lead.messages) ? lead.messages : [];
+        // Deduplication Check
+        const alreadyHasMsg = existingMessages.some(m => m && (m.id === inMsg.id || m.wamid === inMsg.id));
+        if (alreadyHasMsg) {
+          console.log(`[Webhook] Candidate "${lead.name}" already has message ID "${inMsg.id}". Skipping duplicate.`);
+          continue;
+        }
+
+        const incomingMsg: Message = {
+          id: inMsg.id,
+          wamid: inMsg.id,
+          sender: 'lead',
+          senderName: lead.name,
+          text: String(inMsg.messageBody),
+          timestamp: inMsg.timestamp || new Date().toISOString(),
+          status: 'delivered',
+          channel: 'whatsapp',
+          ...(inMsg.mediaUrl ? {
+            type: inMsg.mediaType,
+            mediaUrl: String(parsedMediaUrl),
+            fileName: inMsg.fileName ? String(inMsg.fileName) : undefined,
+            fileSize: inMsg.fileSize ? String(inMsg.fileSize) : undefined
+          } : {})
+        };
+
+        const timelineEntry = {
+          id: `tl_${Date.now()}_hook`,
+          type: 'message',
+          text: `Inbound WhatsApp received: "${String(inMsg.messageBody).substring(0, 75)}"`,
+          actor: lead.name,
+          timestamp: inMsg.timestamp || new Date().toISOString()
+        };
+
+        ensureMutation(lead.id).inboundMessages.push({
+          msg: incomingMsg,
+          timelineEntry,
+          updatedAt: new Date().toISOString()
+        });
+        updatedCount++;
+        console.log(`[Webhook] Queued atomic append for message "${inMsg.id}" to candidate "${lead.name}".`);
+
+        handleAutoReplyIfEnabled(lead.id, lead.phone, lead.name);
+      } else {
+        // Candidate not found: Create brand new unassigned inquiry for Requesting
+        const cleanNameId = `CONTACT_${cleanPhone.slice(-10)}`;
+        const newLeadId = generateUniqueLeadId(leads, cleanNameId);
+        
+        const lowerBody = (String(inMsg.messageBody || '') + ' ' + String(inMsg.campaignHint || '')).toLowerCase();
+        let inferredCountry = '';
+        let inferredPosition = '';
+        let inferredCampaign = inMsg.campaignHint || 'Direct WhatsApp';
+        let inferredProject = '';
+
+        if (lowerBody.includes('japan')) {
+          inferredCountry = 'Japan';
+          inferredPosition = 'SSW';
+          inferredCampaign = inMsg.campaignHint || 'New Sales Japan 09-09-2026';
+          inferredProject = 'JAPAN SSW';
+        } else if (lowerBody.includes('albania') || lowerBody.includes('albaina')) {
+          inferredCountry = 'Albania';
+          inferredPosition = 'Hospitality';
+          inferredCampaign = inMsg.campaignHint || 'New Sales Albania 04-11';
+          inferredProject = 'Hospitality Division';
+        } else if (lowerBody.includes('nurse') || lowerBody.includes('qatar')) {
+          inferredCountry = 'Qatar';
+          inferredPosition = 'Nurse';
+          inferredCampaign = inMsg.campaignHint || 'Qatar Nurse';
+          inferredProject = 'Healthcare Abroad';
+        } else if (lowerBody.includes('kuwait')) {
+          inferredCountry = 'Kuwait';
+          inferredPosition = 'Hospitality';
+          inferredCampaign = inMsg.campaignHint || 'Kuwait';
+          inferredProject = 'Hospitality Division';
+        } else if (lowerBody.includes('europe')) {
+          inferredCountry = 'Europe';
+          inferredPosition = 'General Applicant';
+          inferredCampaign = inMsg.campaignHint || 'Europe';
+        } else if (lowerBody.includes('isreal') || lowerBody.includes('israel')) {
+          inferredCountry = 'Israel';
+          inferredPosition = 'Supermarket';
+          inferredCampaign = inMsg.campaignHint || 'Israel';
+        }
+
+        const candidateName = inMsg.senderName && inMsg.senderName.trim().length > 1
+          ? inMsg.senderName.trim()
+          : `WhatsApp Lead ${cleanPhone.slice(-10)}`;
+
+        const newLead: Lead = {
+          id: newLeadId,
+          serialNo: '',
+          entryDate: (inMsg.timestamp || new Date().toISOString()).split('T')[0],
+          assignDate: '',
+          name: candidateName,
+          phone: cleanPhone.startsWith('91') && cleanPhone.length > 10 ? `+${cleanPhone}` : `+91${cleanPhone.slice(-10)}`,
+          gender: 'Not defined',
+          age: '',
+          origin: '',
+          country: inferredCountry,
+          position: inferredPosition,
+          project: inferredProject || undefined,
+          experience: '',
+          adminRemarks: inMsg.campaignHint ? `Captured from campaign: ${inMsg.campaignHint}` : '',
+          notes: '',
+          assignedTo: 'unassigned',
+          importance: 3,
+          remarks1: '',
+          remarks2: '',
+          remarks3: '',
+          stage: 'new',
+          budget: 0,
+          budgetRaw: 'N/A',
+          summary: `Inbound WhatsApp message received: "${inMsg.messageBody}"`,
+          requirements: ['WhatsApp Inbound', ...(inferredPosition ? [inferredPosition] : [])],
+          fitScore: 'medium',
+          nextAction: 'Qualify credentials and documents.',
+          campaign: inferredCampaign,
+          createdAt: inMsg.timestamp || new Date().toISOString(),
+          updatedAt: inMsg.timestamp || new Date().toISOString(),
+          intake: false,
+          tags: Array.isArray(inMsg.tags) && inMsg.tags.length > 0 ? inMsg.tags : (inferredCountry ? [inferredCountry.toUpperCase()] : []),
+          messages: [
+            {
+              id: inMsg.id,
+              wamid: inMsg.id,
+              sender: 'lead',
+              senderName: candidateName,
+              text: String(inMsg.messageBody),
+              timestamp: inMsg.timestamp || new Date().toISOString(),
+              status: 'delivered',
+              channel: 'whatsapp',
+              ...(inMsg.mediaUrl ? {
+                type: inMsg.mediaType,
+                mediaUrl: String(parsedMediaUrl),
+                fileName: inMsg.fileName ? String(inMsg.fileName) : undefined,
+                fileSize: inMsg.fileSize ? String(inMsg.fileSize) : undefined
+              } : {})
+            }
+          ],
+          timeline: [
+            {
+              id: `tl_${Date.now()}_new_hook`,
+              type: 'message',
+              text: `Inbound WhatsApp ad enquiry received: "${String(inMsg.messageBody).substring(0, 75)}"`,
+              actor: candidateName,
+              timestamp: inMsg.timestamp || new Date().toISOString()
+            }
+          ]
+        };
+
+        clearLeadsCache();
+        await addLead(newLead);
+        newCount++;
+        console.log(`[Webhook] Created new requesting lead ID="${newLeadId}" for inbound phone "${newLead.phone}".`);
+
+        handleAutoReplyIfEnabled(newLead.id, newLead.phone, newLead.name);
+      }
+    }
+
+    if (touchedLeadMutations.size > 0) {
+      for (const [leadId, mut] of touchedLeadMutations.entries()) {
+        await updateSingleLead(leadId, (targetLead) => {
+          if (!Array.isArray(targetLead.messages)) targetLead.messages = [];
+          if (!Array.isArray(targetLead.timeline)) targetLead.timeline = [];
+
+          for (const st of mut.statusUpdates) {
+            const idx = targetLead.messages.findIndex(m => m && (m.id === st.wamid || m.wamid === st.wamid));
+            if (idx !== -1) {
+              const oldStatus = targetLead.messages[idx].status;
+              const statusPriority = { 'sent': 1, 'delivered': 2, 'read': 3, 'failed': 0 };
+              const oldPriority = statusPriority[oldStatus as keyof typeof statusPriority] || 0;
+              const newPriority = statusPriority[st.status as keyof typeof statusPriority] || 0;
+              if (newPriority > oldPriority || st.status === 'failed') {
+                targetLead.messages[idx].status = st.status;
+                if (st.errorDetails) {
+                  targetLead.messages[idx].errorDetails = st.errorDetails;
+                }
+              }
+            }
+          }
+
+          if (mut.inboundMessages.length > 0) {
+            targetLead.messages.forEach(m => {
+              if (m && m.sender !== 'lead') {
+                m.status = 'read';
+              }
+            });
+            for (const item of mut.inboundMessages) {
+              const dup = targetLead.messages.some(m => m && (m.id === item.msg.id || m.wamid === item.msg.id));
+              if (!dup) {
+                targetLead.messages.push(item.msg);
+                targetLead.timeline.push(item.timelineEntry);
+              }
+            }
+            targetLead.updatedAt = mut.inboundMessages[mut.inboundMessages.length - 1].updatedAt;
+          }
+
+          return targetLead;
+        });
+      }
+      console.log(`[Webhook] Atomically persisted updates for ${touchedLeadMutations.size} lead(s) to disk & Firestore.`);
+    }
+  } catch (err) {
+    console.error('[Webhook Ingestion Error]:', err);
+  }
+
+  return { newCount, updatedCount, statusesCount };
+}
+
+// Multi-Channel Webhook Receiver Endpoints (Meta Cloud API, AiSensy, and Partners)
+// CRITICAL: Immediately responds 200 OK within <2ms to prevent Meta/AiSensy timeouts and retry blacklisting!
+const WEBHOOK_PATHS = [
+  '/api/whatsapp/webhook',
+  '/api/aisensy/webhook',
+  '/api/webhook/aisensy',
+  '/api/meta/webhook',
+  '/api/webhook/meta'
+];
+
+WEBHOOK_PATHS.forEach(p => {
+  app.post(p, (req, res) => {
+    // Immediate acknowledgement to Meta / AiSensy dispatcher
+    res.status(200).send('EVENT_RECEIVED');
+
+    // Process asynchronously in background
+    setImmediate(async () => {
+      try {
+        await processInboundWebhookPayload(req.body);
+      } catch (err) {
+        console.error(`[Webhook Async Error on ${p}]:`, err);
+      }
+    });
   });
+});
+
+// Automatic Catch-up Sync Endpoint: Reconciles all pending off-hour webhooks
+app.post('/api/whatsapp/sync-catchup', async (req, res) => {
+  try {
+    const inboxFile = path.join(process.cwd(), 'data', 'webhooks_inbox.jsonl');
+    let processedCount = 0;
+    if (fs.existsSync(inboxFile)) {
+      const content = fs.readFileSync(inboxFile, 'utf8');
+      const lines = content.split('\n').filter(Boolean);
+      for (const line of lines) {
+        try {
+          const item = JSON.parse(line);
+          if (item && item.payload && item.processed === false) {
+            await processInboundWebhookPayload(item.payload);
+            processedCount++;
+          }
+        } catch {
+          // ignore corrupted lines
+        }
+      }
+    }
+    const leads = await getLeads();
+    const requestingLeads = leads.filter(l => 
+      !l.isDeleted && 
+      (!l.assignedTo || l.assignedTo.toLowerCase() === 'unassigned' || l.assignedTo.toLowerCase() === 'all' || l.assignedTo.trim() === '') &&
+      (l.messages || []).some(m => m && m.sender === 'lead')
+    );
+    res.json({
+      success: true,
+      processedCount,
+      requestingCount: requestingLeads.length,
+      totalLeads: leads.length,
+      message: `Sync complete. ${requestingLeads.length} requesting leads active.`
+    });
+  } catch (err: any) {
+    console.error('Failed to run catchup sync:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Bulk Import & Paste Endpoint for AiSensy Calling Sheet or Meta Ads Export
+app.post('/api/whatsapp/bulk-sync', async (req, res) => {
+  try {
+    const { rawText, rows } = req.body;
+    const leads = await getLeads();
+    let addedCount = 0;
+    let skippedCount = 0;
+    const addedLeads: Lead[] = [];
+
+    // Helper to process a single candidate record
+    const processCandidateRecord = async (name: string, phoneStr: string, campaignStr?: string, messageStr?: string, dateStr?: string) => {
+      const cleanDigits = String(phoneStr || '').replace(/\D/g, '');
+      if (!cleanDigits || cleanDigits.length < 10) {
+        skippedCount++;
+        return;
+      }
+      const last10 = cleanDigits.slice(-10);
+      const formattedPhone = `+91${last10}`;
+
+      // Check if lead already exists
+      const exists = leads.some(l => {
+        if (l.isDeleted) return false;
+        const lDigits = String(l.phone || '').replace(/\D/g, '');
+        return lDigits.endsWith(last10);
+      });
+
+      if (exists) {
+        skippedCount++;
+        return;
+      }
+
+      const inferredBody = messageStr || `Inbound inquiry for ${campaignStr || 'overseas jobs'}`;
+      const lower = (String(campaignStr || '') + ' ' + inferredBody).toLowerCase();
+      let country = '';
+      let position = '';
+      let campaign = campaignStr || 'Direct WhatsApp';
+      let project = '';
+
+      if (lower.includes('japan')) {
+        country = 'Japan';
+        position = 'SSW';
+        campaign = campaignStr || 'New Sales Japan 09-09-2026';
+        project = 'JAPAN SSW';
+      } else if (lower.includes('albania') || lower.includes('albaina')) {
+        country = 'Albania';
+        position = 'Hospitality';
+        campaign = campaignStr || 'New Sales Albania 04-11';
+        project = 'Hospitality Division';
+      } else if (lower.includes('nurse') || lower.includes('qatar')) {
+        country = 'Qatar';
+        position = 'Nurse';
+        campaign = campaignStr || 'Qatar Nurse';
+        project = 'Healthcare Abroad';
+      } else if (lower.includes('kuwait')) {
+        country = 'Kuwait';
+        position = 'Hospitality';
+        campaign = campaignStr || 'Kuwait';
+        project = 'Hospitality Division';
+      } else if (lower.includes('europe')) {
+        country = 'Europe';
+        position = 'General Applicant';
+        campaign = campaignStr || 'Europe';
+      } else if (lower.includes('israel') || lower.includes('isreal')) {
+        country = 'Israel';
+        position = 'Supermarket';
+        campaign = campaignStr || 'Israel';
+      }
+
+      const cleanName = name && name.trim().length > 1 ? name.trim() : `WhatsApp Lead ${last10}`;
+      const leadId = generateUniqueLeadId(leads, `CONTACT_${last10}`);
+      const entryTime = dateStr && !isNaN(new Date(dateStr).getTime()) ? new Date(dateStr).toISOString() : new Date().toISOString();
+
+      const newLead: Lead = {
+        id: leadId,
+        serialNo: '',
+        entryDate: entryTime.split('T')[0],
+        assignDate: '',
+        name: cleanName,
+        phone: formattedPhone,
+        gender: 'Not defined',
+        age: '',
+        origin: '',
+        country,
+        position,
+        project: project || undefined,
+        experience: '',
+        adminRemarks: `Imported via AiSensy Calling Sheet / Meta Ads Catch-up`,
+        notes: '',
+        assignedTo: 'unassigned',
+        importance: 3,
+        remarks1: '',
+        remarks2: '',
+        remarks3: '',
+        stage: 'new',
+        budget: 0,
+        budgetRaw: 'N/A',
+        summary: `Inbound WhatsApp message: "${inferredBody}"`,
+        requirements: ['WhatsApp Inbound', ...(position ? [position] : [])],
+        fitScore: 'medium',
+        nextAction: 'Qualify credentials and documents.',
+        campaign,
+        createdAt: entryTime,
+        updatedAt: entryTime,
+        intake: false,
+        tags: country ? [country.toUpperCase()] : [],
+        messages: [
+          {
+            id: `m_sync_${Date.now()}_${last10}`,
+            wamid: `m_sync_${Date.now()}_${last10}`,
+            sender: 'lead',
+            senderName: cleanName,
+            text: inferredBody,
+            timestamp: entryTime,
+            status: 'delivered',
+            channel: 'whatsapp'
+          }
+        ],
+        timeline: [
+          {
+            id: `tl_${Date.now()}_sync_${last10}`,
+            type: 'message',
+            text: `Inbound enquiry imported: "${inferredBody.substring(0, 75)}"`,
+            actor: cleanName,
+            timestamp: entryTime
+          }
+        ]
+      };
+
+      leads.unshift(newLead);
+      addedLeads.push(newLead);
+      addedCount++;
+    };
+
+    // If structured rows provided
+    if (Array.isArray(rows) && rows.length > 0) {
+      for (const row of rows) {
+        await processCandidateRecord(
+          row.name || row.candidateName || row.userName,
+          row.phone || row.mobile || row.contact,
+          row.campaign || row.campaignName,
+          row.message || row.initialMessage || row.text,
+          row.date || row.createdAt || row.entryDate
+        );
+      }
+    } 
+    // If raw copy-pasted text provided
+    else if (rawText && typeof rawText === 'string') {
+      const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        // Tab-separated or comma-separated or plain text line
+        const parts = line.includes('\t') ? line.split('\t') : (line.includes(',') ? line.split(',') : [line]);
+        let phoneCandidate = '';
+        let nameCandidate = '';
+        let campaignCandidate = '';
+        let msgCandidate = '';
+
+        for (const p of parts) {
+          const trimmed = p.trim();
+          const digits = trimmed.replace(/\D/g, '');
+          if (digits.length >= 10 && !phoneCandidate) {
+            phoneCandidate = trimmed;
+          } else if (!nameCandidate && trimmed.length > 2 && isNaN(Number(trimmed)) && !trimmed.toLowerCase().includes('http')) {
+            nameCandidate = trimmed;
+          } else if (!campaignCandidate && (trimmed.toLowerCase().includes('japan') || trimmed.toLowerCase().includes('albania') || trimmed.toLowerCase().includes('qatar') || trimmed.toLowerCase().includes('kuwait') || trimmed.toLowerCase().includes('nurse') || trimmed.toLowerCase().includes('sales'))) {
+            campaignCandidate = trimmed;
+          } else if (!msgCandidate && trimmed.length > 3) {
+            msgCandidate = trimmed;
+          }
+        }
+
+        if (phoneCandidate) {
+          await processCandidateRecord(nameCandidate, phoneCandidate, campaignCandidate, msgCandidate);
+        }
+      }
+    }
+
+    if (addedCount > 0) {
+      clearLeadsCache();
+      await saveLeads(leads);
+    }
+
+    res.json({
+      success: true,
+      addedCount,
+      skippedCount,
+      totalRequesting: leads.filter(l => !l.isDeleted && (!l.assignedTo || l.assignedTo.toLowerCase() === 'unassigned')).length,
+      message: `Successfully imported ${addedCount} enquiries (${skippedCount} duplicates skipped).`
+    });
+  } catch (err: any) {
+    console.error('Bulk sync failed:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 
@@ -4469,49 +5047,180 @@ app.post('/api/leads/:id/restore', async (req, res) => {
 
 // ---------------- ACTIVE JOBS CRUD ENDPOINTS ----------------
 
+// Helper to clean up unused job creative files on local disk
+function cleanupUnusedJobCreativeFile(fileUrl: string | undefined, remainingJobs: Job[]) {
+  try {
+    if (!fileUrl || !fileUrl.startsWith('/uploads/job_creative_')) return;
+    const isStillUsed = remainingJobs.some(j => j.imageUrl === fileUrl);
+    if (isStillUsed) return;
+    const safeName = path.basename(fileUrl);
+    const targetPath = path.join(UPLOADS_DIR, safeName);
+    if (fs.existsSync(targetPath)) {
+      fs.unlinkSync(targetPath);
+      console.log(`[ActiveJobs] Cleaned up replaced/deleted creative file: ${safeName}`);
+    }
+  } catch (cleanupErr) {
+    console.warn('[ActiveJobs] Creative cleanup warning:', cleanupErr);
+  }
+}
+
+// POST upload & convert job creative image into optimized WebP
+app.post('/api/jobs/upload-creative', async (req, res) => {
+  try {
+    const { fileName, base64Data } = req.body;
+    if (!base64Data || typeof base64Data !== 'string') {
+      res.status(400).json({ error: 'Image data is required.' });
+      return;
+    }
+
+    const cleanBase64 = base64Data.replace(/^data:[^;]+;base64,/, '');
+    const inputBuffer = Buffer.from(cleanBase64, 'base64');
+    if (!inputBuffer || inputBuffer.length === 0) {
+      res.status(400).json({ error: 'Invalid or empty image payload.' });
+      return;
+    }
+
+    // Convert any uploaded creative image into compressed WebP (auto-oriented, max 1600px on longest side)
+    const { data: webpBuffer, info } = await sharp(inputBuffer)
+      .rotate()
+      .resize({
+        width: 1600,
+        height: 1600,
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+      .webp({
+        quality: 82,
+        effort: 4
+      })
+      .toBuffer({ resolveWithObject: true });
+
+    const rawBase = path.basename(String(fileName || 'creative'), path.extname(String(fileName || 'creative')))
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .replace(/_+/g, '_')
+      .slice(0, 40) || 'creative';
+
+    const safeWebpName = `job_creative_${rawBase}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.webp`;
+    const filePath = path.join(UPLOADS_DIR, safeWebpName);
+
+    fs.writeFileSync(filePath, webpBuffer);
+
+    try {
+      await backupFileToFirestore(safeWebpName, filePath);
+    } catch (backupErr) {
+      console.error(`[ActiveJobs] Cloud backup warning for ${safeWebpName}:`, backupErr);
+    }
+
+    const fileUrl = `/uploads/${safeWebpName}`;
+    console.log(
+      `[ActiveJobs] Creative converted to WebP: ${safeWebpName} (${inputBuffer.length} -> ${webpBuffer.length} bytes, ${info.width}x${info.height})`
+    );
+
+    res.json({
+      success: true,
+      url: fileUrl,
+      fileName: safeWebpName,
+      format: 'webp',
+      sizeBytes: webpBuffer.length,
+      originalSizeBytes: inputBuffer.length,
+      width: info.width,
+      height: info.height
+    });
+  } catch (err: any) {
+    console.error('[ActiveJobs] WebP creative upload failed:', err);
+    res.status(500).json({ error: err?.message || 'Failed to process and convert image to WebP.' });
+  }
+});
+
 // GET all active jobs
 app.get('/api/jobs', async (req, res) => {
   try {
-    const jobs = await getJobs();
+    const jobs = await getJobs(false);
     res.json(jobs);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
 
-// POST add a new job
+// GET archived (soft-deleted) jobs for zero-data-loss recovery
+app.get('/api/jobs/archived', async (req, res) => {
+  try {
+    const allJobs = await getJobs(true);
+    const archived = allJobs.filter(j => j.isDeleted === true);
+    res.json(archived);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST add a new job (Creative Image + Service Charge simplified schema, legacy optional)
 app.post('/api/jobs', async (req, res) => {
   try {
-    const { title, country, salaryRange, requirement, positions, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
-    if (!title) {
-      res.status(400).json({ error: 'Job title is required.' });
+    const {
+      imageUrl,
+      serviceCharge,
+      imageFormat,
+      imageSizeBytes,
+      originalFilename,
+      title,
+      country,
+      salaryRange,
+      requirement,
+      positions,
+      processingFeeMale,
+      processingFeeFemale,
+      accommodation,
+      ageLimit,
+      conditions,
+      modeOfInterview,
+      applicability,
+      otherTerms,
+      isActive
+    } = req.body;
+
+    const cleanImageUrl = imageUrl ? String(imageUrl).trim() : '';
+    const cleanServiceCharge = serviceCharge ? String(serviceCharge).trim() : '';
+    const cleanTitle = title ? String(title).trim() : '';
+
+    if (!cleanImageUrl && !cleanTitle) {
+      res.status(400).json({ error: 'Please upload a job creative image.' });
+      return;
+    }
+    if (cleanImageUrl && !cleanServiceCharge && !cleanTitle) {
+      res.status(400).json({ error: 'Service Charge is required.' });
       return;
     }
 
-    const jobs = await getJobs();
+    const nowIso = new Date().toISOString();
     const newJob: Job = {
       id: `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      title: String(title).trim(),
-      country: country ? String(country).trim() : 'Kuwait',
+      imageUrl: cleanImageUrl,
+      serviceCharge: cleanServiceCharge,
+      imageFormat: imageFormat ? String(imageFormat) : (cleanImageUrl.endsWith('.webp') ? 'webp' : ''),
+      imageSizeBytes: typeof imageSizeBytes === 'number' ? imageSizeBytes : undefined,
+      originalFilename: originalFilename ? String(originalFilename).trim() : '',
+      title: cleanTitle || (cleanServiceCharge ? `Demand • ${cleanServiceCharge}`.slice(0, 120) : 'Job Demand Creative'),
+      country: country ? String(country).trim() : '',
       salaryRange: salaryRange ? String(salaryRange).trim() : '',
-      requirement: requirement ? String(requirement).trim() : 'General Requirement',
+      requirement: requirement ? String(requirement).trim() : '',
       positions: Array.isArray(positions) ? positions : undefined,
-      processingFeeMale: processingFeeMale ? String(processingFeeMale).trim() : 'No fee listed',
-      processingFeeFemale: processingFeeFemale ? String(processingFeeFemale).trim() : 'No fee listed',
-      accommodation: accommodation ? String(accommodation).trim() : 'No details provided',
-      ageLimit: ageLimit ? String(ageLimit).trim() : 'N/A',
+      processingFeeMale: processingFeeMale ? String(processingFeeMale).trim() : '',
+      processingFeeFemale: processingFeeFemale ? String(processingFeeFemale).trim() : '',
+      accommodation: accommodation ? String(accommodation).trim() : '',
+      ageLimit: ageLimit ? String(ageLimit).trim() : '',
       conditions: Array.isArray(conditions) ? conditions.map(c => String(c).trim()).filter(Boolean) : [],
-      modeOfInterview: modeOfInterview ? String(modeOfInterview) : 'Online',
-      applicability: applicability ? String(applicability) : 'Both Male & Female can Apply',
+      modeOfInterview: modeOfInterview ? String(modeOfInterview) : '',
+      applicability: applicability ? String(applicability) : '',
       otherTerms: otherTerms ? String(otherTerms).trim() : '',
       isActive: isActive !== undefined ? Boolean(isActive) : true,
-      createdAt: new Date().toISOString()
+      isDeleted: false,
+      deletedAt: null,
+      createdAt: nowIso,
+      updatedAt: nowIso
     };
 
-    jobs.unshift(newJob);
-    await saveJobs(jobs);
-
-    res.status(201).json(newJob);
+    const savedJob = await upsertSingleJob(newJob, 'create');
+    res.status(201).json(savedJob);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -4521,55 +5230,98 @@ app.post('/api/jobs', async (req, res) => {
 app.put('/api/jobs/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, country, salaryRange, requirement, positions, processingFeeMale, processingFeeFemale, accommodation, ageLimit, conditions, modeOfInterview, applicability, otherTerms, isActive } = req.body;
+    const {
+      imageUrl,
+      serviceCharge,
+      imageFormat,
+      imageSizeBytes,
+      originalFilename,
+      title,
+      country,
+      salaryRange,
+      requirement,
+      positions,
+      processingFeeMale,
+      processingFeeFemale,
+      accommodation,
+      ageLimit,
+      conditions,
+      modeOfInterview,
+      applicability,
+      otherTerms,
+      isActive
+    } = req.body;
 
-    const jobs = await getJobs();
+    const jobs = await getJobs(true);
     const idx = jobs.findIndex(j => j.id === id);
     if (idx === -1) {
       res.status(404).json({ error: 'Job not found' });
       return;
     }
 
-    const updatedJob = {
+    const nextImageUrl = imageUrl !== undefined ? String(imageUrl).trim() : (jobs[idx].imageUrl || '');
+    const nextServiceCharge = serviceCharge !== undefined ? String(serviceCharge).trim() : (jobs[idx].serviceCharge || '');
+
+    const updatedJob: Job = {
       ...jobs[idx],
-      title: title !== undefined ? String(title).trim() : (jobs[idx].title || ''),
-      country: country !== undefined ? String(country).trim() : (jobs[idx].country || 'Kuwait'),
+      imageUrl: nextImageUrl,
+      serviceCharge: nextServiceCharge,
+      imageFormat: imageFormat !== undefined
+        ? String(imageFormat)
+        : (nextImageUrl.endsWith('.webp') ? 'webp' : (jobs[idx].imageFormat || '')),
+      imageSizeBytes: typeof imageSizeBytes === 'number' ? imageSizeBytes : jobs[idx].imageSizeBytes,
+      originalFilename: originalFilename !== undefined ? String(originalFilename).trim() : (jobs[idx].originalFilename || ''),
+      title: title !== undefined
+        ? String(title).trim()
+        : (jobs[idx].title || (nextServiceCharge ? `Demand • ${nextServiceCharge}`.slice(0, 120) : 'Job Demand Creative')),
+      country: country !== undefined ? String(country).trim() : (jobs[idx].country || ''),
       salaryRange: salaryRange !== undefined ? String(salaryRange).trim() : (jobs[idx].salaryRange || ''),
-      requirement: requirement !== undefined ? String(requirement).trim() : (jobs[idx].requirement || 'General Requirement'),
+      requirement: requirement !== undefined ? String(requirement).trim() : (jobs[idx].requirement || ''),
       positions: positions !== undefined ? (Array.isArray(positions) ? positions : undefined) : jobs[idx].positions,
-      processingFeeMale: processingFeeMale !== undefined ? String(processingFeeMale).trim() : (jobs[idx].processingFeeMale || 'No fee listed'),
-      processingFeeFemale: processingFeeFemale !== undefined ? String(processingFeeFemale).trim() : (jobs[idx].processingFeeFemale || 'No fee listed'),
-      accommodation: accommodation !== undefined ? String(accommodation).trim() : (jobs[idx].accommodation || 'No details provided'),
-      ageLimit: ageLimit !== undefined ? String(ageLimit).trim() : (jobs[idx].ageLimit || 'N/A'),
+      processingFeeMale: processingFeeMale !== undefined ? String(processingFeeMale).trim() : (jobs[idx].processingFeeMale || ''),
+      processingFeeFemale: processingFeeFemale !== undefined ? String(processingFeeFemale).trim() : (jobs[idx].processingFeeFemale || ''),
+      accommodation: accommodation !== undefined ? String(accommodation).trim() : (jobs[idx].accommodation || ''),
+      ageLimit: ageLimit !== undefined ? String(ageLimit).trim() : (jobs[idx].ageLimit || ''),
       conditions: conditions !== undefined ? (Array.isArray(conditions) ? conditions.map(c => String(c).trim()).filter(Boolean) : (jobs[idx].conditions || [])) : (jobs[idx].conditions || []),
-      modeOfInterview: modeOfInterview !== undefined ? String(modeOfInterview) : (jobs[idx].modeOfInterview || 'Online'),
-      applicability: applicability !== undefined ? String(applicability) : (jobs[idx].applicability || 'Both Male & Female can Apply'),
+      modeOfInterview: modeOfInterview !== undefined ? String(modeOfInterview) : (jobs[idx].modeOfInterview || ''),
+      applicability: applicability !== undefined ? String(applicability) : (jobs[idx].applicability || ''),
       otherTerms: otherTerms !== undefined ? String(otherTerms).trim() : (jobs[idx].otherTerms || ''),
-      isActive: isActive !== undefined ? Boolean(isActive) : (jobs[idx].isActive !== undefined ? jobs[idx].isActive : true)
+      isActive: isActive !== undefined ? Boolean(isActive) : (jobs[idx].isActive !== undefined ? jobs[idx].isActive : true),
+      updatedAt: new Date().toISOString()
     };
 
-    jobs[idx] = updatedJob;
-    await saveJobs(jobs);
-
-    res.json(updatedJob);
+    const saved = await upsertSingleJob(updatedJob, 'update');
+    res.json(saved);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
 
-// DELETE a job
+// DELETE a job (safe soft-delete: moves to Archive so creative + details are never lost)
 app.delete('/api/jobs/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const jobs = await getJobs();
-    const filtered = jobs.filter(j => j.id !== id);
-    if (jobs.length === filtered.length) {
+    const ok = await softDeleteJob(id);
+    if (!ok) {
       res.status(404).json({ error: 'Job not found' });
       return;
     }
+    res.json({ success: true, softDeleted: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
 
-    await saveJobs(filtered);
-    res.json({ success: true });
+// POST restore a soft-deleted job from the Archive
+app.post('/api/jobs/:id/restore', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const restored = await restoreSingleJob(id);
+    if (!restored) {
+      res.status(404).json({ error: 'Archived job not found' });
+      return;
+    }
+    res.json({ success: true, job: restored });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -4647,14 +5399,12 @@ app.put('/api/updates/:id', async (req, res) => {
 app.delete('/api/updates/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = await getUpdates();
-    const filtered = updates.filter(u => u.id !== id);
-    if (updates.length === filtered.length) {
+    const deleted = await deleteUpdateById(id);
+    if (!deleted) {
       res.status(404).json({ error: 'Update not found' });
       return;
     }
 
-    await saveUpdates(filtered);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -5773,10 +6523,58 @@ async function handleReactivationChatbot(leadId: string, messageBody: string) {
   }
 }
 
+// Strict gender normalizer: returns 'MALE' or 'FEMALE' only for valid known genders; '' for Not defined/empty/unknown
+function normalizeStrictGender(raw: unknown): 'MALE' | 'FEMALE' | '' {
+  const g = String(raw || '').trim().toUpperCase();
+  if (!g) return '';
+  if (g === 'FEMALE' || g === 'F' || g === 'WOMAN' || g === 'GIRL' || g === 'LADY') return 'FEMALE';
+  if (g === 'MALE' || g === 'M' || g === 'MAN' || g === 'BOY' || g === 'GENT') return 'MALE';
+  return '';
+}
+
+function toCompactReactivationCandidate(c: any, includeLastMessage = false): any {
+  const compactMsgs =
+    includeLastMessage && Array.isArray(c.messages) && c.messages.length > 0
+      ? [c.messages[c.messages.length - 1]]
+      : [];
+  return {
+    id: c.id,
+    serialNo: c.serialNo,
+    name: c.name,
+    phone: c.phone,
+    gender: c.gender,
+    age: c.age,
+    origin: c.origin,
+    country: c.country,
+    position: c.position,
+    experience: c.experience,
+    qualification: c.qualification,
+    salaryRange: c.salaryRange,
+    adminRemarks: c.adminRemarks,
+    remarks1: c.remarks1,
+    remarks2: c.remarks2,
+    remarks3: c.remarks3,
+    notes: c.notes,
+    summary: c.summary,
+    assignedTo: c.assignedTo || 'unassigned',
+    importance: c.importance,
+    stage: c.stage,
+    fitScore: c.fitScore,
+    project: c.project,
+    tags: c.tags,
+    campaign: c.campaign,
+    reactivationStatus: c.reactivationStatus,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    entryDate: c.entryDate,
+    messages: compactMsgs
+  };
+}
+
 // GET all active reactivation campaigns summarized from leads
 app.get('/api/reactivation/campaigns', async (req, res) => {
   try {
-    const leads = await getLeads(true);
+    const leads = await getLeads();
     const reactivationLeads = leads.filter(l => l.campaign && l.campaign.toLowerCase().startsWith('reactivation -'));
     
     const campaignMap: Record<string, {
@@ -5849,8 +6647,7 @@ app.get('/api/reactivation/campaigns', async (req, res) => {
       });
 
       campaign.candidates.push({
-        ...l,
-        assignedTo: l.assignedTo || 'unassigned',
+        ...toCompactReactivationCandidate(l, true),
         hasReplied: hasLeadReplied
       });
     });
@@ -5973,21 +6770,21 @@ app.post('/api/reactivation/scan', async (req, res) => {
   try {
     const { jobTitle, country, salary, experience, requirements, inactivityMonths, limit, gender, skipAI, candidateIds } = req.body;
     
-    let leads = await getLeads(true);
+    let leads = await getLeads();
     if (Array.isArray(candidateIds) && candidateIds.length > 0) {
       leads = leads.filter(l => candidateIds.includes(l.id));
     }
     
+    const requestedGender = normalizeStrictGender(gender);
+
     // Filter stale/inactive leads
     let inactiveCandidates = leads.filter(l => {
       if (l.isDeleted) return false;
 
-      // Filter by gender if specified (MALE or FEMALE)
-      if (gender && gender !== 'ALL' && gender !== 'any') {
-        const leadGender = (l.gender || '').toUpperCase();
-        const filterGender = gender.toUpperCase();
-        const leadGenderNormalized = leadGender.startsWith('F') ? 'FEMALE' : leadGender.startsWith('M') ? 'MALE' : '';
-        if (leadGenderNormalized && leadGenderNormalized !== filterGender) {
+      // Strict gender filter: when MALE or FEMALE is requested, exclude opposite gender AND undefined/Not defined/empty/unknown genders
+      if (requestedGender) {
+        const leadGenderNormalized = normalizeStrictGender(l.gender);
+        if (leadGenderNormalized !== requestedGender) {
           return false;
         }
       }
@@ -6063,11 +6860,9 @@ app.post('/api/reactivation/scan', async (req, res) => {
       seedCandidates.forEach(sc => {
         // Only push if not already in CRM as a lead (prevent duplicate seed)
         if (!leads.some(l => l.phone === sc.phone)) {
-          // If gender filter is specified, check if seed matches
-          if (gender && gender !== 'ALL' && gender !== 'any') {
-            const scGender = (sc.gender || '').toUpperCase();
-            const filterGender = gender.toUpperCase();
-            if (scGender !== filterGender) return;
+          // Strict gender filter on seeded candidates as well
+          if (requestedGender && normalizeStrictGender(sc.gender) !== requestedGender) {
+            return;
           }
           inactiveCandidates.push(sc as any);
         }
@@ -6214,7 +7009,7 @@ app.post('/api/reactivation/scan', async (req, res) => {
       const inactivityInfo = calculateInactivityPeriod(c);
 
       return {
-        ...c,
+        ...toCompactReactivationCandidate(c, false),
         matchScore: matchObj.matchScore,
         matchReason: matchObj.matchReason,
         lastContactedMonths: inactivityInfo.months,
@@ -6239,7 +7034,7 @@ app.post('/api/reactivation/ai-suggest-vacancy', async (req, res) => {
       targetCountry = 'All'
     } = req.body;
 
-    let leads = await getLeads(true);
+    let leads = await getLeads();
     let pool = leads.filter(l => !l.isDeleted);
 
     if (Array.isArray(candidateIds) && candidateIds.length > 0) {
@@ -6291,9 +7086,9 @@ app.post('/api/reactivation/ai-suggest-vacancy', async (req, res) => {
         const c = l.country.trim();
         countryPreferences[c] = (countryPreferences[c] || 0) + 1;
       }
-      const g = (l.gender || '').toUpperCase();
-      if (g.startsWith('F')) femaleCount++;
-      else if (g.startsWith('M')) maleCount++;
+      const g = normalizeStrictGender(l.gender);
+      if (g === 'FEMALE') femaleCount++;
+      else if (g === 'MALE') maleCount++;
     });
 
     const topPositions = Object.entries(positionsDist).sort((a, b) => b[1] - a[1]).slice(0, 5).map(e => e[0]);
@@ -6408,10 +7203,216 @@ Return a JSON object conforming strictly to this format:
   }
 });
 
-// POST launch reactivation campaign
+interface BroadcastJobStatus {
+  jobId: string;
+  campaignName: string;
+  jobTitle: string;
+  status: 'running' | 'completed' | 'failed';
+  total: number;
+  processed: number;
+  sentCount: number;
+  failedCount: number;
+  startedAt: string;
+  finishedAt?: string;
+  error?: string;
+}
+
+const broadcastJobs = new Map<string, BroadcastJobStatus>();
+
+function pruneOldBroadcastJobs() {
+  if (broadcastJobs.size <= 30) return;
+  const entries = Array.from(broadcastJobs.entries());
+  for (let i = 0; i < entries.length - 30; i++) {
+    broadcastJobs.delete(entries[i][0]);
+  }
+}
+
+async function processBroadcastJob(
+  jobId: string,
+  params: {
+    campaignName: string;
+    jobTitle: string;
+    country: string;
+    salary: string;
+    targets: Array<{ leadId: string; message: string; phone: string; name: string; gender?: string }>;
+    templateId?: string;
+    targetGender?: string;
+  }
+) {
+  const job = broadcastJobs.get(jobId);
+  if (!job) return;
+
+  try {
+    const templates = await getWhatsAppTemplates().catch(() => DEFAULT_WHATSAPP_TEMPLATES);
+    const matchedTemplate = params.templateId
+      ? templates.find(t => t.id === params.templateId || t.title === params.templateId)
+      : undefined;
+
+    const BATCH_SAVE_SIZE = 25;
+    let pendingUpdates: Array<{
+      target: { leadId: string; message: string; phone: string; name: string; gender?: string };
+      dispatchResult: Awaited<ReturnType<typeof sendWhatsAppMessage>>;
+      outboundMsg: Message;
+      tlItem: { id: string; type: 'system'; text: string; actor: string; timestamp: string };
+    }> = [];
+
+    const flushPendingUpdates = async () => {
+      if (pendingUpdates.length === 0) return;
+      const batchToCommit = pendingUpdates;
+      pendingUpdates = [];
+
+      const latestLeads = [...(await getLeads())];
+      const leadIdxMap = new Map<string, number>();
+      latestLeads.forEach((l, i) => {
+        if (l && l.id) leadIdxMap.set(l.id, i);
+      });
+
+      const nowIso = new Date().toISOString();
+      for (const item of batchToCommit) {
+        const { leadId, phone, name, gender } = item.target;
+        const existingIdx = leadIdxMap.get(leadId);
+
+        if (existingIdx === undefined) {
+          const newLeadId = `LEAD_REACT_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          const resolvedGender = normalizeStrictGender(gender) || normalizeStrictGender(params.targetGender) || '';
+          const newLead: Lead = {
+            id: newLeadId,
+            name,
+            phone,
+            gender: resolvedGender,
+            age: '26',
+            origin: 'Darjeeling',
+            country: params.country,
+            position: params.jobTitle,
+            experience: '3 years',
+            salaryRange: params.salary || '180 OMR',
+            adminRemarks: '',
+            assignedTo: 'unassigned',
+            importance: 4,
+            stage: 'new',
+            budget: 500,
+            budgetRaw: '500',
+            summary: 'Matched via AI Reactivation Campaign',
+            requirements: [params.jobTitle],
+            fitScore: 'high',
+            nextAction: 'Qualify on WhatsApp reply',
+            campaign: params.campaignName,
+            reactivationStatus: item.dispatchResult.status === 'failed' ? 'failed' : 'sent',
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            messages: [item.outboundMsg],
+            timeline: [item.tlItem],
+            entryDate: nowIso.split('T')[0],
+            assignDate: '',
+            remarks1: '',
+            remarks2: '',
+            remarks3: '',
+            notes: ''
+          };
+          latestLeads.push(newLead);
+          leadIdxMap.set(newLeadId, latestLeads.length - 1);
+        } else {
+          const lead = { ...latestLeads[existingIdx] };
+          lead.campaign = params.campaignName;
+          // Preserve lead.stage on campaign launch
+          lead.salaryRange = params.salary || lead.salaryRange || '180 OMR';
+          lead.position = params.jobTitle || lead.position;
+          lead.country = params.country || lead.country;
+          lead.reactivationStatus = item.dispatchResult.status === 'failed' ? 'failed' : 'sent';
+          lead.messages = [...(Array.isArray(lead.messages) ? lead.messages : []), item.outboundMsg];
+          lead.timeline = [...(Array.isArray(lead.timeline) ? lead.timeline : []), item.tlItem];
+          lead.updatedAt = nowIso;
+          latestLeads[existingIdx] = lead;
+        }
+      }
+
+      await saveLeads(latestLeads);
+    };
+
+    // Snapshot existing leads for template placeholder resolution before dispatching
+    const snapshotLeads = await getLeads();
+    const snapshotMap = new Map<string, Lead>();
+    snapshotLeads.forEach(l => {
+      if (l && l.id) snapshotMap.set(l.id, l);
+    });
+
+    for (let i = 0; i < params.targets.length; i++) {
+      const target = params.targets[i];
+      const snapshotLead = snapshotMap.get(target.leadId);
+
+      const dispatchResult = await sendWhatsAppMessage(
+        target.phone,
+        target.message,
+        target.name,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        snapshotLead,
+        matchedTemplate
+      );
+
+      const outboundMsg: Message = {
+        id: dispatchResult.messageId || `msg_react_out_${Date.now()}_${i}`,
+        sender: 'user',
+        senderName: 'CGP Reactivation Outreach',
+        text: target.message,
+        timestamp: new Date().toISOString(),
+        status: dispatchResult.status === 'failed' ? 'failed' : 'sent',
+        channel: 'whatsapp',
+        templateName: matchedTemplate ? matchedTemplate.id : undefined,
+        templateType: matchedTemplate ? 'template' : undefined,
+        errorDetails:
+          dispatchResult.status === 'failed'
+            ? dispatchResult.details?.error?.message || JSON.stringify(dispatchResult.details)
+            : undefined,
+        buttons: dispatchResult.buttons
+      };
+
+      const tlItem = {
+        id: `tl_${Date.now()}_${i}_react_launch`,
+        type: 'system' as const,
+        text: `Launched Reactivation Campaign outreach: "${target.message}"`,
+        actor: 'Campaign Engine',
+        timestamp: new Date().toISOString()
+      };
+
+      pendingUpdates.push({ target, dispatchResult, outboundMsg, tlItem });
+
+      job.processed++;
+      if (dispatchResult.status === 'failed') {
+        job.failedCount++;
+      } else {
+        job.sentCount++;
+      }
+
+      if (pendingUpdates.length >= BATCH_SAVE_SIZE) {
+        await flushPendingUpdates();
+      }
+
+      // Gentle 100ms pacing between WhatsApp API requests so large 150-500+ broadcasts don't burst Meta API
+      if (i < params.targets.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    await flushPendingUpdates();
+
+    job.status = 'completed';
+    job.finishedAt = new Date().toISOString();
+    console.log(`[Broadcast Job ${jobId}] Completed ${job.sentCount}/${job.total} sent (${job.failedCount} failed) for "${params.campaignName}".`);
+  } catch (err: any) {
+    console.error(`[Broadcast Job ${jobId}] Failed:`, err);
+    job.status = 'failed';
+    job.error = err?.message || 'Unknown broadcast execution error';
+    job.finishedAt = new Date().toISOString();
+  }
+}
+
+// POST launch reactivation campaign (non-blocking background queue to prevent 60s upstream request timeouts)
 app.post('/api/reactivation/launch', async (req, res) => {
   try {
-    const { jobTitle, country, salary, targets, templateId } = req.body;
+    const { jobTitle, country, salary, targets, templateId, gender } = req.body;
     if (!Array.isArray(targets) || targets.length === 0) {
       res.status(400).json({ error: 'Targets array is required and cannot be empty.' });
       return;
@@ -6421,120 +7422,57 @@ app.post('/api/reactivation/launch', async (req, res) => {
     const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
     const campaignName = `Reactivation - ${jobTitle} ${country} (${dateStr} ${timeStr})`;
-    const leads = await getLeads(true);
-    
-    // Retrieve Meta template if specified
-    const templates = await getWhatsAppTemplates().catch(() => DEFAULT_WHATSAPP_TEMPLATES);
-    const matchedTemplate = templateId ? templates.find(t => t.id === templateId || t.title === templateId) : undefined;
 
-    for (const target of targets) {
-      const { leadId, message, phone, name } = target;
-      
-      // Find or create lead (if it was a virtual seeded candidate, add it to CRM!)
-      let leadIdx = leads.findIndex(l => l.id === leadId);
-      let lead: Lead;
+    const jobId = `bcast_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const jobStatus: BroadcastJobStatus = {
+      jobId,
+      campaignName,
+      jobTitle: jobTitle || 'Vacancy Outreach',
+      status: 'running',
+      total: targets.length,
+      processed: 0,
+      sentCount: 0,
+      failedCount: 0,
+      startedAt: now.toISOString()
+    };
 
-      if (leadIdx === -1) {
-        // Virtual candidate - materialize as an actual lead in the CRM!
-        const newLeadId = `LEAD_REACT_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        lead = {
-          id: newLeadId,
-          name,
-          phone,
-          gender: 'MALE',
-          age: '26',
-          origin: 'Darjeeling',
-          country,
-          position: jobTitle,
-          experience: '3 years',
-          salaryRange: salary || '180 OMR',
-          adminRemarks: 'ORGANIC - Materialized from stale archives via Reactivation.',
-          assignedTo: 'unassigned',
-          importance: 4,
-          stage: 'new',
-          budget: 500,
-          budgetRaw: '500',
-          summary: 'Matched via AI Reactivation Campaign',
-          requirements: [jobTitle],
-          fitScore: 'high',
-          nextAction: 'Qualify on WhatsApp reply',
-          campaign: campaignName,
-          reactivationStatus: 'sent',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          messages: [],
-          timeline: [],
-          entryDate: new Date().toISOString().split('T')[0],
-          assignDate: '',
-          remarks1: '',
-          remarks2: '',
-          remarks3: '',
-          notes: ''
-        };
-        leads.push(lead);
-        leadIdx = leads.length - 1;
-      } else {
-        lead = leads[leadIdx];
-        lead.campaign = campaignName;
-        // Preserving lead.stage on campaign launch to prevent automated CRM pipeline shifts. Only Admins and Coordinators can modify stages.
-        lead.salaryRange = salary || lead.salaryRange || '180 OMR';
-        lead.position = jobTitle || lead.position;
-        lead.country = country || lead.country;
-      }
+    broadcastJobs.set(jobId, jobStatus);
+    pruneOldBroadcastJobs();
 
-      // Send the outreach via WhatsApp (Simulation or Meta Cloud API)
-      const dispatchResult = await sendWhatsAppMessage(
-        phone, 
-        message, 
-        name, 
-        undefined, 
-        undefined, 
-        undefined, 
-        undefined, 
-        lead, 
-        matchedTemplate
-      );
-
-      // Set reactivationStatus based on genuine delivery success!
-      lead.reactivationStatus = dispatchResult.status === 'failed' ? 'failed' : 'sent';
-      
-      // Append outbound message to messages list
-      const outboundMsg: Message = {
-        id: dispatchResult.messageId || `msg_react_out_${Date.now()}`,
-        sender: 'user',
-        senderName: 'CGP Reactivation Outreach',
-        text: message,
-        timestamp: new Date().toISOString(),
-        status: dispatchResult.status === 'failed' ? 'failed' : 'sent',
-        channel: 'whatsapp',
-        templateName: matchedTemplate ? matchedTemplate.id : undefined,
-        templateType: matchedTemplate ? 'template' : undefined,
-        errorDetails: dispatchResult.status === 'failed' ? (dispatchResult.details?.error?.message || JSON.stringify(dispatchResult.details)) : undefined,
-        buttons: dispatchResult.buttons
-      };
-
-      if (!Array.isArray(lead.messages)) lead.messages = [];
-      lead.messages.push(outboundMsg);
-
-      if (!Array.isArray(lead.timeline)) lead.timeline = [];
-      lead.timeline.push({
-        id: `tl_${Date.now()}_react_launch`,
-        type: 'system',
-        text: `Launched Reactivation Campaign outreach: "${message}"`,
-        actor: 'Campaign Engine',
-        timestamp: new Date().toISOString()
+    setImmediate(() => {
+      processBroadcastJob(jobId, {
+        campaignName,
+        jobTitle: jobTitle || '',
+        country: country || '',
+        salary: salary || '',
+        targets,
+        templateId,
+        targetGender: gender
       });
+    });
 
-      lead.updatedAt = new Date().toISOString();
-      leads[leadIdx] = lead;
-    }
-
-    clearLeadsCache();
-    await saveLeads(leads);
-    res.json({ success: true, count: targets.length });
+    res.json({
+      success: true,
+      queued: true,
+      jobId,
+      campaignName,
+      total: targets.length,
+      count: targets.length
+    });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
+});
+
+// GET live progress status for an active background broadcast job
+app.get('/api/reactivation/launch-status/:jobId', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  const job = broadcastJobs.get(req.params.jobId);
+  if (!job) {
+    res.status(404).json({ error: 'Broadcast job not found or expired.' });
+    return;
+  }
+  res.json({ success: true, ...job });
 });
 
 // POST simulate candidate replying YES/NO to trigger AI screening
@@ -7321,429 +8259,717 @@ Remarks Logs: ${remarksStr || 'No call log history.'}`;
 }
 
 
-// POST Smart AI Candidate Profiler and Matcher
+// POST Fast Conversational AI Candidate Matcher (Strictly scoped to Coordinator's own leads)
 app.post('/api/ai-match-leads', async (req, res) => {
+  const startTime = Date.now();
   try {
-    const { jobId, textCommand, image } = req.body;
+    const {
+      jobId,
+      textCommand,
+      message,
+      image,
+      history,
+      previousLeadIds
+    } = req.body || {};
 
-    let jobDetails = {
-      title: 'Hotel Receptionist',
-      country: 'Maldives/MVR (or other)',
-      salary: 'USD 450 per month',
-      experience: 'Minimum 3 years as a Receptionist',
-      skills: 'Good English communication skills',
-      preferredRegion: 'West Bengal, Darjeeling, or Siliguri region',
-      benefits: 'Free Food, Free Accommodation'
-    };
+    const userMessage = String(message || textCommand || '').trim();
+    const userRole = String(req.headers['x-user-role'] || req.body?.userRole || 'user').trim().toLowerCase();
+    const agentId = String(req.headers['x-agent-id'] || req.body?.agentId || 'unassigned').trim();
+    const isAdminUser = userRole === 'admin';
 
-    // If an existing job was selected, fetch its details and merge
+    // 1. Load leads & coordinators cleanly from memory/cache and strictly enforce coordinator scoping
+    const [rawLeads, coordinators] = await Promise.all([getLeads(), getCoordinators()]);
+    const activeLeads = rawLeads.filter(l => l && !l.isDeleted);
+
+    let scopedLeads: Lead[] = [];
+    if (isAdminUser) {
+      scopedLeads = activeLeads;
+    } else if (agentId && agentId.toLowerCase() !== 'unassigned') {
+      scopedLeads = activeLeads.filter(l => isCoordinatorMatch(l.assignedTo, agentId, coordinators));
+    } else {
+      scopedLeads = [];
+    }
+
+    // Resolve coordinator display label for clear scope transparency
+    const matchedCoord = coordinators.find(
+      c =>
+        c.username?.toLowerCase() === agentId.toLowerCase() ||
+        c.displayName?.toLowerCase() === agentId.toLowerCase()
+    );
+    const scopeOwnerName = matchedCoord?.displayName || agentId;
+
+    // 2. Load optional selected Active Job context (and its local .webp creative if no custom image uploaded)
+    let jobSummaryText = '';
+    let attachedImageDataUrl: string | null = typeof image === 'string' && image.trim() ? image.trim() : null;
+    let selectedJobRecord: any = null;
+
     if (jobId) {
-      const jobs = await getJobs();
-      const matchedJob = jobs.find(j => j.id === jobId);
-      if (matchedJob) {
-        jobDetails.title = matchedJob.title || jobDetails.title;
-        jobDetails.country = matchedJob.country || jobDetails.country;
-        jobDetails.experience = matchedJob.requirement || jobDetails.experience;
-        jobDetails.skills = matchedJob.applicability || jobDetails.skills;
-        jobDetails.preferredRegion = matchedJob.otherTerms || jobDetails.preferredRegion;
-        jobDetails.benefits = (matchedJob.conditions && matchedJob.conditions.join(', ')) || jobDetails.benefits;
-      }
-    }
+      const jobs = await getJobs(false);
+      selectedJobRecord = jobs.find(j => j.id === jobId) || null;
+      if (selectedJobRecord) {
+        const parts = [
+          selectedJobRecord.title || '',
+          selectedJobRecord.country ? `Country: ${selectedJobRecord.country}` : '',
+          selectedJobRecord.serviceCharge ? `Service Charge: ${selectedJobRecord.serviceCharge}` : '',
+          selectedJobRecord.requirement ? `Requirement: ${selectedJobRecord.requirement}` : '',
+          selectedJobRecord.ageLimit ? `Age: ${selectedJobRecord.ageLimit}` : ''
+        ].filter(Boolean);
+        jobSummaryText = parts.join(' | ');
 
-    // Parse textCommand details directly if provided without image
-    if (textCommand && !image) {
-      jobDetails.title = textCommand.split('\n')[0].replace(/Match candidates for/i, '').replace(/role/i, '').replace(/"/g, '').trim() || jobDetails.title;
-    }
-
-    const ai = getGemini();
-    let isFlyerParsed = false;
-
-    // Phase 1: Flyer Image Visual Extraction using Gemini 3.5 Flash
-    if (ai && image) {
-      try {
-        let base64Data = image;
-        let mimeType = 'image/png';
-        if (image.startsWith('data:')) {
-          const parts = image.split(',');
-          base64Data = parts[1];
-          const mimeMatch = parts[0].match(/data:(.*?);base64/);
-          if (mimeMatch) mimeType = mimeMatch[1];
-        }
-
-        const imagePart = {
-          inlineData: {
-            mimeType,
-            data: base64Data
-          }
-        };
-
-        const parsePrompt = `Analyze this job vacancy flyer/advertisement creative.
-Extract the job requirements and details.
-
-CRITICAL INSTRUCTIONS FOR TEXT DEDUPLICATION:
-If you notice any phrase, sentence, requirement, slogan, or benefit repeated multiple times in the image, DO NOT repeat them in the JSON output fields. Clean up the extracted text to be unique, concise, and professional. Only extract each piece of information ONCE.
-
-Return a JSON object with these fields:
-{
-  "title": "the job position title, e.g. Receptionist",
-  "country": "the country/region of work, e.g. Maldives, Germany, Qatar",
-  "salary": "the salary details listed, e.g. USD 450 per month",
-  "experience": "required experience, e.g. 3 years as receptionist. Ensure no repeating lines/text.",
-  "skills": "required skills/criteria, e.g. English speaking. Ensure no repeating phrases.",
-  "preferredRegion": "any preferred region of origin, e.g. West Bengal, Darjeeling, or Siliguri region",
-  "benefits": "benefits listed, e.g. Free food, free accommodation"
-}
-Ensure the output is valid JSON.`;
-
-        const parseRes = await safeGenerateContent(ai, {
-          model: 'gemini-3.5-flash',
-          contents: { parts: [imagePart, { text: parsePrompt }] },
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                country: { type: Type.STRING },
-                salary: { type: Type.STRING },
-                experience: { type: Type.STRING },
-                skills: { type: Type.STRING },
-                preferredRegion: { type: Type.STRING },
-                benefits: { type: Type.STRING }
-              },
-              required: ["title"]
-            }
-          }
-        });
-
-        if (parseRes.text) {
-          const parsed = JSON.parse(parseRes.text.trim());
-          
-          // Apply deduplication to all parsed fields to prevent repetitive looping
-          if (parsed.title) parsed.title = deduplicateText(parsed.title);
-          if (parsed.country) parsed.country = deduplicateText(parsed.country);
-          if (parsed.salary) parsed.salary = deduplicateText(parsed.salary);
-          if (parsed.experience) parsed.experience = deduplicateText(parsed.experience);
-          if (parsed.skills) parsed.skills = deduplicateText(parsed.skills);
-          if (parsed.preferredRegion) parsed.preferredRegion = deduplicateText(parsed.preferredRegion);
-          if (parsed.benefits) parsed.benefits = deduplicateText(parsed.benefits);
-
-          jobDetails = { ...jobDetails, ...parsed };
-          isFlyerParsed = true;
-        }
-      } catch (parseErr) {
-        console.error('Error parsing flyer image with Gemini:', parseErr);
-      }
-    }
-
-    // Merge custom command rules on top of parsed values if both exist
-    if (textCommand && isFlyerParsed) {
-      jobDetails.experience += ` | Additional requirement: ${textCommand}`;
-    }
-
-    // Apply overall deduplication to ensure final job details are extremely clean
-    jobDetails.title = deduplicateText(jobDetails.title);
-    jobDetails.country = deduplicateText(jobDetails.country);
-    jobDetails.salary = deduplicateText(jobDetails.salary);
-    jobDetails.experience = deduplicateText(jobDetails.experience);
-    jobDetails.skills = deduplicateText(jobDetails.skills);
-    jobDetails.preferredRegion = deduplicateText(jobDetails.preferredRegion);
-    jobDetails.benefits = deduplicateText(jobDetails.benefits);
-
-    // Determine required gender from parsed job context
-    const combinedJobText = `${jobDetails.title} ${jobDetails.skills} ${jobDetails.experience}`.toLowerCase();
-    const requiresFemale = /\b(female|girls|women|woman|lady|ladies)\b/i.test(combinedJobText);
-    const requiresMale = /\b(male|boys|men|man|gentleman|gentlemen)\b/i.test(combinedJobText);
-
-    let requiredGender: 'female' | 'male' | 'any' = 'any';
-    if (requiresFemale && !requiresMale) {
-      requiredGender = 'female';
-    } else if (requiresMale && !requiresFemale) {
-      requiredGender = 'male';
-    }
-
-    const leads = await getLeads();
-
-    // Phase 2: Double-Stage Matching (Fast keyword filter to find top 120 potential fits, then AI score)
-    const searchTerms = [
-      ...jobDetails.title.toLowerCase().split(/[\s-/]+/),
-      ...jobDetails.preferredRegion.toLowerCase().split(/[\s,.-]+/)
-    ].filter(t => t && t.length > 2);
-
-    const preScored = leads.map(lead => {
-      let score = 0;
-      const leadText = `
-        ${lead.name} 
-        ${lead.position || ''} 
-        ${lead.origin || ''} 
-        ${lead.experience || ''} 
-        ${lead.country || ''} 
-        ${lead.remarks1 || ''} 
-        ${lead.remarks2 || ''} 
-        ${lead.remarks3 || ''}
-      `.toLowerCase();
-
-      // Check if this lead is a strict gender mismatch
-      const leadGenderStr = String(lead.gender || '').trim().toUpperCase();
-      const isLeadFemale = leadGenderStr === 'F' || leadGenderStr === 'FEMALE';
-      const isLeadMale = leadGenderStr === 'M' || leadGenderStr === 'MALE';
-
-      let genderMismatch = false;
-      if (requiredGender === 'female' && isLeadMale) {
-        genderMismatch = true;
-      } else if (requiredGender === 'male' && isLeadFemale) {
-        genderMismatch = true;
-      }
-
-      // Position Match weights high
-      if (lead.position && lead.position.toLowerCase().includes(jobDetails.title.toLowerCase())) {
-        score += 60;
-      }
-
-      // Origin matcher
-      const regions = ['darjeeling', 'siliguri', 'bengal', 'sikkim'];
-      regions.forEach(r => {
-        if (jobDetails.preferredRegion.toLowerCase().includes(r) && leadText.includes(r)) {
-          score += 40;
-        }
-      });
-
-      // Search term index matching
-      searchTerms.forEach(term => {
-        if (leadText.includes(term)) score += 10;
-      });
-
-      if (lead.stage === 'lost') score -= 30; // lower priority for lost leads
-
-      return { lead, preScore: score, genderMismatch };
-    });
-
-    // Select the top 120 leads for high-precision Gemini evaluation, filtering out gender mismatches strictly
-    const topCandidates = preScored
-      .filter(item => !item.genderMismatch)
-      .sort((a, b) => b.preScore - a.preScore)
-      .slice(0, 120)
-      .map(item => item.lead);
-
-    // Universally pre-fetch/extract CV text summaries for the top 25 candidates in parallel (leveraging caching)
-    try {
-      if (topCandidates.length > 0) {
-        await Promise.all(topCandidates.slice(0, 25).map(c => getOrExtractCvText(c)));
-      }
-    } catch (cvErr) {
-      console.error('Error universally pre-fetching CV text summaries:', cvErr);
-    }
-
-    let matchedProfiles: any[] = [];
-    let isSimulatedResult = false;
-
-    // Phase 3: AI precision evaluation using Gemini 3.5 Flash JSON schema matching
-    if (ai && topCandidates.length > 0) {
-      try {
-        const systemInstruction = `You are an elite, highly professional AI recruiter for overseas placements.
-Evaluate the candidate list against the given Job Demand requirements.
-Assign a matching score (0 to 100) based on their skills, gender/age, origin/preferred regions, experience, and Remarks Log.
-Strictly respect the required gender constraint (do not match candidates of the wrong gender).
-Provide a clear, brief 1-sentence matching explanation.
-Return the output strictly in the requested JSON schema.`;
-
-        // Only send the top 25 candidates to Gemini to guarantee sub-2-second responses and save token limits
-        const geminiCandidates = topCandidates.slice(0, 25);
-        const remainingCandidates = topCandidates.slice(25);
-
-        const evaluationPrompt = `Job Demand Details:
-- Title: ${jobDetails.title}
-- Target Location: ${jobDetails.country}
-- Salary Package: ${jobDetails.salary}
-- Required Experience: ${jobDetails.experience}
-- Skills Preference: ${jobDetails.skills}
-- Origin Group/Region Preference: ${jobDetails.preferredRegion}
-- Additional Benefits: ${jobDetails.benefits}
-- Required Gender: ${requiredGender === 'female' ? 'Strictly Female Only' : requiredGender === 'male' ? 'Strictly Male Only' : 'Any Gender'}
-
-Candidates to Evaluate:
-${JSON.stringify(geminiCandidates.map(c => ({
-  id: c.id,
-  name: c.name,
-  gender: c.gender,
-  age: c.age,
-  origin: c.origin,
-  position: c.position,
-  experience: c.experience,
-  remarks: `${c.remarks1 || ''} ${c.remarks2 || ''} ${c.remarks3 || ''} ${c.adminRemarks || ''}`.trim(),
-  cvSummary: c.cvTextContent || 'No uploaded CV scan available'
-})), null, 2)}`;
-
-        const evalRes = await safeGenerateContent(ai, {
-          model: 'gemini-3.5-flash',
-          contents: evaluationPrompt,
-          config: {
-            systemInstruction,
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                matches: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      leadId: { type: Type.STRING },
-                      score: { type: Type.INTEGER },
-                      reason: { type: Type.STRING }
-                    },
-                    required: ["leadId", "score", "reason"]
-                  }
-                }
-              },
-              required: ["matches"]
-            }
-          }
-        });
-
-        if (evalRes.text) {
-          const parsedEval = JSON.parse(evalRes.text.trim());
-          const matchMap = new Map<string, { score: number; reason: string }>();
-          parsedEval.matches.forEach((m: any) => {
-            matchMap.set(m.leadId, { score: m.score, reason: m.reason });
-          });
-
-          const geminiEvaluated = geminiCandidates.map(c => {
-            const matchInfo = matchMap.get(c.id) || { score: 50, reason: 'Candidate matches general profile criteria.' };
-            return {
-              ...c,
-              matchScore: matchInfo.score,
-              matchReason: matchInfo.reason
-            };
-          });
-
-          // Evaluate the remaining candidates using fast, local, high-quality heuristics
-          const heuristicEvaluated = remainingCandidates.map(c => {
-            let score = 50;
-            let reason = 'Candidate holds general profiles corresponding to position keywords.';
-
-            const leadText = `
-              ${c.name} 
-              ${c.position || ''} 
-              ${c.origin || ''} 
-              ${c.experience || ''} 
-              ${c.remarks1 || ''} 
-              ${c.remarks2 || ''} 
-              ${c.remarks3 || ''}
-            `.toLowerCase();
-
-            // Double check gender mismatch programmatically just in case
-            const leadGenderStr = String(c.gender || '').trim().toUpperCase();
-            const isLeadFemale = leadGenderStr === 'F' || leadGenderStr === 'FEMALE';
-            const isLeadMale = leadGenderStr === 'M' || leadGenderStr === 'MALE';
-
-            if (requiredGender === 'female' && isLeadMale) {
-              return {
-                ...c,
-                matchScore: 0,
-                matchReason: 'Candidate gender mismatch (Job requires Female).'
-              };
-            } else if (requiredGender === 'male' && isLeadFemale) {
-              return {
-                ...c,
-                matchScore: 0,
-                matchReason: 'Candidate gender mismatch (Job requires Male).'
-              };
-            }
-
-            // Check for position relevance
-            const isPositionMatch = c.position && c.position.toLowerCase().includes(jobDetails.title.toLowerCase());
-            if (isPositionMatch) {
-              score += 35;
-              reason = `Strong keyword matching for ${jobDetails.title} roles.`;
-            } else if (leadText.includes(jobDetails.title.toLowerCase())) {
-              score += 25;
-              reason = `Resume mentions experience or interest relevant to ${jobDetails.title} positions.`;
-            }
-
-            // Check for region preference
-            if (jobDetails.preferredRegion && jobDetails.preferredRegion.toLowerCase().trim() !== 'none' && jobDetails.preferredRegion.toLowerCase().trim() !== 'n/a') {
-              const regionWords = jobDetails.preferredRegion.toLowerCase().split(/[\s,.-]+/);
-              const matchedRegions = regionWords.filter(w => w.length > 3 && leadText.includes(w));
-              if (matchedRegions.length > 0) {
-                score += 15;
-                reason += ` Origin aligns with the preferred region of ${jobDetails.preferredRegion}.`;
+        if (!attachedImageDataUrl && selectedJobRecord.imageUrl && selectedJobRecord.imageUrl.startsWith('/uploads/')) {
+          try {
+            const localImgPath = path.join(UPLOADS_DIR, path.basename(selectedJobRecord.imageUrl));
+            if (fs.existsSync(localImgPath)) {
+              const stat = fs.statSync(localImgPath);
+              if (stat.size > 0 && stat.size < 1.5 * 1024 * 1024) {
+                const ext = path.extname(localImgPath).toLowerCase();
+                const mime = ext === '.png' ? 'image/png' : (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg' : 'image/webp';
+                const b64 = fs.readFileSync(localImgPath).toString('base64');
+                attachedImageDataUrl = `data:${mime};base64,${b64}`;
               }
             }
-
-            score = Math.min(88, Math.max(40, score));
-
-            return {
-              ...c,
-              matchScore: score,
-              matchReason: reason
-            };
-          });
-
-          matchedProfiles = [...geminiEvaluated, ...heuristicEvaluated]
-            // Keep scores > 0 to filter out potential mismatches
-            .filter(item => item.matchScore > 0)
-            .sort((a, b) => b.matchScore - a.matchScore);
+          } catch {}
         }
-      } catch (evalErr) {
-        console.error('Error during precise Gemini evaluation:', evalErr);
+      }
+    }
+
+    // If coordinator has zero assigned leads, return immediately (<10ms) in simple language
+    if (scopedLeads.length === 0) {
+      return res.json({
+        reply: isAdminUser
+          ? 'No active candidate leads found in CRM right now.'
+          : `Hi ${scopeOwnerName}, right now 0 leads are assigned to you. Ask admin to assign leads first, then I can find match for you.`,
+        jobSummary: jobSummaryText || '',
+        jobDetails: {
+          title: selectedJobRecord?.serviceCharge || selectedJobRecord?.title || 'General Search',
+          country: selectedJobRecord?.country || '',
+          salary: '',
+          experience: '',
+          skills: '',
+          preferredRegion: '',
+          benefits: ''
+        },
+        matches: [],
+        scopedCount: 0,
+        scopeLabel: isAdminUser ? 'All CRM Leads' : `${scopeOwnerName}'s Leads Only`,
+        elapsedMs: Date.now() - startTime,
+        isSimulated: false
+      });
+    }
+
+    // 3. Gather recent context & previous IDs
+    const recentUserTexts = Array.isArray(history)
+      ? history
+          .filter((h: any) => h && h.role === 'user' && h.text)
+          .slice(-3)
+          .map((h: any) => String(h.text))
+      : [];
+
+    const prevIdSet = new Set(Array.isArray(previousLeadIds) ? previousLeadIds.map(String) : []);
+
+    // Build quick lead pool statistics for general chat questions ("how many leads I have?", etc.)
+    const stageCounts: Record<string, number> = {};
+    for (const l of scopedLeads) {
+      const st = l.stage || 'new';
+      stageCounts[st] = (stageCounts[st] || 0) + 1;
+    }
+
+    // Domain synonym clusters for full CRM coverage across common hospitality/abroad recruitment trades
+    const ROLE_SYNONYM_GROUPS: Array<{
+      triggers: string[];
+      exact: string[];
+      related: string[];
+    }> = [
+      {
+        triggers: ['waitress', 'waitresses', 'waiter', 'waiters', 'steward', 'stewardess', 'hostess', 'server', 'table service'],
+        exact: ['waitress', 'waitresses', 'waiter', 'waiters', 'steward', 'stewardess', 'hostess', 'server'],
+        related: ['hospitality', 'f&b', 'food & beverage', 'barista', 'bartender', 'restaurant', 'cafe', 'coffee shop', 'hotel industry', 'banquet', 'catering', 'food service']
+      },
+      {
+        triggers: ['hospitality', 'f&b', 'food & beverage', 'barista', 'bartender', 'hotel industry', 'restaurant', 'catering'],
+        exact: ['hospitality', 'f&b', 'food & beverage', 'barista', 'bartender', 'hotel industry', 'restaurant', 'catering', 'waitress', 'waiter', 'hostess', 'steward'],
+        related: ['cafe', 'coffee shop', 'banquet', 'food service', 'front office', 'receptionist']
+      },
+      {
+        triggers: ['cook', 'cooks', 'chef', 'chefs', 'commi', 'culinary', 'baker', 'pastry', 'tandoor', 'sous chef', 'kitchen'],
+        exact: ['cook', 'cooks', 'chef', 'chefs', 'commi', 'culinary', 'baker', 'pastry', 'tandoor', 'sous chef', 'kitchen helper'],
+        related: ['kitchen', 'restaurant', 'catering', 'banquet']
+      },
+      {
+        triggers: ['nurse', 'nursing', 'gnm', 'anm', 'caregiver', 'care giver', 'caretaker', 'care taker', 'healthcare'],
+        exact: ['nurse', 'nursing', 'gnm', 'anm', 'caregiver', 'care giver', 'caretaker', 'care taker'],
+        related: ['healthcare', 'medical', 'hospital', 'clinic', 'patient care', 'midwife', 'ssw']
+      },
+      {
+        triggers: ['driver', 'drivers', 'driving', 'chauffeur', 'heavy driver', 'light driver'],
+        exact: ['driver', 'drivers', 'driving', 'chauffeur', 'heavy driver', 'light driver', 'truck driver', 'bus driver', 'delivery driver'],
+        related: ['transport', 'rider', 'courier', 'logistics']
+      },
+      {
+        triggers: ['cleaner', 'cleaning', 'housekeeping', 'house keeping', 'housekeeper', 'maid', 'nanny', 'babysitter', 'janitor'],
+        exact: ['cleaner', 'cleaning', 'housekeeping', 'house keeping', 'housekeeper', 'maid', 'nanny', 'babysitter', 'janitor', 'room attendant'],
+        related: ['attendant', 'laundry', 'domestic']
+      },
+      {
+        triggers: ['cashier', 'sales', 'salesgirl', 'salesman', 'retail', 'promoter', 'merchandiser'],
+        exact: ['cashier', 'sales', 'salesgirl', 'salesman', 'sales executive', 'retail', 'promoter', 'merchandiser'],
+        related: ['supermarket', 'mall', 'customer service', 'counter', 'store']
+      },
+      {
+        triggers: ['packer', 'packers', 'packing', 'warehouse', 'factory', 'picker', 'loader', 'storekeeper', 'store keeper'],
+        exact: ['packer', 'packers', 'packing', 'warehouse', 'factory', 'picker', 'loader', 'store keeper', 'storekeeper'],
+        related: ['helper', 'packaging', 'logistics', 'production', 'manufacturing', 'inventory']
+      },
+      {
+        triggers: ['security', 'guard', 'security guard', 'bouncer', 'watchman'],
+        exact: ['security', 'guard', 'security guard', 'bouncer', 'watchman'],
+        related: ['safety', 'patrol', 'cctv']
+      },
+      {
+        triggers: ['receptionist', 'front office', 'front desk', 'concierge'],
+        exact: ['receptionist', 'front office', 'front desk', 'concierge'],
+        related: ['hospitality', 'customer service', 'admin', 'clerk']
+      },
+      {
+        triggers: ['electrician', 'plumber', 'technician', 'mechanic', 'welder', 'carpenter', 'mason', 'hvac', 'fitter', 'painter'],
+        exact: ['electrician', 'plumber', 'technician', 'mechanic', 'welder', 'carpenter', 'mason', 'hvac', 'ac technician', 'fitter', 'painter'],
+        related: ['maintenance', 'technical', 'construction']
+      },
+      {
+        triggers: ['teacher', 'teaching', 'tutor', 'instructor'],
+        exact: ['teacher', 'teaching', 'tutor', 'instructor'],
+        related: ['education', 'school']
+      }
+    ];
+
+    const KNOWN_COUNTRIES = [
+      'kuwait', 'dubai', 'uae', 'qatar', 'oman', 'bahrain', 'saudi', 'ksa', 'japan',
+      'albania', 'poland', 'malta', 'europe', 'croatia', 'romania', 'serbia', 'bulgaria',
+      'singapore', 'malaysia', 'maldives', 'israel', 'cyprus', 'russia', 'armenia'
+    ];
+
+    const hasTerm = (text: string, term: string): boolean => {
+      if (!text || !term) return false;
+      const esc = term.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (!esc) return false;
+      return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, 'i').test(text);
+    };
+
+    const detectGenderFromText = (text: string): 'female' | 'male' | 'any' => {
+      const wantsF = /\b(female|females|girl|girls|woman|women|lady|ladies|waitress|waitresses|maid|maids|nanny|hostess)\b/i.test(text);
+      const wantsM = /\b(male|males|boy|boys|man|men|gentleman|gentlemen|waiter|waiters)\b/i.test(text);
+      if (wantsF && !wantsM) return 'female';
+      if (wantsM && !wantsF) return 'male';
+      return 'any';
+    };
+
+    const stopWords = new Set([
+      'i', 'need', 'want', 'show', 'find', 'give', 'me', 'some', 'any', 'good', 'best', 'for', 'in',
+      'from', 'with', 'who', 'have', 'has', 'can', 'the', 'and', 'or', 'to', 'of', 'only', 'leads',
+      'lead', 'candidate', 'candidates', 'job', 'work', 'please', 'pls', 'check', 'my', 'your', 'are',
+      'all', 'list', 'full', 'female', 'females', 'male', 'males', 'girl', 'girls', 'boy', 'boys',
+      'woman', 'women', 'man', 'men', 'under', 'above', 'below', 'age', 'years', 'year', 'yr', 'yrs',
+      'stage', 'active', 'no', 'not', 'lost', 'remove', 'without', 'except', 'now', 'also', 'more', 'worker'
+    ]);
+
+    const ai = getGemini();
+    let intent: 'casual_or_count' | 'search' = 'search';
+    let casualReply = '';
+    let aiJobSummary = jobSummaryText || userMessage.slice(0, 80) || 'Candidate Match';
+    let requiredGender: 'female' | 'male' | 'any' = detectGenderFromText(`${userMessage} ${jobSummaryText}`);
+    let exactRoleTerms: string[] = [];
+    let relatedRoleTerms: string[] = [];
+    let targetCountries: string[] = [];
+    let targetOrigins: string[] = [];
+    let minAge = 0;
+    let maxAge = 0;
+    let excludeLost = false;
+    let mustHaveKeywords: string[] = [];
+    let filterPreviousOnly = false;
+    let isSimulatedResult = false;
+
+    const historyLines = Array.isArray(history)
+      ? history
+          .slice(-4)
+          .map((h: any) => `${h.role === 'user' ? 'User' : 'AI'}: ${String(h.text || '').slice(0, 180)}`)
+          .join('\n')
+      : '';
+
+    // 4. Phase 1: Fast Gemini intent & filter extractor (text -> flash-lite ~0.6s, image -> 4-hydrogen ~1.5s)
+    // Never filters or caps candidate IDs! Extracts structured search criteria so 100% of matching leads are returned.
+    if (ai) {
+      try {
+        const systemInstruction = `You are a fast CRM search translator for consultancy staff. Talk in VERY SIMPLE broken English (friendly WhatsApp style).
+TASK: Understand what the user wants from their message (plus any job photo / active job / recent chat context) and return clean JSON search filters.
+
+RULES:
+1. If user only says greeting/thanks ("hi", "hello", "ok", "thanks") OR asks a count/status question about their CRM leads ("how many leads I have?", "how many won leads?") without asking to list candidates, set "intent": "casual_or_count" and write "casualReply" in 1-2 short simple broken-English sentences using the exact Stage numbers provided.
+2. Otherwise set "intent": "search".
+3. Extract ALL relevant job role keywords and common CRM synonyms:
+   - exactRoleTerms: main job words (e.g. for waitress -> ["waitress", "waiter", "hostess", "steward"]; for cook -> ["cook", "chef", "commi", "culinary"]). Keep array empty [] if user did not specify any job role (like "show my kuwait leads").
+   - relatedRoleTerms: closely related CRM position categories (e.g. for waitress -> ["hospitality", "barista", "f&b", "restaurant", "hotel", "cafe"]; NEVER include "general", "sales", "teacher", or unrelated jobs).
+4. Extract requiredGender ("female", "male", or "any"). If query mentions waitress/hostess/girl/lady/female -> "female".
+5. Extract countries (if asked, e.g. ["kuwait"]), origins/cities (if asked, e.g. ["darjeeling"]), minAge / maxAge (0 if not mentioned), excludeLost (true ONLY if user says "no lost", "active only", "hide lost"; default false so full list is returned!), mustHaveKeywords (if user asks specific requirement like "passport", "english", "taj hotel").
+6. Set filterPreviousOnly = true ONLY when user is narrowing the previous list (e.g. "only from Darjeeling", "remove lost from this list", "under 25 only") AND NOT starting a brand new job search.
+7. NEVER write fancy corporate English.`;
+
+        const parserPrompt = `Scope: ${isAdminUser ? `All CRM Leads (${scopedLeads.length} active)` : `ONLY ${scopeOwnerName}'s own leads (${scopedLeads.length} total)`}
+Stage summary: new=${stageCounts.new || 0}, in_discussion=${(stageCounts.in_discussion || 0) + (stageCounts.negotiating || 0)}, strong=${stageCounts.strong_opportunity || 0}, office_visited=${stageCounts.office_visited || 0}, won=${stageCounts.won || 0}, cold=${stageCounts.cold_leads || 0}, lost=${stageCounts.lost || 0}
+${jobSummaryText ? `Selected Active Job: ${jobSummaryText}\n` : ''}${historyLines ? `Recent chat:\n${historyLines}\n` : ''}Previous matched list count: ${prevIdSet.size}
+User message now: "${userMessage || (attachedImageDataUrl ? 'Find matching candidates for this job photo' : 'Hi')}"`;
+
+        const parts: any[] = [];
+        if (attachedImageDataUrl) {
+          let base64Data = attachedImageDataUrl;
+          let mimeType = 'image/png';
+          if (attachedImageDataUrl.startsWith('data:')) {
+            const splitParts = attachedImageDataUrl.split(',');
+            base64Data = splitParts[1] || '';
+            const mimeMatch = splitParts[0].match(/data:(.*?);base64/);
+            if (mimeMatch) mimeType = mimeMatch[1];
+          }
+          if (base64Data) {
+            parts.push({ inlineData: { mimeType, data: base64Data } });
+          }
+        }
+        parts.push({ text: parserPrompt });
+
+        const fastModel = attachedImageDataUrl ? 'gemini-4-hydrogen' : 'gemini-3.1-flash-lite';
+        const fastThinking = attachedImageDataUrl ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL;
+
+        const parseRes = await safeGenerateContent(ai, {
+          model: fastModel,
+          contents: { parts },
+          config: {
+            systemInstruction,
+            thinkingConfig: { thinkingLevel: fastThinking },
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                intent: { type: Type.STRING },
+                casualReply: { type: Type.STRING },
+                jobSummary: { type: Type.STRING },
+                requiredGender: { type: Type.STRING },
+                exactRoleTerms: { type: Type.ARRAY, items: { type: Type.STRING } },
+                relatedRoleTerms: { type: Type.ARRAY, items: { type: Type.STRING } },
+                countries: { type: Type.ARRAY, items: { type: Type.STRING } },
+                origins: { type: Type.ARRAY, items: { type: Type.STRING } },
+                minAge: { type: Type.INTEGER },
+                maxAge: { type: Type.INTEGER },
+                excludeLost: { type: Type.BOOLEAN },
+                mustHaveKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                filterPreviousOnly: { type: Type.BOOLEAN }
+              },
+              required: ['intent', 'jobSummary', 'requiredGender', 'exactRoleTerms', 'relatedRoleTerms']
+            }
+          }
+        });
+
+        if (parseRes?.text) {
+          const p = JSON.parse(parseRes.text.trim());
+          intent = String(p.intent || '').toLowerCase() === 'casual_or_count' ? 'casual_or_count' : 'search';
+          casualReply = String(p.casualReply || '').trim();
+          if (p.jobSummary) aiJobSummary = String(p.jobSummary).trim();
+          const gVal = String(p.requiredGender || '').toLowerCase();
+          if (gVal === 'female' || gVal === 'male' || gVal === 'any') requiredGender = gVal;
+          exactRoleTerms = Array.isArray(p.exactRoleTerms) ? p.exactRoleTerms.map((x: any) => String(x).toLowerCase().trim()).filter(Boolean) : [];
+          relatedRoleTerms = Array.isArray(p.relatedRoleTerms) ? p.relatedRoleTerms.map((x: any) => String(x).toLowerCase().trim()).filter(Boolean) : [];
+          targetCountries = Array.isArray(p.countries) ? p.countries.map((x: any) => String(x).toLowerCase().trim()).filter(Boolean) : [];
+          targetOrigins = Array.isArray(p.origins) ? p.origins.map((x: any) => String(x).toLowerCase().trim()).filter(Boolean) : [];
+          minAge = Number(p.minAge) > 0 ? Number(p.minAge) : 0;
+          maxAge = Number(p.maxAge) > 0 ? Number(p.maxAge) : 0;
+          excludeLost = Boolean(p.excludeLost);
+          mustHaveKeywords = Array.isArray(p.mustHaveKeywords) ? p.mustHaveKeywords.map((x: any) => String(x).toLowerCase().trim()).filter(Boolean) : [];
+          filterPreviousOnly = Boolean(p.filterPreviousOnly) && prevIdSet.size > 0 && !attachedImageDataUrl && !jobId;
+        }
+      } catch (parseErr) {
+        console.warn('[AI Matcher Chat] Gemini intent parser fallback to deterministic parser:', parseErr);
         isSimulatedResult = true;
       }
     } else {
       isSimulatedResult = true;
     }
 
-    // Heuristics-based Fallback/Simulated Matching Mode
-    if (isSimulatedResult || matchedProfiles.length === 0) {
-      matchedProfiles = topCandidates.map(c => {
-        let score = 50;
-        let reason = 'Candidate holds general profiles corresponding to position keywords.';
-
-        const leadText = `
-          ${c.name} 
-          ${c.position || ''} 
-          ${c.origin || ''} 
-          ${c.experience || ''} 
-          ${c.remarks1 || ''} 
-          ${c.remarks2 || ''} 
-          ${c.remarks3 || ''}
-        `.toLowerCase();
-
-        // Check for position relevance
-        const isReceptionist = leadText.includes('reception') || leadText.includes('front') || leadText.includes('hotel') || leadText.includes('office') || leadText.includes('admin') || leadText.includes('cook') || leadText.includes('housekeep');
-        if (isReceptionist) {
-          score += 35;
-          reason = `Excellent matches found in resume keywords for ${jobDetails.title} roles.`;
-        }
-
-        // Check for region preference
-        const isPreferredOrigin = leadText.includes('darjeeling') || leadText.includes('siliguri') || leadText.includes('bengal') || leadText.includes('sikkim');
-        if (isPreferredOrigin) {
-          score += 12;
-          reason += ' Origin aligns with the preferred West Bengal/Darjeeling region.';
-        }
-
-        if (c.experience && c.experience.toLowerCase().includes('years')) {
-          score += 3;
-        }
-
-        score = Math.min(98, Math.max(55, score));
-
-        return {
-          ...c,
-          matchScore: score,
-          matchReason: reason
-        };
-      }).sort((a, b) => b.matchScore - a.matchScore);
+    // Deterministic fallback & safety merge so synonyms/countries/age are always caught even if Gemini is unavailable
+    const fallbackTextSource = `${userMessage} ${jobSummaryText}`.toLowerCase();
+    if (isSimulatedResult) {
+      const isGreetingOrCount =
+        !attachedImageDataUrl &&
+        !jobId &&
+        (/^(hi|hello|hey|ok|thanks|thank you)\b/i.test(userMessage) ||
+          /how many (lead|leads)|total leads|my leads count/i.test(userMessage));
+      if (isGreetingOrCount) {
+        intent = 'casual_or_count';
+        casualReply = `Hi ${scopeOwnerName}! You have ${scopedLeads.length} leads total (new=${stageCounts.new || 0}, in discussion=${(stageCounts.in_discussion || 0) + (stageCounts.negotiating || 0)}, strong=${stageCounts.strong_opportunity || 0}, won=${stageCounts.won || 0}). Tell me what worker you need!`;
+      }
     }
 
-    res.json({
-      jobDetails,
-      matches: matchedProfiles.slice(0, 30),
-      isSimulated: isSimulatedResult || !ai
+    if (intent === 'casual_or_count') {
+      const elapsedMs = Date.now() - startTime;
+      return res.json({
+        reply: casualReply || `Hi ${scopeOwnerName}! You have ${scopedLeads.length} leads total. Tell me what worker you need!`,
+        jobSummary: 'CRM Chat',
+        jobDetails: {
+          title: 'CRM Chat',
+          country: '',
+          salary: '',
+          experience: '',
+          skills: '',
+          preferredRegion: '',
+          benefits: ''
+        },
+        matches: [],
+        scopedCount: scopedLeads.length,
+        scopeLabel: isAdminUser ? `All CRM Leads (${scopedLeads.length})` : `${scopeOwnerName}'s Leads Only (${scopedLeads.length})`,
+        elapsedMs,
+        isSimulated: isSimulatedResult
+      });
+    }
+
+    // Extract deterministic country/age/keyword signals cleanly if not already captured
+    if (targetCountries.length === 0) {
+      for (const c of KNOWN_COUNTRIES) {
+        if (hasTerm(fallbackTextSource, c)) targetCountries.push(c);
+      }
+    }
+    if (!excludeLost && /\b(no lost|hide lost|exclude lost|active only|active stage only|not lost)\b/i.test(userMessage)) {
+      excludeLost = true;
+    }
+    if (!maxAge) {
+      const mUnder = userMessage.match(/\b(?:under|below|max|less than)\s*(\d{2})\b/i);
+      if (mUnder) maxAge = Number(mUnder[1]);
+    }
+    if (!minAge) {
+      const mAbove = userMessage.match(/\b(?:above|over|min|more than)\s*(\d{2})\b/i);
+      if (mAbove) minAge = Number(mAbove[1]);
+    }
+
+    // Merge exact + related role terms with our curated ROLE_SYNONYM_GROUPS so full CRM matches are guaranteed
+    const exactRoleSet = new Set<string>(exactRoleTerms.filter(t => t.length >= 2 && !stopWords.has(t)));
+    const relatedRoleSet = new Set<string>(relatedRoleTerms.filter(t => t.length >= 2 && !stopWords.has(t)));
+
+    // Remove generic country tokens if Gemini accidentally put country names into role arrays
+    const countrySet = new Set(targetCountries.map(c => c.toLowerCase()));
+    for (const c of countrySet) {
+      exactRoleSet.delete(c);
+      relatedRoleSet.delete(c);
+    }
+
+    // Add raw non-stop, non-country search tokens from the current message/job if exactRoleSet is still empty
+    if (exactRoleSet.size === 0 && !filterPreviousOnly) {
+      const rawTokens = fallbackTextSource
+        .split(/[^a-z0-9&]+/)
+        .filter(t => t.length >= 2 && !stopWords.has(t) && !countrySet.has(t) && !KNOWN_COUNTRIES.includes(t));
+      for (const t of rawTokens) exactRoleSet.add(t);
+    }
+
+    // Expand synonyms based on triggers present in userMessage/jobSummaryText/exactRoleSet
+    const triggerSource = `${fallbackTextSource} ${Array.from(exactRoleSet).join(' ')}`;
+    for (const grp of ROLE_SYNONYM_GROUPS) {
+      if (grp.triggers.some(t => hasTerm(triggerSource, t))) {
+        grp.exact.forEach(t => exactRoleSet.add(t));
+        grp.related.forEach(t => relatedRoleSet.add(t));
+      }
+    }
+    // Ensure exact terms take precedence over related terms
+    for (const ex of exactRoleSet) {
+      relatedRoleSet.delete(ex);
+    }
+
+    // Filter out noisy overly-broad words from relatedRoleSet
+    for (const noisy of ['general', 'worker', 'staff', 'job', 'experience', 'hotel']) {
+      relatedRoleSet.delete(noisy);
+    }
+
+    // 5. Phase 2: Instant 100%-Pool Deterministic Matching & Ranking across ALL scopedLeads (NO truncation!)
+    const candidatePool = filterPreviousOnly
+      ? scopedLeads.filter(l => prevIdSet.has(l.id))
+      : scopedLeads;
+
+    const hasRoleCriteria = exactRoleSet.size > 0 || relatedRoleSet.size > 0;
+    const hasFilterCriteria =
+      hasRoleCriteria ||
+      countrySet.size > 0 ||
+      targetOrigins.length > 0 ||
+      mustHaveKeywords.length > 0 ||
+      requiredGender !== 'any' ||
+      minAge > 0 ||
+      maxAge > 0;
+
+    const STAGE_PRIORITY: Record<string, number> = {
+      strong_opportunity: 20,
+      office_visited: 18,
+      in_discussion: 12,
+      negotiating: 12,
+      proposal: 10,
+      rotations: 8,
+      new: 7,
+      cold_leads: 3,
+      won: 1,
+      lost: -18
+    };
+
+    const STAGE_DISPLAY: Record<string, string> = {
+      new: 'New Inbound',
+      in_discussion: 'In Discussion',
+      negotiating: 'In Discussion',
+      strong_opportunity: 'Strong Opportunity',
+      office_visited: 'Office Visited',
+      won: 'Won',
+      cold_leads: 'Cold Leads',
+      lost: 'Lost'
+    };
+
+    type ScoredCandidate = {
+      lead: Lead;
+      rawScore: number;
+      hasExactRoleHit: boolean;
+      matchesCountry: boolean;
+      matchedTermLabel: string;
+    };
+
+    const rawMatchesList: ScoredCandidate[] = [];
+
+    for (const lead of candidatePool) {
+      const gRaw = String(lead.gender || '').trim().toUpperCase();
+      const isF = gRaw === 'F' || gRaw === 'FEMALE';
+      const isM = gRaw === 'M' || gRaw === 'MALE';
+
+      const posProjTags = `${lead.position || ''} ${lead.project || ''} ${Array.isArray(lead.tags) ? lead.tags.join(' ') : ''}`;
+      const expStr = `${lead.experience || ''}`;
+      const remarksStr = `${lead.remarks1 || ''} ${lead.remarks2 || ''} ${lead.remarks3 || ''} ${lead.adminRemarks || ''}`;
+      const notesAndCv = `${remarksStr} ${lead.cvTextContent || ''}`;
+      const allSearchable = `${lead.name || ''} ${posProjTags} ${expStr} ${lead.country || ''} ${lead.origin || ''} ${lead.qualification || ''} ${notesAndCv}`;
+
+      // Strict gender guarantee (when user wants female or male)
+      if (requiredGender === 'female') {
+        if (isM) continue;
+        if (!isF) {
+          // For "Not defined"/blank gender, allow only if profile explicitly states female/waitress/hostess/maid/nanny
+          if (!/\b(female|waitress|waitresses|hostess|maid|nanny|girl|lady|ladies)\b/i.test(`${posProjTags} ${expStr} ${remarksStr}`)) {
+            continue;
+          }
+        }
+      } else if (requiredGender === 'male') {
+        if (isF) continue;
+        if (!isM) {
+          if (!/\b(male|waiter|waiters|man|boy|gentleman)\b/i.test(`${posProjTags} ${expStr} ${remarksStr}`)) {
+            continue;
+          }
+        }
+      }
+
+      // Stage exclusion if explicitly requested
+      if (excludeLost && lead.stage === 'lost') continue;
+
+      // Age constraint check
+      const ageNum = parseInt(String(lead.age || ''), 10);
+      if (minAge > 0 && (isNaN(ageNum) || ageNum < minAge)) continue;
+      if (maxAge > 0 && (isNaN(ageNum) || ageNum > maxAge)) continue;
+
+      // Origin / hometown constraint check
+      if (targetOrigins.length > 0) {
+        const originTargetText = `${lead.origin || ''} ${remarksStr} ${lead.cvTextContent || ''}`;
+        if (!targetOrigins.some(orig => hasTerm(originTargetText, orig))) continue;
+      }
+
+      // Extra mandatory keywords (e.g. "passport", "english", "taj")
+      if (mustHaveKeywords.length > 0) {
+        const everyKwOk = mustHaveKeywords.every(kw => hasTerm(allSearchable, kw));
+        if (!everyKwOk) continue;
+      }
+
+      // Role scoring across exact + related terms
+      let roleScore = 0;
+      let hasExactRoleHit = false;
+      let matchedTermLabel = '';
+
+      for (const term of exactRoleSet) {
+        if (hasTerm(posProjTags, term)) {
+          roleScore += 60;
+          hasExactRoleHit = true;
+          if (!matchedTermLabel) matchedTermLabel = term;
+        } else if (hasTerm(expStr, term)) {
+          roleScore += 48;
+          hasExactRoleHit = true;
+          if (!matchedTermLabel) matchedTermLabel = term;
+        } else if (hasTerm(notesAndCv, term)) {
+          roleScore += 32;
+          hasExactRoleHit = true;
+          if (!matchedTermLabel) matchedTermLabel = term;
+        }
+      }
+
+      for (const term of relatedRoleSet) {
+        if (hasTerm(posProjTags, term)) {
+          roleScore += 32;
+          if (!matchedTermLabel) matchedTermLabel = term;
+        } else if (hasTerm(expStr, term)) {
+          roleScore += 24;
+          if (!matchedTermLabel) matchedTermLabel = term;
+        } else if (hasTerm(notesAndCv, term)) {
+          roleScore += 12;
+          if (!matchedTermLabel) matchedTermLabel = term;
+        }
+      }
+
+      // If role criteria exist and candidate does not match any exact or related role term, skip
+      if (hasRoleCriteria && roleScore === 0) continue;
+
+      // Country match evaluation
+      const countryText = `${lead.country || ''} ${lead.project || ''} ${expStr} ${remarksStr} ${lead.cvTextContent || ''}`;
+      const matchesCountry =
+        countrySet.size > 0 && Array.from(countrySet).some(c => hasTerm(countryText, c));
+
+      if (!hasRoleCriteria && countrySet.size > 0 && !matchesCountry) {
+        continue;
+      }
+
+      if (!hasFilterCriteria) continue;
+
+      // Quality & stage ranking bonuses
+      let totalScore = roleScore;
+      if (matchesCountry) totalScore += 40;
+      if (isF && requiredGender === 'female') totalScore += 15;
+      if (isM && requiredGender === 'male') totalScore += 15;
+      totalScore += STAGE_PRIORITY[lead.stage || 'new'] || 0;
+
+      const cleanExp = expStr.trim().toLowerCase();
+      if (cleanExp && cleanExp !== 'fresher' && cleanExp !== 'freshers' && cleanExp !== 'fresh criteria' && cleanExp !== 'verification pending' && cleanExp !== 'n/a') {
+        totalScore += 8;
+      }
+      if (lead.cvTextContent) totalScore += 4;
+
+      rawMatchesList.push({
+        lead,
+        rawScore: totalScore,
+        hasExactRoleHit,
+        matchesCountry,
+        matchedTermLabel
+      });
+    }
+
+    // Smart country narrowing ONLY when targetCountries were specified WITH role terms:
+    // If >= 8 candidates match the requested country explicitly, keep requested-country + blank/General-country candidates
+    // (excludes candidates strictly locked to other unrelated countries like Japan/Europe).
+    let finalScored = rawMatchesList;
+    if (countrySet.size > 0 && hasRoleCriteria) {
+      const explicitCountryCount = rawMatchesList.filter(x => x.matchesCountry).length;
+      if (explicitCountryCount >= 8) {
+        finalScored = rawMatchesList.filter(x => {
+          if (x.matchesCountry) return true;
+          const lc = String(x.lead.country || '').trim().toLowerCase();
+          return !lc || lc === 'not defined' || lc === 'n/a' || lc === 'general' || lc === 'other';
+        });
+      }
+    }
+
+    // Sort: requested country first -> exact role match first -> totalScore descending -> newest first
+    finalScored.sort((a, b) => {
+      if (countrySet.size > 0 && a.matchesCountry !== b.matchesCountry) {
+        return a.matchesCountry ? -1 : 1;
+      }
+      if (a.hasExactRoleHit !== b.hasExactRoleHit) {
+        return a.hasExactRoleHit ? -1 : 1;
+      }
+      if (b.rawScore !== a.rawScore) {
+        return b.rawScore - a.rawScore;
+      }
+      return new Date(b.lead.createdAt || 0).getTime() - new Date(a.lead.createdAt || 0).getTime();
     });
 
+    // Return FULL list by default (generous safety cap 500 covers every match cleanly)
+    const maxScoreVal = finalScored.length > 0 ? Math.max(...finalScored.map(s => s.rawScore), 1) : 100;
+    const matchedProfiles = finalScored.slice(0, 500).map(item => {
+      const c = item.lead;
+      // Calibrated 62-99% relevance score
+      const baseFloor = item.hasExactRoleHit ? 84 : 70;
+      const ratio = item.rawScore / maxScoreVal;
+      let matchScore = Math.round(baseFloor + ratio * (99 - baseFloor));
+      if (c.stage === 'lost') matchScore = Math.min(matchScore, 74);
+      matchScore = Math.min(99, Math.max(60, matchScore));
+
+      // Simple broken-English 1-line reason from actual candidate data
+      const genderText =
+        /^f(emale)?$/i.test(String(c.gender || '').trim())
+          ? 'Female'
+          : /^m(ale)?$/i.test(String(c.gender || '').trim())
+          ? 'Male'
+          : '';
+      const headerBits = [
+        genderText,
+        c.age ? `Age ${c.age}` : '',
+        c.origin ? `from ${c.origin}` : ''
+      ].filter(Boolean);
+
+      const cleanExpText = String(c.experience || '').replace(/\s+/g, ' ').trim();
+      const expSnippet = cleanExpText ? `Exp: ${cleanExpText.slice(0, 85)}${cleanExpText.length > 85 ? '...' : ''}` : '';
+      const roleBit = c.position ? `Work: ${c.position}` : (item.matchedTermLabel ? `Match: ${item.matchedTermLabel}` : '');
+      const countryBit = c.country && !/^(not defined|n\/a)$/i.test(c.country) ? `Country: ${c.country}` : '';
+      const stLabel = STAGE_DISPLAY[c.stage || 'new'] || c.stage || 'New';
+
+      const reasonParts = [
+        headerBits.join(', '),
+        item.hasExactRoleHit && item.matchedTermLabel ? `Exact "${item.matchedTermLabel}" match` : roleBit,
+        expSnippet,
+        countryBit,
+        `Stage: ${stLabel}`
+      ].filter(Boolean);
+
+      return {
+        ...c,
+        matchScore,
+        matchReason: reasonParts.join(' · ')
+      };
+    });
+
+    const exactCount = finalScored.filter(x => x.hasExactRoleHit).length;
+    const relatedCount = finalScored.length - exactCount;
+    const activeStageCount = finalScored.filter(x => x.lead.stage !== 'lost').length;
+    const topNames = matchedProfiles
+      .slice(0, 3)
+      .map(m => m.name)
+      .filter(Boolean)
+      .join(', ');
+
+    let aiReply = '';
+    if (matchedProfiles.length === 0) {
+      aiReply = `Sorry ${scopeOwnerName}, I check ${isAdminUser ? `all ${scopedLeads.length}` : `your ${scopedLeads.length}`} leads for ${aiJobSummary}. No matching candidate found right now. Try simple role name or remove filter.`;
+    } else if (hasRoleCriteria) {
+      const breakdownParts = [
+        exactCount > 0 ? `${exactCount} exact role match` : '',
+        relatedCount > 0 ? `${relatedCount} related Hospitality/skill match` : ''
+      ].filter(Boolean);
+      const breakdownText = breakdownParts.length > 1 ? ` (${breakdownParts.join(', ')})` : '';
+      aiReply = `Okay! I check ${isAdminUser ? `all ${scopedLeads.length}` : `your ${scopedLeads.length}`} leads for ${aiJobSummary}. Found ${matchedProfiles.length} full matching candidate${breakdownText} — ${activeStageCount} active leads. Best on top: ${topNames}. Full list is below!`;
+    } else {
+      aiReply = `Okay! I check ${isAdminUser ? `all ${scopedLeads.length}` : `your ${scopedLeads.length}`} leads for ${aiJobSummary}. Found ${matchedProfiles.length} full matching candidate (${activeStageCount} active). Top: ${topNames}. Full list is below!`;
+    }
+
+    const elapsedMs = Date.now() - startTime;
+    console.log(`[AI Matcher Chat] ${elapsedMs}ms | user=${agentId} (${userRole}) | scopedLeads=${scopedLeads.length} | matches=${matchedProfiles.length} (exact=${exactCount}, related=${relatedCount})`);
+
+    res.json({
+      reply: aiReply,
+      jobSummary: aiJobSummary,
+      jobDetails: {
+        title: aiJobSummary || selectedJobRecord?.serviceCharge || selectedJobRecord?.title || 'AI Chat Match',
+        country: selectedJobRecord?.country || targetCountries.join(', '),
+        salary: '',
+        experience: '',
+        skills: Array.from(exactRoleSet).join(', '),
+        preferredRegion: targetOrigins.join(', '),
+        benefits: ''
+      },
+      matches: matchedProfiles,
+      scopedCount: scopedLeads.length,
+      scopeLabel: isAdminUser ? `All CRM Leads (${scopedLeads.length})` : `${scopeOwnerName}'s Leads Only (${scopedLeads.length})`,
+      elapsedMs,
+      isSimulated: isSimulatedResult
+    });
   } catch (err) {
+    console.error('[AI Matcher Chat] Error:', err);
     res.status(500).json({ error: (err as Error).message });
   }
 });
@@ -7840,6 +9066,18 @@ async function startServer() {
       }
     } catch (err) {
       console.error('[Self-Healing] Failed to execute duplicate wallet incentives correction:', err);
+    }
+
+    // Run Won & tracked milestone integrity verification + backfill Firestore wallet_ledger
+    try {
+      const integrity = await ensureWalletIntegrityFromLeads();
+      if (integrity.healedCount > 0) {
+        console.log(`[Self-Healing] Restored ${integrity.healedCount} missing wallet transactions from active Won/milestone leads.`);
+      } else {
+        console.log('[Self-Healing] Wallet integrity check passed: All active Won & milestone credits match ledger.');
+      }
+    } catch (intErr) {
+      console.error('[Self-Healing] Failed to run wallet integrity verification:', intErr);
     }
   }, 5000);
 

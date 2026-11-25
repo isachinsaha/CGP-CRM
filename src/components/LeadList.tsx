@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
-import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Download, Sparkles, TrendingUp, X, UploadCloud, MessageSquare, FileText, Ban } from 'lucide-react';
+import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Download, Sparkles, TrendingUp, X, UploadCloud, MessageSquare, FileText, Ban, LayoutGrid, Table } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { getCountryFlagUrl, formatCandidateName, getEffectiveIntake } from '../utils';
-import { SearchableSelect } from './SearchableSelect';
+import { getCountryFlagUrl, formatCandidateName, getEffectiveIntake, isCoordinatorMatch } from '../utils';
+import { MultiSearchableSelect } from './MultiSearchableSelect';
+import { LeadCard } from './LeadCard.tsx';
 
 interface LeadListProps {
   leads: Lead[];
@@ -52,17 +53,18 @@ export default function LeadList({
   metaPositions = [],
   metaTags = []
 }: LeadListProps) {
+  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   const [searchQuery, setSearchQuery] = useState('');
-  const [countryFilter, setCountryFilter] = useState('All');
-  const [coordinatorFilter, setCoordinatorFilter] = useState('All');
-  const [stageFilter, setStageFilter] = useState('All');
-  const [fitScoreFilter, setFitScoreFilter] = useState('All');
-  const [tagFilter, setTagFilter] = useState('All');
-  const [projectFilter, setProjectFilter] = useState('All');
-  const [positionFilter, setPositionFilter] = useState('All');
-  const [genderFilter, setGenderFilter] = useState('All');
-  const [remarksFilter, setRemarksFilter] = useState('All');
-  const [dateFilter, setDateFilter] = useState('All'); // 'All', 'Today', 'Yesterday', 'Last7Days', 'Last30Days', 'Custom'
+  const [countryFilter, setCountryFilter] = useState<string[]>([]);
+  const [coordinatorFilter, setCoordinatorFilter] = useState<string[]>([]);
+  const [stageFilter, setStageFilter] = useState<string[]>([]);
+  const [fitScoreFilter, setFitScoreFilter] = useState<string[]>([]);
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [projectFilter, setProjectFilter] = useState<string[]>([]);
+  const [positionFilter, setPositionFilter] = useState<string[]>([]);
+  const [genderFilter, setGenderFilter] = useState<string[]>([]);
+  const [remarksFilter, setRemarksFilter] = useState<string[]>([]);
+  const [dateFilter, setDateFilter] = useState<string[]>([]); // [] = All, multi values from 'Today', 'Yesterday', 'Last7Days', 'Last30Days', 'Custom'
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
@@ -120,21 +122,23 @@ export default function LeadList({
   useEffect(() => {
     if (!onFiltersChange) return;
 
+    const serializeMulti = (arr: string[]) => (arr.length > 0 ? arr.join('||') : 'All');
+
     const currentPayload = {
       search: searchQuery,
-      country: countryFilter,
-      coordinator: coordinatorFilter,
-      stage: stageFilter,
-      fitScore: fitScoreFilter,
-      tag: tagFilter,
-      project: projectFilter,
-      position: positionFilter,
-      dateFilter: dateFilter,
+      country: serializeMulti(countryFilter),
+      coordinator: serializeMulti(coordinatorFilter),
+      stage: serializeMulti(stageFilter),
+      fitScore: serializeMulti(fitScoreFilter),
+      tag: serializeMulti(tagFilter),
+      project: serializeMulti(projectFilter),
+      position: serializeMulti(positionFilter),
+      dateFilter: serializeMulti(dateFilter),
       customStartDate,
       customEndDate,
       bucket: bucketToggle,
-      gender: genderFilter,
-      remarksFilter
+      gender: serializeMulti(genderFilter),
+      remarksFilter: serializeMulti(remarksFilter)
     };
 
     const serialized = JSON.stringify(currentPayload);
@@ -292,30 +296,31 @@ export default function LeadList({
   // Helper to fetch 100% of matching leads across all pages if server-side pagination is active
   const fetchAllMatchingLeads = async (): Promise<Lead[]> => {
     try {
+      const serializeMulti = (arr: string[]) => (arr.length > 0 ? arr.join('||') : 'All');
       const params = new URLSearchParams({
         all: 'true',
         search: searchQuery || '',
-        country: countryFilter || 'All',
-        project: projectFilter || 'All',
-        position: positionFilter || 'All',
-        gender: genderFilter || 'All',
-        fitScore: fitScoreFilter || 'All',
-        tag: tagFilter || 'All',
-        coordinator: coordinatorFilter || 'All',
-        stage: 'All',
-        dateFilter: dateFilter || 'All',
+        country: serializeMulti(countryFilter),
+        project: serializeMulti(projectFilter),
+        position: serializeMulti(positionFilter),
+        gender: serializeMulti(genderFilter),
+        fitScore: serializeMulti(fitScoreFilter),
+        tag: serializeMulti(tagFilter),
+        coordinator: serializeMulti(coordinatorFilter),
+        stage: serializeMulti(stageFilter),
+        dateFilter: serializeMulti(dateFilter),
         customStartDate: customStartDate || '',
         customEndDate: customEndDate || '',
-        remarksFilter: remarksFilter || 'All',
+        remarksFilter: serializeMulti(remarksFilter),
         bucket: bucketToggle || 'all',
-        role: userRole || 'agent',
-        username: currentAgentId || ''
+        userRole: userRole || 'agent',
+        agentId: currentAgentId || ''
       });
 
       const res = await fetch(`/api/leads?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.leads) && data.leads.length > 0) {
+        if (Array.isArray(data.leads)) {
           return data.leads;
         }
       }
@@ -807,125 +812,130 @@ export default function LeadList({
         (lead.source && lead.source.toLowerCase().includes(query)) ||
         (lead.project && lead.project.toLowerCase().includes(query));
 
-      // 3. Country Applied filter
-      const matchesCountry = countryFilter === 'All' || 
-        (lead.country && lead.country.trim().toLowerCase() === countryFilter.trim().toLowerCase());
-      
-      // 3.5 Hiring Project filter
-      const matchesProject = projectFilter === 'All' || 
-        (lead.project && lead.project.trim().toLowerCase() === projectFilter.trim().toLowerCase());
+      // 3. Country Applied multi-select filter
+      const matchesCountry =
+        countryFilter.length === 0 ||
+        (!!lead.country && countryFilter.some(cf => lead.country!.trim().toLowerCase() === cf.trim().toLowerCase()));
 
-      // 3.6 Target Job Position filter
-      const matchesPosition = positionFilter === 'All' || 
-        (lead.position && lead.position.trim().toLowerCase() === positionFilter.trim().toLowerCase());
+      // 3.5 Hiring Project multi-select filter
+      const matchesProject =
+        projectFilter.length === 0 ||
+        (!!lead.project && projectFilter.some(pf => lead.project!.trim().toLowerCase() === pf.trim().toLowerCase()));
 
-      // 4. Inbound Quality Fit score filter
-      const matchesFit = fitScoreFilter === 'All' || 
-        (lead.fitScore && lead.fitScore.trim().toLowerCase() === fitScoreFilter.trim().toLowerCase());
+      // 3.6 Target Job Position multi-select filter
+      const matchesPosition =
+        positionFilter.length === 0 ||
+        (!!lead.position && positionFilter.some(pf => lead.position!.trim().toLowerCase() === pf.trim().toLowerCase()));
 
-      // 6. Dynamic Tags filter
-      const matchesTag = tagFilter === 'All' || 
-        (lead.tags && lead.tags.some(t => t.trim().toLowerCase() === tagFilter.trim().toLowerCase()));
+      // 4. Inbound Quality Fit score multi-select filter
+      const matchesFit =
+        fitScoreFilter.length === 0 ||
+        (!!lead.fitScore && fitScoreFilter.some(ff => lead.fitScore!.trim().toLowerCase() === ff.trim().toLowerCase()));
 
-      // 7. Date Wise Filter
+      // 6. Dynamic Tags multi-select filter
+      const matchesTag =
+        tagFilter.length === 0 ||
+        (!!lead.tags && tagFilter.some(tf => lead.tags!.some(t => t.trim().toLowerCase() === tf.trim().toLowerCase())));
+
+      // 7. Date Wise Multi-Select Filter
       let matchesDate = true;
-      if (dateFilter !== 'All') {
+      if (dateFilter.length > 0) {
         const leadTime = new Date(lead.createdAt).getTime();
         const startOfDay = (d: Date) => {
           const res = new Date(d);
-          res.setHours(0,0,0,0);
+          res.setHours(0, 0, 0, 0);
           return res.getTime();
         };
         const endOfDay = (d: Date) => {
           const res = new Date(d);
-          res.setHours(23,59,59,999);
+          res.setHours(23, 59, 59, 999);
           return res.getTime();
         };
 
         const today = new Date();
-        if (dateFilter === 'Today') {
-          matchesDate = leadTime >= startOfDay(today) && leadTime <= endOfDay(today);
-        } else if (dateFilter === 'Yesterday') {
-          const yesterday = new Date();
-          yesterday.setDate(today.getDate() - 1);
-          matchesDate = leadTime >= startOfDay(yesterday) && leadTime <= endOfDay(yesterday);
-        } else if (dateFilter === 'Last7Days') {
-          const sevenDaysAgo = new Date();
-          sevenDaysAgo.setDate(today.getDate() - 7);
-          matchesDate = leadTime >= startOfDay(sevenDaysAgo) && leadTime <= endOfDay(today);
-        } else if (dateFilter === 'Last30Days') {
-          const thirtyDaysAgo = new Date();
-          thirtyDaysAgo.setDate(today.getDate() - 30);
-          matchesDate = leadTime >= startOfDay(thirtyDaysAgo) && leadTime <= endOfDay(today);
-        } else if (dateFilter === 'Custom') {
-          const start = customStartDate ? startOfDay(new Date(customStartDate)) : 0;
-          const end = customEndDate ? endOfDay(new Date(customEndDate)) : Infinity;
-          matchesDate = leadTime >= start && leadTime <= end;
-        }
+        matchesDate = dateFilter.some(df => {
+          if (df === 'Today') {
+            return leadTime >= startOfDay(today) && leadTime <= endOfDay(today);
+          } else if (df === 'Yesterday') {
+            const yesterday = new Date();
+            yesterday.setDate(today.getDate() - 1);
+            return leadTime >= startOfDay(yesterday) && leadTime <= endOfDay(yesterday);
+          } else if (df === 'Last7Days') {
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(today.getDate() - 7);
+            return leadTime >= startOfDay(sevenDaysAgo) && leadTime <= endOfDay(today);
+          } else if (df === 'Last30Days') {
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(today.getDate() - 30);
+            return leadTime >= startOfDay(thirtyDaysAgo) && leadTime <= endOfDay(today);
+          } else if (df === 'Custom') {
+            const start = customStartDate ? startOfDay(new Date(customStartDate)) : 0;
+            const end = customEndDate ? endOfDay(new Date(customEndDate)) : Infinity;
+            return leadTime >= start && leadTime <= end;
+          }
+          return true;
+        });
       }
 
-      // 8. Coordinator Filter (only relevant for admin)
-      const matchesCoordinator = 
-        userRole !== 'admin' || 
-        coordinatorFilter === 'All' || 
-        (coordinatorFilter === 'Unassigned' ? !lead.assignedTo : (lead.assignedTo?.toLowerCase() === coordinatorFilter.toLowerCase() || lead.assignedTo === coordinatorFilter));
+      // 8. Coordinator Multi-Select Filter (only relevant for admin)
+      const matchesCoordinator =
+        userRole !== 'admin' ||
+        coordinatorFilter.length === 0 ||
+        coordinatorFilter.some(cf => isCoordinatorMatch(lead.assignedTo, cf, coordinators));
 
-      // 8.5 Gender Filter
+      // 8.5 Gender Multi-Select Filter
       let matchesGender = true;
-      if (genderFilter !== 'All') {
+      if (genderFilter.length > 0) {
         const g = String(lead.gender || '').toUpperCase().trim();
-        const filterG = String(genderFilter).toUpperCase().trim();
-        if (filterG === 'MALE' || filterG === 'M') {
-          matchesGender = g === 'M' || g === 'MALE';
-        } else if (filterG === 'FEMALE' || filterG === 'F') {
-          matchesGender = g === 'F' || g === 'FEMALE';
-        }
+        matchesGender = genderFilter.some(gf => {
+          const filterG = String(gf).toUpperCase().trim();
+          if (filterG === 'MALE' || filterG === 'M') return g === 'M' || g === 'MALE';
+          if (filterG === 'FEMALE' || filterG === 'F') return g === 'F' || g === 'FEMALE';
+          return g === filterG;
+        });
       }
 
-      // 8.6 Remarks Filter
+      // 8.6 Remarks Multi-Select Filter
       let matchesRemarks = true;
-      if (remarksFilter !== 'All') {
+      if (remarksFilter.length > 0) {
         const r1 = !!(lead.remarks1 && lead.remarks1.trim());
         const r2 = !!(lead.remarks2 && lead.remarks2.trim());
         const r3 = !!(lead.remarks3 && lead.remarks3.trim());
 
-        if (remarksFilter === 'remarks1') {
-          matchesRemarks = r1;
-        } else if (remarksFilter === 'remarks2') {
-          matchesRemarks = r2;
-        } else if (remarksFilter === 'remarks3') {
-          matchesRemarks = r3;
-        } else if (remarksFilter === 'remarks1Only') {
-          matchesRemarks = r1 && !r2 && !r3;
-        } else if (remarksFilter === 'remarks2Only') {
-          matchesRemarks = r2 && !r1 && !r3;
-        } else if (remarksFilter === 'remarks3Only') {
-          matchesRemarks = r3 && !r1 && !r2;
-        } else if (remarksFilter === 'noRemarks') {
-          matchesRemarks = !r1 && !r2 && !r3;
-        } else if (remarksFilter === 'allRemarks') {
-          matchesRemarks = r1 && r2 && r3;
-        }
+        matchesRemarks = remarksFilter.some(rf => {
+          if (rf === 'remarks1') return r1;
+          if (rf === 'remarks2') return r2;
+          if (rf === 'remarks3') return r3;
+          if (rf === 'remarks1Only') return r1 && !r2 && !r3;
+          if (rf === 'remarks2Only') return r2 && !r1 && !r3;
+          if (rf === 'remarks3Only') return r3 && !r1 && !r2;
+          if (rf === 'noRemarks') return !r1 && !r2 && !r3;
+          if (rf === 'allRemarks') return r1 && r2 && r3;
+          return true;
+        });
       }
 
-      // 8.7 Pipeline Stage Filter
+      // 8.7 Pipeline Stage Multi-Select Filter
       let matchesStage = true;
-      if (stageFilter !== 'All') {
+      if (stageFilter.length > 0) {
         const s = lead.stage || 'new';
-        if (stageFilter === 'negotiating') {
-          matchesStage = s === 'negotiating' || s === 'in_discussion';
-        } else if (stageFilter === 'office_visited') {
-          matchesStage = s === 'office_visited' || s === 'proposal';
-        } else if (stageFilter === 'cold_leads') {
-          matchesStage = s === 'cold_leads' || s === 'rotations';
-        } else {
-          matchesStage = s === stageFilter;
-        }
+        matchesStage = stageFilter.some(sf => {
+          if (sf === 'negotiating' || sf === 'in_discussion') {
+            return s === 'negotiating' || s === 'in_discussion';
+          }
+          if (sf === 'office_visited' || sf === 'proposal') {
+            return s === 'office_visited' || s === 'proposal';
+          }
+          if (sf === 'cold_leads' || sf === 'rotations') {
+            return s === 'cold_leads' || s === 'rotations';
+          }
+          return s === sf;
+        });
       }
 
       return matchesSearch && matchesCountry && matchesProject && matchesPosition && matchesFit && matchesTag && matchesDate && matchesCoordinator && matchesGender && matchesRemarks && matchesStage;
     });
-  }, [leads, searchQuery, countryFilter, stageFilter, projectFilter, positionFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter, remarksFilter, onFiltersChange]);
+  }, [leads, searchQuery, countryFilter, stageFilter, projectFilter, positionFilter, genderFilter, fitScoreFilter, tagFilter, dateFilter, customStartDate, customEndDate, userRole, currentAgentId, coordinatorFilter, remarksFilter, coordinators, onFiltersChange]);
 
   // Paginated leads for page-wise viewport listing
   const paginatedLeads = useMemo(() => {
@@ -1100,22 +1110,54 @@ export default function LeadList({
             )}
           </div>
 
-          {/* Right: Quick Action Buttons flex row */}
+          {/* Right: Quick Action Buttons & View Switcher flex row */}
           <div className="flex flex-wrap items-center gap-2 justify-start lg:justify-end shrink-0">
-            {/* Interactive G-Sheet Mode Toggle! */}
-            <button
-              type="button"
-              onClick={() => setIsInlineEdit(!isInlineEdit)}
-              className={`text-xs font-black px-3.5 py-1.5 rounded-lg transition-all border flex items-center gap-1.5 cursor-pointer shadow-3xs ${
-                isInlineEdit 
-                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' 
-                  : 'bg-slate-850 text-slate-300 border-slate-750 hover:bg-slate-800/80'
-              }`}
-              title="Enable fast double-click spreadsheet typing directly in cells"
-            >
-              <span>⚡ Grid Quick-Edit</span>
-              <span className={`h-2 w-2 rounded-full ${isInlineEdit ? 'bg-white animate-pulse' : 'bg-emerald-500'}`} />
-            </button>
+            {/* Table / Grid View Switcher */}
+            <div className="flex items-center gap-0.5 bg-slate-900 border border-slate-750 p-1 rounded-lg shadow-inner shrink-0">
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  viewMode === 'table'
+                    ? 'bg-emerald-800 text-white border border-emerald-600/60 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Spreadsheet Table View"
+              >
+                <Table className="h-3 w-3" />
+                <span>Table View</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('grid')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  viewMode === 'grid'
+                    ? 'bg-emerald-800 text-white border border-emerald-600/60 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Candidate Cards Grid View"
+              >
+                <LayoutGrid className="h-3 w-3" />
+                <span>Grid View</span>
+              </button>
+            </div>
+
+            {/* Interactive G-Sheet Mode Toggle (only for Table View) */}
+            {viewMode === 'table' && (
+              <button
+                type="button"
+                onClick={() => setIsInlineEdit(!isInlineEdit)}
+                className={`text-xs font-black px-3.5 py-1.5 rounded-lg transition-all border flex items-center gap-1.5 cursor-pointer shadow-3xs ${
+                  isInlineEdit 
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' 
+                    : 'bg-slate-850 text-slate-300 border-slate-750 hover:bg-slate-800/80'
+                }`}
+                title="Enable fast double-click spreadsheet typing directly in cells"
+              >
+                <span>⚡ Grid Quick-Edit</span>
+                <span className={`h-2 w-2 rounded-full ${isInlineEdit ? 'bg-white animate-pulse' : 'bg-emerald-500'}`} />
+              </button>
+            )}
 
             {/* AI Cohort Analysis Report Trigger */}
             <button
@@ -1191,24 +1233,24 @@ export default function LeadList({
         <div className="space-y-3 text-left">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 text-[10px] font-black text-black dark:text-slate-100 uppercase tracking-widest leading-none select-none">
-              <Filter className="h-3.5 w-3.5 text-black dark:text-slate-100" /> DIRECTORY FILTERS ({filteredLeads.length} Matches):
+              <Filter className="h-3.5 w-3.5 text-black dark:text-slate-100" /> DIRECTORY FILTERS ({onPageChange ? totalLeadsCount : filteredLeads.length} Matches):
             </div>
             
             {/* Reset All Filters button if any are active */}
-            {(countryFilter !== 'All' || coordinatorFilter !== 'All' || stageFilter !== 'All' || projectFilter !== 'All' || positionFilter !== 'All' || tagFilter !== 'All' || fitScoreFilter !== 'All' || genderFilter !== 'All' || remarksFilter !== 'All' || dateFilter !== 'All') && (
+            {(countryFilter.length > 0 || coordinatorFilter.length > 0 || stageFilter.length > 0 || projectFilter.length > 0 || positionFilter.length > 0 || tagFilter.length > 0 || fitScoreFilter.length > 0 || genderFilter.length > 0 || remarksFilter.length > 0 || dateFilter.length > 0) && (
               <button
                 type="button"
                 onClick={() => {
-                  setCountryFilter('All');
-                  setCoordinatorFilter('All');
-                  setStageFilter('All');
-                  setProjectFilter('All');
-                  setPositionFilter('All');
-                  setTagFilter('All');
-                  setFitScoreFilter('All');
-                  setGenderFilter('All');
-                  setRemarksFilter('All');
-                  setDateFilter('All');
+                  setCountryFilter([]);
+                  setCoordinatorFilter([]);
+                  setStageFilter([]);
+                  setProjectFilter([]);
+                  setPositionFilter([]);
+                  setTagFilter([]);
+                  setFitScoreFilter([]);
+                  setGenderFilter([]);
+                  setRemarksFilter([]);
+                  setDateFilter([]);
                   setCustomStartDate('');
                   setCustomEndDate('');
                 }}
@@ -1219,17 +1261,22 @@ export default function LeadList({
             )}
           </div>
 
-          {/* Filters Responsive Grid - 10 Filters total */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10 gap-2.5 w-full">
+          {/* Filters Responsive Grid - 10 Multi-Select Filters total */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-10 gap-2 2xl:gap-2.5 w-full">
             
             {/* Country filter */}
             <div className="w-full">
               <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Country</label>
-              <SearchableSelect
-                value={countryFilter}
+              <MultiSearchableSelect
+                values={countryFilter}
                 onChange={setCountryFilter}
                 options={countryOptions}
-                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+                allLabel="All Countries"
+                placeholder="Search countries..."
+                badgeColor="bg-emerald-600"
+                activeTextClass="text-[#0d7d4d] dark:text-emerald-200"
+                activeBorderClass="border-emerald-500 ring-1 ring-emerald-500/40"
+                className="w-full text-xs px-3 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
               />
             </div>
 
@@ -1237,11 +1284,16 @@ export default function LeadList({
             <div className="w-full">
               <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Coordinator</label>
               {userRole === 'admin' ? (
-                <SearchableSelect
-                  value={coordinatorFilter}
+                <MultiSearchableSelect
+                  values={coordinatorFilter}
                   onChange={setCoordinatorFilter}
                   options={coordinatorOptions}
-                  className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/80 hover:bg-emerald-100/80 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/60 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+                  allLabel="👤 All Coordinators"
+                  placeholder="Search coordinators..."
+                  badgeColor="bg-emerald-600"
+                  activeTextClass="text-[#0d7d4d] dark:text-emerald-200"
+                  activeBorderClass="border-emerald-500 ring-1 ring-emerald-500/40"
+                  className="w-full text-xs px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/80 hover:bg-emerald-100/80 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/60 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
                 />
               ) : (
                 <div className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-dashed border-slate-700 bg-slate-900/10 text-slate-600 font-extrabold select-none truncate">
@@ -1253,95 +1305,137 @@ export default function LeadList({
             {/* Pipeline Stage Filter */}
             <div className="w-full">
               <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Pipeline Stage</label>
-              <SearchableSelect
-                value={stageFilter}
+              <MultiSearchableSelect
+                values={stageFilter}
                 onChange={setStageFilter}
                 options={stageOptions}
-                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+                allLabel="All Stages"
+                placeholder="Search stages..."
+                badgeColor="bg-emerald-600"
+                activeTextClass="text-[#0d7d4d] dark:text-emerald-200"
+                activeBorderClass="border-emerald-500 ring-1 ring-emerald-500/40"
+                className="w-full text-xs px-3 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
               />
             </div>
 
             {/* Hiring Project filter */}
             <div className="w-full">
               <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Project</label>
-              <SearchableSelect
-                value={projectFilter}
+              <MultiSearchableSelect
+                values={projectFilter}
                 onChange={setProjectFilter}
                 options={projectOptions}
-                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+                allLabel="All Projects"
+                placeholder="Search projects..."
+                badgeColor="bg-emerald-600"
+                activeTextClass="text-[#0d7d4d] dark:text-emerald-200"
+                activeBorderClass="border-emerald-500 ring-1 ring-emerald-500/40"
+                className="w-full text-xs px-3 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
               />
             </div>
 
             {/* Target Job Position Filter */}
             <div className="w-full">
               <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Position</label>
-              <SearchableSelect
-                value={positionFilter}
+              <MultiSearchableSelect
+                values={positionFilter}
                 onChange={setPositionFilter}
                 options={positionOptions}
-                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs animate-fade-in"
+                allLabel="All Positions"
+                placeholder="Search positions..."
+                badgeColor="bg-emerald-600"
+                activeTextClass="text-[#0d7d4d] dark:text-emerald-200"
+                activeBorderClass="border-emerald-500 ring-1 ring-emerald-500/40"
+                className="w-full text-xs px-3 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs animate-fade-in"
               />
             </div>
 
             {/* Tags Filter Dropdown */}
             <div className="w-full">
               <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Tag</label>
-              <SearchableSelect
-                value={tagFilter}
+              <MultiSearchableSelect
+                values={tagFilter}
                 onChange={setTagFilter}
                 options={tagOptions}
-                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
+                allLabel="All Tags"
+                placeholder="Search tags..."
+                badgeColor="bg-emerald-600"
+                activeTextClass="text-[#0d7d4d] dark:text-emerald-200"
+                activeBorderClass="border-emerald-500 ring-1 ring-emerald-500/40"
+                className="w-full text-xs px-3 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
               />
             </div>
 
             {/* Fit score filter */}
             <div className="w-full">
               <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Fit Score</label>
-              <SearchableSelect
-                value={fitScoreFilter}
+              <MultiSearchableSelect
+                values={fitScoreFilter}
                 onChange={setFitScoreFilter}
                 options={fitScoreOptions}
-                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
+                allLabel="All AI Quality Fit"
+                placeholder="Search fit quality..."
+                badgeColor="bg-emerald-600"
+                activeTextClass="text-[#0d7d4d] dark:text-emerald-200"
+                activeBorderClass="border-emerald-500 ring-1 ring-emerald-500/40"
+                className="w-full text-xs px-3 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
               />
             </div>
 
             {/* Gender Filter */}
             <div className="w-full">
               <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Gender</label>
-              <SearchableSelect
-                value={genderFilter}
+              <MultiSearchableSelect
+                values={genderFilter}
                 onChange={setGenderFilter}
                 options={genderOptions}
-                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+                allLabel="All Genders"
+                placeholder="Filter genders..."
+                badgeColor="bg-emerald-600"
+                activeTextClass="text-[#0d7d4d] dark:text-emerald-200"
+                activeBorderClass="border-emerald-500 ring-1 ring-emerald-500/40"
+                className="w-full text-xs px-3 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
               />
             </div>
 
             {/* Remarks wise Filter */}
             <div className="w-full">
               <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Remarks Status</label>
-              <SearchableSelect
-                value={remarksFilter}
+              <MultiSearchableSelect
+                values={remarksFilter}
                 onChange={setRemarksFilter}
                 options={remarksOptions}
-                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
+                allLabel={`💬 Remarks: All (${leads.length})`}
+                placeholder="Search remarks..."
+                badgeColor="bg-emerald-600"
+                activeTextClass="text-[#0d7d4d] dark:text-emerald-200"
+                activeBorderClass="border-emerald-500 ring-1 ring-emerald-500/40"
+                align="right"
+                className="w-full text-xs px-3 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs"
               />
             </div>
 
             {/* Date Wise Filter */}
             <div className="w-full">
               <label className="block text-[9px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Date Period</label>
-              <SearchableSelect
-                value={dateFilter}
+              <MultiSearchableSelect
+                values={dateFilter}
                 onChange={setDateFilter}
                 options={dateOptions}
-                className="w-full text-xs px-3.5 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
+                allLabel="📅 All Dates"
+                placeholder="Search date periods..."
+                badgeColor="bg-emerald-600"
+                activeTextClass="text-[#0d7d4d] dark:text-emerald-200"
+                activeBorderClass="border-emerald-500 ring-1 ring-emerald-500/40"
+                align="right"
+                className="w-full text-xs px-3 py-1.5 rounded-xl border border-emerald-200/90 dark:border-emerald-800/60 bg-white hover:bg-emerald-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-[#0d7d4d] dark:text-emerald-300 font-extrabold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer uppercase shadow-2xs"
               />
             </div>
 
           </div>
 
           {/* Date Picker Custom inputs rendered beautifully underneath filter grid */}
-          {dateFilter === 'Custom' && (
+          {dateFilter.includes('Custom') && (
             <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 p-2.5 max-w-md rounded-2xl animate-in fade-in zoom-in-95 mt-2 shadow-inner">
               <span className="text-[10px] text-slate-400 font-black tracking-wide">FROM:</span>
               <input
@@ -1727,7 +1821,7 @@ export default function LeadList({
       )}
 
       <div className="bg-slate-850 rounded-2xl border border-slate-750 overflow-hidden shadow-lg text-left">
-        {isInlineEdit && (
+        {viewMode === 'table' && isInlineEdit && (
           <div className="bg-emerald-950/40 border-b border-slate-750 p-2.5 px-4 text-[11px] font-bold text-slate-300 flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-accent-emerald animate-pulse" />
@@ -1737,7 +1831,60 @@ export default function LeadList({
           </div>
         )}
 
-        <div className="overflow-x-auto max-h-[620px] overflow-y-auto">
+        {viewMode === 'grid' ? (
+          <div className="p-4 sm:p-5 space-y-4 bg-slate-950/35">
+            {/* Grid View Header Controls */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+              <label className="flex items-center gap-2 text-xs font-black text-slate-300 uppercase tracking-wider cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={paginatedLeads.length > 0 && paginatedLeads.map(l => l.id).every(id => selectedLeadIds.includes(id))}
+                  onChange={() => {
+                    const visibleIds = paginatedLeads.map(l => l.id);
+                    const isAllSelected = visibleIds.length > 0 && visibleIds.every(id => selectedLeadIds.includes(id));
+                    if (isAllSelected) {
+                      setSelectedLeadIds(prev => prev.filter(id => !visibleIds.includes(id)));
+                    } else {
+                      setSelectedLeadIds(prev => Array.from(new Set([...prev, ...visibleIds])));
+                    }
+                  }}
+                  className="h-3.5 w-3.5 rounded border-slate-700 text-accent-purple focus:ring-accent-purple cursor-pointer bg-slate-950"
+                />
+                <span>Select All on Page ({paginatedLeads.length})</span>
+              </label>
+
+              <span className="text-[10px] uppercase font-black text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-3 py-1 rounded-full font-mono">
+                Grid View • {paginatedLeads.length} Cards on Page
+              </span>
+            </div>
+
+            {paginatedLeads.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 2xl:gap-4 py-1">
+                {paginatedLeads.map((lead) => (
+                  <LeadCard
+                    key={lead.id}
+                    lead={lead}
+                    onSelectLead={onSelectLead}
+                    onUpdateStage={onUpdateStage}
+                    draggable={false}
+                    showStageBadge={true}
+                    isSelected={selectedLeadIds.includes(lead.id)}
+                    onToggleSelect={(id) => {
+                      setSelectedLeadIds(prev =>
+                        prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+                      );
+                    }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-16 text-slate-500 font-bold bg-slate-900/20 border border-dashed border-slate-750 rounded-2xl">
+                No placement candidates match selected options. Verify active spreadsheet categories or sub-agent bucket filters.
+              </div>
+            )}
+          </div>
+        ) : (
+        <div className="overflow-x-auto max-h-[calc(100vh-19.5rem)] min-h-[22rem] 2xl:max-h-[38.75rem] overflow-y-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-slate-900/50 border-b border-slate-750 text-left select-none">
@@ -2118,6 +2265,7 @@ export default function LeadList({
             </tbody>
           </table>
         </div>
+        )}
 
         {/* Pagination Controls */}
         {((onPageChange && totalPagesCount > 1) || (!onPageChange && filteredLeads.length > itemsPerPage)) && (

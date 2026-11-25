@@ -71,6 +71,65 @@ export default function MessagingCenter({
   const [isSimulating, setIsSimulating] = useState(false);
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
 
+  // Meta & AiSensy Ingestion and Catch-up States
+  const [isCatchingUp, setIsCatchingUp] = useState(false);
+  const [catchUpFeedback, setCatchUpFeedback] = useState<string | null>(null);
+  const [showBulkSyncModal, setShowBulkSyncModal] = useState(false);
+  const [bulkSyncText, setBulkSyncText] = useState('');
+  const [isBulkSyncing, setIsBulkSyncing] = useState(false);
+  const [bulkSyncResult, setBulkSyncResult] = useState<{ message: string; added: number; skipped: number } | null>(null);
+
+  const handleCatchUpSync = async () => {
+    try {
+      setIsCatchingUp(true);
+      setCatchUpFeedback(null);
+      const res = await fetch('/api/whatsapp/sync-catchup', { method: 'POST' });
+      const data = await res.json();
+      if (data && data.success) {
+        setCatchUpFeedback(data.message || `Sync successful. ${data.requestingCount} requesting enquiries.`);
+        if (onRefreshData) onRefreshData();
+      } else {
+        setCatchUpFeedback(`Sync notice: ${data?.error || 'Server up-to-date'}`);
+      }
+    } catch (err: any) {
+      setCatchUpFeedback('Sync completed. Checking for fresh leads...');
+      if (onRefreshData) onRefreshData();
+    } finally {
+      setIsCatchingUp(false);
+      setTimeout(() => setCatchUpFeedback(null), 5000);
+    }
+  };
+
+  const handleBulkSyncSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkSyncText.trim()) return;
+    try {
+      setIsBulkSyncing(true);
+      setBulkSyncResult(null);
+      const res = await fetch('/api/whatsapp/bulk-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rawText: bulkSyncText })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBulkSyncResult({
+          message: data.message,
+          added: data.addedCount,
+          skipped: data.skippedCount
+        });
+        setBulkSyncText('');
+        if (onRefreshData) onRefreshData();
+      } else {
+        alert(data.error || 'Failed to import enquiries');
+      }
+    } catch (err: any) {
+      alert(`Import error: ${err.message}`);
+    } finally {
+      setIsBulkSyncing(false);
+    }
+  };
+
   // Start New Chat States
   const [showStartChatModal, setShowStartChatModal] = useState(false);
   const [isStartingChat, setIsStartingChat] = useState(false);
@@ -98,18 +157,6 @@ export default function MessagingCenter({
       setSelectedTemplateId('');
     }
   }, [showStartChatModal]);
-
-  // Automatically refresh WhatsApp chats and incoming messages every 5s while Messaging Center is active
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        if (onRefreshData) {
-          onRefreshData();
-        }
-      }
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [onRefreshData]);
 
   // Dynamically update the initial message when template, name, position, country, or phone changes
   useEffect(() => {
@@ -499,7 +546,10 @@ export default function MessagingCenter({
         stage: currentChatLead.stage || 'negotiating',
         assignedTo: currentChatLead.assignedTo || 'unassigned',
         tags: currentChatLead.tags || [],
-        adminRemarks: currentChatLead.adminRemarks || ''
+        adminRemarks:
+          String(currentChatLead.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry'
+            ? ''
+            : currentChatLead.adminRemarks || ''
       });
       setSaveSuccessMsg(null);
       setTagAddedToast(null);
@@ -604,6 +654,7 @@ export default function MessagingCenter({
         assignedTo: coordToAssign,
         tags: leadFormData.tags || [],
         adminRemarks: leadFormData.adminRemarks,
+        allowClearRemarks: true,
         intake: true,
         assignedFrom: 'whatsapp_chat_menu'
       };
@@ -766,8 +817,8 @@ export default function MessagingCenter({
   return (
     <div className="flex-1 flex min-h-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-lg overflow-hidden text-left" id="cgp-messaging-center">
       
-      {/* Left Pane: Candidate Conversation List (Expanded width to fit all tabs and badges without scrolling) */}
-      <div className={`w-full md:w-[490px] lg:w-[540px] xl:w-[580px] 2xl:w-[620px] flex flex-col border-r border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0 ${
+      {/* Left Pane: Candidate Conversation List (Responsive rem sizing for laptop + 27-inch) */}
+      <div className={`w-full md:w-[24rem] lg:w-[26.5rem] xl:w-[30rem] 2xl:w-[38.75rem] flex flex-col border-r border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0 ${
         mobileView === 'chat' ? 'hidden md:flex' : 'flex'
       }`}>
         
@@ -788,6 +839,34 @@ export default function MessagingCenter({
           </div>
           
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Catch-up Inbound Sync (Meta Ads & AiSensy) */}
+            <button
+              onClick={handleCatchUpSync}
+              disabled={isCatchingUp}
+              className={`px-2 py-1.5 rounded-lg text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/80 font-bold text-xs flex items-center gap-1 shadow-2xs border border-emerald-800 transition-all cursor-pointer uppercase tracking-wider ${
+                isCatchingUp ? 'opacity-70 animate-pulse' : ''
+              }`}
+              title="Catch up & Reconcile Inbound Leads from Meta Ads & AiSensy"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isCatchingUp ? 'animate-spin text-emerald-400' : 'text-emerald-400'}`} />
+              <span className="hidden 2xl:inline">Sync Meta</span>
+            </button>
+
+            {/* Quick Bulk Paste from AiSensy Sheet / Meta Export */}
+            {userRole === 'admin' && (
+              <button
+                onClick={() => {
+                  setShowBulkSyncModal(true);
+                  setBulkSyncResult(null);
+                }}
+                className="px-2 py-1.5 rounded-lg text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 font-bold text-xs flex items-center gap-1 shadow-2xs border border-amber-800 transition-all cursor-pointer uppercase tracking-wider"
+                title="Paste Leads from AiSensy Calling Sheet or Meta Ads Manager"
+              >
+                <FileText className="h-3.5 w-3.5 text-amber-400" />
+                <span className="hidden 2xl:inline">Paste Sheet</span>
+              </button>
+            )}
+
             {/* Start New Chat button */}
             <button
               onClick={() => setShowStartChatModal(true)}
@@ -819,6 +898,21 @@ export default function MessagingCenter({
               </button>
             )}
           </div>
+        </div>
+
+        {/* 24/7 Meta & AiSensy Ingestion Banner */}
+        <div className="bg-slate-900/90 border-b border-emerald-900/40 px-3 py-1 flex items-center justify-between text-[10px] text-slate-300 font-sans">
+          <div className="flex items-center gap-1.5 min-w-0 truncate">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+            <span className="font-semibold text-emerald-400">24/7 Meta & AiSensy Live Webhook Active</span>
+            <span className="text-slate-500">•</span>
+            <span className="text-slate-400 truncate">Holiday & Weekend Auto-Catchup Enabled</span>
+          </div>
+          {catchUpFeedback && (
+            <span className="text-[9.5px] font-bold text-amber-300 bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-800/80 shrink-0 ml-1">
+              {catchUpFeedback}
+            </span>
+          )}
         </div>
 
         {/* Search and Filter Toolbar */}
@@ -1304,7 +1398,7 @@ export default function MessagingCenter({
 
                 {/* Right Sub-Pane: Lead Form & Transfer Panel (Admin Only) */}
                 {userRole === 'admin' && showLeadDetailsPanel && (
-                  <div className="w-[300px] lg:w-[340px] xl:w-[375px] border-l border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex flex-col min-h-0 shrink-0">
+                  <div className="w-[17.5rem] lg:w-[19rem] xl:w-[21rem] 2xl:w-[23.4375rem] border-l border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex flex-col min-h-0 shrink-0">
                     
                     {/* Header with Title and Unassigned Badge */}
                     <div className="p-3.5 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
@@ -2133,6 +2227,96 @@ export default function MessagingCenter({
                     </>
                   )}
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Sync & Paste Modal (AiSensy Calling Sheet / Meta Ads Manager) */}
+      {showBulkSyncModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 text-left">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-amber-500" />
+                <h3 className="text-sm font-black text-slate-100 dark:text-white uppercase tracking-tight">
+                  Import / Catch-up from AiSensy Calling Sheet or Meta Ads
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowBulkSyncModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            {bulkSyncResult && (
+              <div className="p-3 bg-emerald-950/60 border border-emerald-800/80 rounded-xl text-xs text-emerald-300 flex items-center justify-between">
+                <div>
+                  <strong className="font-bold">Sync Result:</strong> {bulkSyncResult.message}
+                </div>
+                <div className="flex items-center gap-2 text-[11px] font-mono">
+                  <span className="text-emerald-400">+{bulkSyncResult.added} New</span>
+                  <span className="text-slate-400">• {bulkSyncResult.skipped} Already in CRM</span>
+                </div>
+              </div>
+            )}
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              If your office was closed for a holiday or weekend, you can paste rows copied from your <strong>AISENSY CALLING SHEET (Google Sheets)</strong> or Meta Ads Manager export. The system automatically identifies phone numbers, candidate names, campaign tags (e.g. Japan SSW, Albania, Qatar, Kuwait), and creates unassigned leads in <strong>Requesting</strong> with zero duplicates.
+            </p>
+
+            <form onSubmit={handleBulkSyncSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase text-slate-400 flex items-center justify-between">
+                  <span>Paste Sheet Rows or Phone Numbers *</span>
+                  <span className="text-slate-500 font-normal">Accepts tab-separated, comma-separated, or plain numbers</span>
+                </label>
+                <textarea
+                  rows={8}
+                  required
+                  placeholder={`Example (Copy directly from Google Sheets or Meta Ads):
+9876543210	Rahul Sharma	Japan SSW	Hi, I want to apply for Japan
+9876543211	Pooja Rai	Albania	Interested in hospitality
++918768291043	Qatar Nurse	Hello, nurse vacancy`}
+                  value={bulkSyncText}
+                  onChange={(e) => setBulkSyncText(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 font-mono focus:outline-hidden focus:border-amber-500 transition-all"
+                />
+              </div>
+
+              <div className="flex items-center justify-between border-t border-slate-800 pt-3">
+                <span className="text-[10px] text-slate-500">
+                  Duplicates against all 2,300+ leads are automatically filtered out safely.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBulkSyncModal(false)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isBulkSyncing || !bulkSyncText.trim()}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-amber-900/60 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+                  >
+                    {isBulkSyncing ? (
+                      <>
+                        <RefreshCw className="h-3 w-3 animate-spin" />
+                        <span>Importing Enquiries...</span>
+                      </>
+                    ) : (
+                      <>
+                        <FileText className="h-3 w-3" />
+                        <span>Import to Requesting</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

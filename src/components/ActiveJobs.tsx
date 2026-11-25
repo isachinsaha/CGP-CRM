@@ -1,22 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Briefcase, 
-  MapPin, 
   Clock, 
   Users, 
   Plus, 
   Trash2, 
   Edit3, 
   Coins, 
-  Video, 
   CheckCircle, 
   X, 
   Loader2, 
   ChevronDown,
-  ChevronUp,
   ShieldCheck,
   AlertCircle,
-  Globe,
   Megaphone,
   TrendingUp,
   TrendingDown,
@@ -25,17 +21,19 @@ import {
   RefreshCw,
   Shield,
   History,
-  Lock,
   Database,
   Download,
-  FileText,
   Trophy,
   Target,
   Flame,
-  Sparkles
+  Upload,
+  Image as ImageIcon,
+  ZoomIn,
+  Search,
+  Archive,
+  RotateCcw
 } from 'lucide-react';
-import { Job, ImportantUpdate, Wallet, WalletTransaction, MonthlyTargetProgress, MonthlyTargetSettings } from '../types';
-import { getCountryFlagUrl, getCountryCode } from '../utils';
+import { Job, ImportantUpdate, Wallet, WalletTransaction, MonthlyTargetProgress } from '../types';
 
 interface ActiveJobsProps {
   currentUser: {
@@ -430,33 +428,31 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     }
   };
 
-  const safeCountries = Array.isArray(countries) ? countries : ['Kuwait', 'Dubai', 'Qatar', 'Germany', 'Japan', 'Albania'];
-
-  // Selected country tab/card state
-  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
-
-  // Form states
+  // Simplified Active Job Creative + Service Charge states
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingJob, setEditingJob] = useState<Job | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
-  
-  // Fields
-  const [title, setTitle] = useState('');
-  const [country, setCountry] = useState('Kuwait');
-  const [customCountry, setCustomCountry] = useState('');
-  const [salaryRange, setSalaryRange] = useState('');
-  const [requirement, setRequirement] = useState('');
-  const [positions, setPositions] = useState<{ title: string; salary: string }[]>([{ title: '', salary: '' }]);
-  const [processingFeeMale, setProcessingFeeMale] = useState('');
-  const [processingFeeFemale, setProcessingFeeFemale] = useState('');
-  const [accommodation, setAccommodation] = useState('');
-  const [ageLimit, setAgeLimit] = useState('');
-  const [modeOfInterview, setModeOfInterview] = useState('Online');
-  const [applicability, setApplicability] = useState('Both Male & Female Candidates can Apply');
-  const [otherTerms, setOtherTerms] = useState('');
-  const [conditionsText, setConditionsText] = useState('');
+
+  const [imageUrl, setImageUrl] = useState('');
+  const [serviceCharge, setServiceCharge] = useState('');
+  const [imageSizeBytes, setImageSizeBytes] = useState<number | undefined>(undefined);
+  const [originalSizeBytes, setOriginalSizeBytes] = useState<number | undefined>(undefined);
+  const [originalFilename, setOriginalFilename] = useState('');
+  const [isUploadingCreative, setIsUploadingCreative] = useState(false);
+  const [isDraggingCreative, setIsDraggingCreative] = useState(false);
+  const [isSubmittingJob, setIsSubmittingJob] = useState(false);
   const [isActive, setIsActive] = useState(true);
+
+  const [jobSearchQuery, setJobSearchQuery] = useState('');
+  const [jobStatusFilter, setJobStatusFilter] = useState<'all' | 'active' | 'paused'>('all');
+  const [previewCreativeJob, setPreviewCreativeJob] = useState<Job | null>(null);
+
+  // Recovery Archive (Zero-Data-Loss Soft-Delete Recovery)
+  const [archivedJobs, setArchivedJobs] = useState<Job[]>([]);
+  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
+  const [loadingArchived, setLoadingArchived] = useState(false);
+  const [restoringJobId, setRestoringJobId] = useState<string | null>(null);
 
   // Important Updates states
   const [updates, setUpdates] = useState<ImportantUpdate[]>([]);
@@ -467,7 +463,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
   const [deletingUpdateId, setDeletingUpdateId] = useState<string | null>(null);
 
   // Fetch all jobs
-  const fetchJobs = async (focusCountry?: string) => {
+  const fetchJobs = async () => {
     setIsLoading(true);
     try {
       const res = await fetch('/api/jobs');
@@ -475,16 +471,6 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
       const data = await res.json();
       const safeData = Array.isArray(data) ? data.filter(j => j && typeof j === 'object') : [];
       setJobs(safeData);
-      
-      if (safeData.length > 0) {
-        if (focusCountry) {
-          setSelectedCountry(focusCountry);
-        } else {
-          setSelectedCountry('ALL');
-        }
-      } else {
-        setSelectedCountry(null);
-      }
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -510,7 +496,6 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
           fetchUpdates(retries - 1);
         }, 1000);
       } else {
-        // Safe default fallback
         const defaultFallback: ImportantUpdate[] = [
           {
             id: 'fallback_1',
@@ -535,23 +520,58 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     }
   }, [currentUser?.role]);
 
+  // Format bytes helper
+  const formatBytes = (bytes?: number) => {
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
 
-  // Smart helper to parse old requirements into structured dynamic array
-  const parseLegacyRequirements = React.useCallback((reqString: string, salRange: string): { title: string; salary: string }[] => {
-    if (!reqString || !reqString.trim()) {
-      return [{ title: '', salary: '' }];
+  // Upload image and convert to WebP on server
+  const handleCreativeImageFile = async (file: File) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setFormError('Please select a valid image file (JPG, PNG, WEBP, etc.).');
+      return;
     }
-    const parts = reqString.split(',').map(p => p.trim()).filter(Boolean);
-    const parsed = parts.map(part => {
-      // Matches "Waiter (1400 AED)" or similar brackets
-      const match = part.match(/^([^(]+)\(([^)]+)\)$/) || part.match(/^([^-]+)-\s*(.+)$/);
-      if (match) {
-        return { title: match[1].trim(), salary: match[2].trim() };
+
+    setFormError(null);
+    setIsUploadingCreative(true);
+
+    try {
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Failed to read image file.'));
+        reader.readAsDataURL(file);
+      });
+
+      const res = await fetch('/api/jobs/upload-creative', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name || 'job_creative.png',
+          fileType: file.type,
+          base64Data
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success || !data.url) {
+        throw new Error(data.error || 'Failed to upload and convert image to WebP.');
       }
-      return { title: part, salary: parts.length === 1 ? salRange || '' : '' };
-    });
-    return parsed.length > 0 ? parsed : [{ title: '', salary: '' }];
-  }, []);
+
+      setImageUrl(data.url);
+      setImageSizeBytes(data.sizeBytes);
+      setOriginalSizeBytes(data.originalSizeBytes);
+      setOriginalFilename(file.name || data.fileName);
+    } catch (err: any) {
+      setFormError(err?.message || 'Failed to process creative image.');
+    } finally {
+      setIsUploadingCreative(false);
+    }
+  };
 
   // Handle open form for creating new job
   const handleOpenCreate = (e?: React.MouseEvent) => {
@@ -561,25 +581,11 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     }
     setFormError(null);
     setEditingJob(null);
-    setTitle('');
-    setCountry(safeCountries[0] || 'Kuwait');
-    setCustomCountry('');
-    setSalaryRange('');
-    setRequirement('');
-    setPositions([{ title: '', salary: '' }]);
-    setProcessingFeeMale('');
-    setProcessingFeeFemale('');
-    setAccommodation('');
-    setAgeLimit('');
-    setModeOfInterview('Online');
-    setApplicability('Both Male & Female Candidates can Apply');
-    setOtherTerms('');
-    setConditionsText([
-      'Pre Medical',
-      'No Stamping Required',
-      'Original Passport is mandatory',
-      'Need to send Introduction Video'
-    ].join('\n'));
+    setImageUrl('');
+    setServiceCharge('');
+    setImageSizeBytes(undefined);
+    setOriginalSizeBytes(undefined);
+    setOriginalFilename('');
     setIsActive(true);
     setIsFormOpen(true);
   };
@@ -590,35 +596,18 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     e.stopPropagation();
     setFormError(null);
     setEditingJob(job);
-    setTitle(job.title || '');
-    
-    const jobCountry = job.country || 'Kuwait';
-    const isPredefined = safeCountries.includes(jobCountry);
-    if (isPredefined) {
-      setCountry(jobCountry);
-      setCustomCountry('');
-    } else {
-      setCountry('Custom');
-      setCustomCountry(jobCountry);
-    }
-
-    setSalaryRange(job.salaryRange || '');
-    setRequirement(job.requirement || '');
-    
-    if (job.positions && Array.isArray(job.positions) && job.positions.length > 0) {
-      setPositions(job.positions);
-    } else {
-      setPositions(parseLegacyRequirements(job.requirement || '', job.salaryRange || ''));
-    }
-
-    setProcessingFeeMale(job.processingFeeMale || '');
-    setProcessingFeeFemale(job.processingFeeFemale || '');
-    setAccommodation(job.accommodation || '');
-    setAgeLimit(job.ageLimit || '');
-    setModeOfInterview(job.modeOfInterview || 'Online');
-    setApplicability(job.applicability || 'Both Male & Female Candidates can Apply');
-    setOtherTerms(job.otherTerms || '');
-    setConditionsText(Array.isArray(job.conditions) ? job.conditions.join('\n') : '');
+    setImageUrl(job.imageUrl || '');
+    setServiceCharge(
+      job.serviceCharge ||
+      (job.processingFeeMale || job.processingFeeFemale
+        ? [job.processingFeeMale ? `Male: ${job.processingFeeMale}` : '', job.processingFeeFemale ? `Female: ${job.processingFeeFemale}` : '']
+            .filter(Boolean)
+            .join(' | ')
+        : '')
+    );
+    setImageSizeBytes(job.imageSizeBytes);
+    setOriginalSizeBytes(undefined);
+    setOriginalFilename(job.originalFilename || '');
     setIsActive(job.isActive !== false);
     setIsFormOpen(true);
   };
@@ -626,59 +615,41 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
   // Handle submit form
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
-
-    const selectedCountry = country === 'Custom' ? customCountry.trim() : country;
-    if (!selectedCountry) {
-      setFormError('Please specify a country.');
+    if (isUploadingCreative) {
+      setFormError('Please wait for the image WebP conversion to finish.');
+      return;
+    }
+    if (!imageUrl.trim()) {
+      setFormError('Please upload a job demand creative image.');
+      return;
+    }
+    if (!serviceCharge.trim()) {
+      setFormError('Please enter the Service Charge.');
       return;
     }
 
-    const validPositions = positions
-      .map(p => ({ title: p.title.trim(), salary: p.salary.trim() }))
-      .filter(p => p.title.length > 0);
-
-    if (validPositions.length === 0) {
-      setFormError('Please specify at least one requirement & salary structure position.');
-      return;
-    }
-
-    const finalRequirement = validPositions.map(p => p.title + (p.salary ? ` (${p.salary})` : '')).join(', ');
-    const finalSalaryRange = validPositions.map(p => p.salary).filter(Boolean).join(' / ');
-
-    const parsedConditions = (conditionsText || '')
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0);
+    setFormError(null);
+    setIsSubmittingJob(true);
 
     const payload = {
-      title: title.trim(),
-      country: selectedCountry,
-      salaryRange: finalSalaryRange,
-      requirement: finalRequirement,
-      positions: validPositions,
-      processingFeeMale: (processingFeeMale || '').trim(),
-      processingFeeFemale: (processingFeeFemale || '').trim(),
-      accommodation: (accommodation || '').trim(),
-      ageLimit: (ageLimit || '').trim(),
-      conditions: parsedConditions,
-      modeOfInterview,
-      applicability,
-      otherTerms: (otherTerms || '').trim(),
+      imageUrl: imageUrl.trim(),
+      serviceCharge: serviceCharge.trim(),
+      imageFormat: 'webp',
+      imageSizeBytes,
+      originalFilename,
+      title: `Demand • ${serviceCharge.trim()}`.slice(0, 120),
       isActive
     };
 
     try {
       let res;
       if (editingJob) {
-        // Edit mode
         res = await fetch(`/api/jobs/${editingJob.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
       } else {
-        // Create mode
         res = await fetch('/api/jobs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -688,15 +659,17 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to save the job vacancy.');
+        throw new Error(errData.error || 'Failed to save the job demand.');
       }
-      
+
       setIsFormOpen(false);
       setEditingJob(null);
       setFormError(null);
-      fetchJobs(selectedCountry);
+      fetchJobs();
     } catch (err) {
       setFormError((err as Error).message);
+    } finally {
+      setIsSubmittingJob(false);
     }
   };
 
@@ -707,7 +680,41 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
     setDeletingJobId(id);
   };
 
-  // Confirms actual deletion of job
+  // Fetch archived (soft-deleted) jobs for Admin recovery
+  const fetchArchivedJobs = async () => {
+    setLoadingArchived(true);
+    try {
+      const res = await fetch('/api/jobs/archived');
+      if (!res.ok) throw new Error('Failed to load archived jobs.');
+      const data = await res.json();
+      setArchivedJobs(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoadingArchived(false);
+    }
+  };
+
+  // Restore a soft-deleted job from the archive
+  const handleRestoreJob = async (jobId: string) => {
+    setRestoringJobId(jobId);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/restore`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to restore job.');
+      }
+      await Promise.all([fetchJobs(), fetchArchivedJobs()]);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRestoringJobId(null);
+    }
+  };
+
+  // Confirms soft-deletion (moves job to Recovery Archive, preserving WebP & metadata)
   const confirmDelete = async () => {
     if (!deletingJobId) return;
     try {
@@ -716,7 +723,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to delete job.');
+        throw new Error(errData.error || 'Failed to archive job.');
       }
       setDeletingJobId(null);
       fetchJobs();
@@ -807,129 +814,39 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
   };
 
 
-  // Group jobs by country
-  const groupedJobs = React.useMemo(() => {
-    const groups: Record<string, Job[]> = {};
-    if (Array.isArray(jobs)) {
-      jobs.forEach(job => {
-        if (job) {
-          // If NOT admin, skip inactive jobs
-          if (currentUser?.role !== 'admin' && job.isActive === false) {
-            return;
-          }
-          const cKey = (job.country || 'Other').trim();
-          if (!groups[cKey]) {
-            groups[cKey] = [];
-          }
-          groups[cKey].push(job);
-        }
-      });
-    }
-    return groups;
-  }, [jobs, currentUser]);
-
-  const uniqueCountriesWithJobs = Object.keys(groupedJobs).sort();
-
-  const allJobsList = React.useMemo(() => {
+  // Filtered active jobs list (only active jobs shown to non-admins)
+  const visibleJobs = React.useMemo(() => {
     if (!Array.isArray(jobs)) return [];
-    return jobs.filter(job => job && (currentUser?.role === 'admin' || job.isActive !== false));
-  }, [jobs, currentUser]);
-
-  const getRegionForCountry = React.useCallback((countryName: string): 'Europe' | 'Middle East' | 'Asia' | 'Other' => {
-    const name = String(countryName).toLowerCase().trim();
-    if (['albania', 'malta', 'greece', 'poland', 'germany', 'croatia', 'romania', 'bulgaria', 'serbia', 'italy', 'france', 'spain', 'portugal', 'hungary', 'greece', 'europe'].some(c => name.includes(c))) {
-      return 'Europe';
-    }
-    if (['kuwait', 'dubai', 'qatar', 'u.a.e', 'oman', 'abu dhabi', 'israel', 'bahrain', 'saudi', 'jordan', 'yemen', 'lebanon', 'middle east'].some(c => name.includes(c))) {
-      return 'Middle East';
-    }
-    if (['japan', 'singapore', 'malaysia', 'maldives', 'thailand', 'vietnam', 'india', 'nepal', 'bhutan', 'cambodia', 'korea', 'china', 'philippines', 'taiwan', 'asia'].some(c => name.includes(c))) {
-      return 'Asia';
-    }
-    return 'Other';
-  }, []);
-
-  const countriesByRegion = React.useMemo(() => {
-    const regions: Record<'Europe' | 'Middle East' | 'Asia' | 'Other', string[]> = {
-      'Europe': [],
-      'Middle East': [],
-      'Asia': [],
-      'Other': []
-    };
-    
-    uniqueCountriesWithJobs.forEach(countryName => {
-      const reg = getRegionForCountry(countryName);
-      regions[reg].push(countryName);
+    const q = jobSearchQuery.trim().toLowerCase();
+    return jobs.filter(job => {
+      if (!job) return false;
+      if (currentUser?.role !== 'admin' && job.isActive === false) return false;
+      if (currentUser?.role === 'admin') {
+        if (jobStatusFilter === 'active' && job.isActive === false) return false;
+        if (jobStatusFilter === 'paused' && job.isActive !== false) return false;
+      }
+      if (q) {
+        const haystack = [
+          job.serviceCharge,
+          job.title,
+          job.country,
+          job.requirement,
+          job.processingFeeMale,
+          job.processingFeeFemale
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
     });
-    
-    return regions;
-  }, [uniqueCountriesWithJobs, getRegionForCountry]);
+  }, [jobs, currentUser?.role, jobStatusFilter, jobSearchQuery]);
 
-  const regionalJobCounts = React.useMemo(() => {
-    const counts: Record<string, number> = {
-      'ALL': allJobsList.length,
-      'Europe': 0,
-      'Middle East': 0,
-      'Asia': 0,
-      'Other': 0
-    };
-    
-    Object.entries(groupedJobs).forEach(([countryName, jobList]) => {
-      const region = getRegionForCountry(countryName);
-      counts[region] += jobList.length;
-    });
-    
-    return counts;
-  }, [groupedJobs, allJobsList.length, getRegionForCountry]);
-
-  const activeRegions = React.useMemo(() => {
-    return (['Europe', 'Middle East', 'Asia', 'Other'] as const).filter(r => {
-      return countriesByRegion[r].length > 0 || regionalJobCounts[r] > 0;
-    });
-  }, [countriesByRegion, regionalJobCounts]);
-
-  const regionConfig = {
-    'Europe': {
-      label: 'Europe',
-      icon: '🇪🇺',
-      badgeClass: 'bg-blue-950/70 text-blue-400 border border-blue-900/40',
-      activeBadgeClass: 'bg-white/20 text-white border border-white/30',
-      textAccent: 'text-blue-400',
-      borderAccent: 'group-hover:border-blue-500/50',
-      gradient: 'from-blue-600 via-indigo-600 to-blue-700',
-      ringColor: 'ring-blue-400/30'
-    },
-    'Middle East': {
-      label: 'Middle East',
-      icon: '🕌',
-      badgeClass: 'bg-amber-950/70 text-amber-400 border border-amber-900/40',
-      activeBadgeClass: 'bg-white/20 text-white border border-white/30',
-      textAccent: 'text-amber-400',
-      borderAccent: 'group-hover:border-amber-500/50',
-      gradient: 'from-amber-600 via-orange-600 to-amber-700',
-      ringColor: 'ring-amber-400/30'
-    },
-    'Asia': {
-      label: 'Asia',
-      icon: '🌏',
-      badgeClass: 'bg-emerald-950/70 text-emerald-400 border border-emerald-900/40',
-      activeBadgeClass: 'bg-white/20 text-white border border-white/30',
-      textAccent: 'text-emerald-400',
-      borderAccent: 'group-hover:border-emerald-500/50',
-      gradient: 'from-emerald-600 via-teal-600 to-emerald-700',
-      ringColor: 'ring-emerald-400/30'
-    },
-    'Other': {
-      label: 'Other Regions',
-      icon: '🌐',
-      badgeClass: 'bg-purple-950/70 text-purple-400 border border-purple-900/40',
-      activeBadgeClass: 'bg-white/20 text-white border border-white/30',
-      textAccent: 'text-purple-400',
-      borderAccent: 'group-hover:border-purple-500/50',
-      gradient: 'from-purple-600 via-pink-600 to-purple-700',
-      ringColor: 'ring-purple-400/30'
-    }
-  };
+  const totalVisibleBaseCount = React.useMemo(() => {
+    if (!Array.isArray(jobs)) return 0;
+    return jobs.filter(j => j && (currentUser?.role === 'admin' || j.isActive !== false)).length;
+  }, [jobs, currentUser?.role]);
 
   return (
     <div id="active-jobs-container" className="space-y-8 animate-fade-in pb-16">
@@ -950,7 +867,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
             </h1>
           </div>
           
-          {subTab === 'jobs' && currentUser?.role === 'admin' && (
+          {subTab === 'jobs' && (
             <button 
               id="add-vacancy-btn"
               type="button"
@@ -1073,295 +990,220 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
         </div>
       )}
 
-      {/* Main Grid / Accordion Country-wise view */}
+      {/* Active Job Creatives Gallery */}
       {isLoading ? (
         <div className="flex flex-col items-center justify-center py-24 space-y-4">
           <Loader2 className="w-12 h-12 text-emerald-500 animate-spin" />
-          <p className="text-slate-500 text-sm font-medium animate-pulse">Retrieving active job demands...</p>
+          <p className="text-slate-500 text-sm font-medium animate-pulse">Loading active job creatives...</p>
         </div>
-      ) : uniqueCountriesWithJobs.length === 0 ? (
+      ) : totalVisibleBaseCount === 0 ? (
         <div className="bg-slate-900 border border-slate-750 border-dashed rounded-3xl py-20 text-center max-w-xl mx-auto px-6">
-          <Briefcase className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-          <h3 className="text-lg font-bold text-slate-100">No vacancies currently listed</h3>
+          <ImageIcon className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+          <h3 className="text-lg font-bold text-slate-100">No active job creatives yet</h3>
           <p className="text-slate-500 text-sm mt-2 max-w-md mx-auto">
-            Get started by adding your first active international job vacancy to allow coordinators to reference pricing and benefits.
+            Upload client demand images and enter the Service Charge so coordinators can view and share active openings instantly.
           </p>
-          <button 
+          <button
+            type="button"
             onClick={handleOpenCreate}
-            className="mt-6 px-4 py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-100 rounded-lg text-sm font-semibold inline-flex items-center gap-2"
+            className="mt-6 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-zinc-950 rounded-xl text-xs font-black inline-flex items-center gap-2 cursor-pointer"
           >
-            <Plus className="w-4 h-4" /> Create vacancy requirement
+            <Upload className="w-4 h-4" /> Upload First Job Creative
           </button>
         </div>
       ) : (
-        <div className="space-y-8 animate-fade-in">
-          {/* Country Selection Header/Title with reset button */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-              <Globe className="h-4 w-4 text-emerald-600 animate-spin" style={{ animationDuration: '8s' }} /> Country Wise Demand Directory
-            </h2>
-            <button
-              type="button"
-              onClick={() => setSelectedCountry('ALL')}
-              className={`px-4.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer flex items-center gap-2 border select-none ${
-                selectedCountry === 'ALL'
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white border-emerald-400 shadow-md ring-2 ring-emerald-400/25 scale-[1.02]'
-                  : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-750 hover:bg-slate-850'
-              }`}
-            >
-              <span>🌐</span> Show All Regions ({allJobsList.length} Jobs)
-            </button>
-          </div>
+        <div className="space-y-6 animate-fade-in">
+          {/* Clean Filter & Search Toolbar */}
+          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <h2 className="text-sm font-black text-slate-100 uppercase tracking-wider flex items-center gap-2">
+                <Briefcase className="w-4 h-4 text-emerald-400" />
+                Active Demand Creatives
+              </h2>
+              <span className="text-xs font-mono font-bold text-slate-400 tabular-nums">
+                ({visibleJobs.length})
+              </span>
+            </div>
 
-          {/* Regional Mother Containers with Child Countries */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {activeRegions.map((regionName) => {
-              const config = regionConfig[regionName];
-              const regionJobsCount = regionalJobCounts[regionName];
-              const childCountries = countriesByRegion[regionName];
-              const isRegionSelected = selectedCountry === `REGION_${regionName}`;
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative flex-1 sm:w-64">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={jobSearchQuery}
+                  onChange={(e) => setJobSearchQuery(e.target.value)}
+                  placeholder="Search service charge..."
+                  className="w-full pl-8 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
 
-              return (
-                <div 
-                  key={regionName} 
-                  className={`bg-slate-900/60 rounded-3xl p-5 border transition-all duration-250 flex flex-col gap-4 ${
-                    isRegionSelected 
-                      ? 'border-emerald-500/50 bg-slate-900/95 shadow-lg shadow-emerald-950/20' 
-                      : 'border-slate-800 hover:border-slate-750/80'
-                  }`}
-                >
-                  {/* Mother Card / Header Row */}
+              {currentUser?.role === 'admin' && (
+                <>
+                  <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-1 text-[11px] font-bold">
+                    {(['all', 'active', 'paused'] as const).map((statusKey) => (
+                      <button
+                        key={statusKey}
+                        type="button"
+                        onClick={() => setJobStatusFilter(statusKey)}
+                        className={`px-2.5 py-1 rounded-lg uppercase tracking-wider transition cursor-pointer ${
+                          jobStatusFilter === statusKey
+                            ? 'bg-emerald-500 text-zinc-950 font-black'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {statusKey}
+                      </button>
+                    ))}
+                  </div>
+
                   <button
                     type="button"
-                    onClick={() => setSelectedCountry(`REGION_${regionName}`)}
-                    className={`w-full group/mother p-3.5 rounded-2xl border text-left transition-all duration-200 select-none cursor-pointer flex items-center justify-between relative overflow-hidden ${
-                      isRegionSelected
-                        ? 'bg-gradient-to-br ' + config.gradient + ' text-white border-white/20 shadow-sm ring-2 ' + config.ringColor + ' scale-[1.01]'
-                        : 'bg-slate-950/80 border-slate-800/80 hover:border-slate-700 text-slate-200 hover:bg-slate-950'
-                    }`}
+                    onClick={() => {
+                      setIsArchiveModalOpen(true);
+                      fetchArchivedJobs();
+                    }}
+                    className="px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-emerald-400 text-[11px] font-bold uppercase tracking-wider inline-flex items-center gap-1.5 transition cursor-pointer"
+                    title="View and restore archived job demands"
                   >
-                    <div className="relative z-10 flex items-center gap-2.5">
-                      <span className="text-xl filter drop-shadow-sm select-none">{config.icon}</span>
-                      <div>
-                        <h3 className="font-black text-xs tracking-wider uppercase leading-tight">
-                          {config.label}
-                        </h3>
-                        <p className={`text-[8px] font-bold mt-0.5 ${isRegionSelected ? 'text-white/80' : 'text-slate-400 group-hover/mother:text-slate-300'}`}>
-                          {isRegionSelected ? '● Region Active' : 'Click to view all'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <span className={`relative z-10 text-[9px] font-mono font-black uppercase px-2 py-0.5 rounded-full ${
-                      isRegionSelected
-                        ? 'bg-white/20 text-white border border-white/30'
-                        : config.badgeClass
-                    }`}>
-                      {regionJobsCount} {regionJobsCount === 1 ? 'Job' : 'Jobs'}
-                    </span>
+                    <Archive className="w-3.5 h-3.5 text-emerald-400" />
+                    Recovery Archive
                   </button>
-
-                  {/* Child Countries inside Mother Region */}
-                  <div className="flex flex-col gap-2">
-                    {childCountries.map((countryName) => {
-                      const countryJobs = groupedJobs[countryName] || [];
-                      const isChildSelected = selectedCountry === countryName;
-                      const flagUrl = getCountryFlagUrl(countryName);
-
-                      return (
-                        <button
-                          key={countryName}
-                          type="button"
-                          onClick={() => setSelectedCountry(countryName)}
-                          className={`group/child p-2 rounded-xl border text-left transition-all duration-150 select-none cursor-pointer flex items-center justify-between relative overflow-hidden ${
-                            isChildSelected
-                              ? 'bg-emerald-600/15 text-emerald-300 border-emerald-500/40 shadow-2xs ring-1 ring-emerald-500/20'
-                              : 'bg-slate-950/40 border-slate-850 hover:border-slate-750 text-slate-300 hover:bg-slate-950/70'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-6 h-4 rounded-xs overflow-hidden border border-slate-800 shrink-0">
-                              {flagUrl ? (
-                                <img 
-                                  src={flagUrl} 
-                                  alt="" 
-                                  className="w-full h-full object-cover"
-                                  referrerPolicy="no-referrer"
-                                />
-                              ) : (
-                                <span className="text-[10px] flex items-center justify-center h-full">🌐</span>
-                              )}
-                            </div>
-                            <span className="font-black text-[10px] uppercase tracking-wider truncate group-hover/child:text-white transition-colors">
-                              {countryName}
-                            </span>
-                          </div>
-
-                          <span className={`text-[8.5px] font-mono font-black shrink-0 px-1.5 py-0.5 rounded-md ${
-                            isChildSelected
-                              ? 'bg-emerald-500 text-zinc-950'
-                              : 'bg-slate-900 text-slate-400 group-hover/child:text-slate-200 group-hover/child:bg-slate-800'
-                          }`}>
-                            {countryJobs.length}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+                </>
+              )}
+            </div>
           </div>
 
-          {/* Jobs display area */}
-          {selectedCountry && (() => {
-            let displayedJobs: Job[] = [];
-            if (selectedCountry === 'ALL') {
-              displayedJobs = allJobsList;
-            } else if (selectedCountry.startsWith('REGION_')) {
-              const regionName = selectedCountry.replace('REGION_', '');
-              displayedJobs = allJobsList.filter(job => getRegionForCountry(job.country || '') === regionName);
-            } else {
-              displayedJobs = groupedJobs[selectedCountry] || [];
-            }
+          {visibleJobs.length === 0 ? (
+            <div className="bg-slate-900/50 border border-slate-800 border-dashed rounded-2xl py-14 text-center">
+              <p className="text-sm font-bold text-slate-400">No job creatives match your current filter.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {visibleJobs.map((job) => {
+                const displayServiceCharge =
+                  job.serviceCharge ||
+                  (job.processingFeeMale || job.processingFeeFemale
+                    ? [
+                        job.processingFeeMale ? `Male: ${job.processingFeeMale}` : '',
+                        job.processingFeeFemale ? `Female: ${job.processingFeeFemale}` : ''
+                      ]
+                        .filter(Boolean)
+                        .join(' • ')
+                    : 'Not specified');
 
-            if (displayedJobs.length === 0) return null;
-
-            return (
-              <div className="bg-slate-950/40 border border-slate-750/80 rounded-3xl p-6 shadow-3xs text-left space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-750/60 pb-4 gap-3">
-                  <div>
-                    <h3 className="text-lg font-black text-slate-100 uppercase tracking-wide flex items-center gap-2.5">
-                      {selectedCountry === 'ALL' ? (
-                        <>
-                          <span className="text-xl">🌐</span> ALL ACTIVE INTERNATIONAL VACANCIES
-                        </>
-                      ) : selectedCountry.startsWith('REGION_') ? (
-                        <>
-                          <span className="text-xl">
-                            {selectedCountry.replace('REGION_', '') === 'Europe' ? '🇪🇺' :
-                             selectedCountry.replace('REGION_', '') === 'Middle East' ? '🕌' :
-                             selectedCountry.replace('REGION_', '') === 'Asia' ? '🌏' : '🌐'}
-                          </span>{' '}
-                          {selectedCountry.replace('REGION_', '').toUpperCase()} ACTIVE VACANCIES
-                        </>
-                      ) : (
-                        <>
-                          {getCountryFlagUrl(selectedCountry) ? (
-                            <div className="p-1 bg-slate-900 border border-slate-750 rounded-lg shadow-2xs flex items-center justify-center shrink-0">
-                              <img 
-                                src={getCountryFlagUrl(selectedCountry)} 
-                                alt="" 
-                                className="w-6 h-4 object-cover rounded-xs shadow-3xs"
-                                referrerPolicy="no-referrer"
-                              />
-                            </div>
-                          ) : (
-                            <span className="text-xl">🌐</span>
-                          )} {selectedCountry} Active Vacancies
-                        </>
-                      )}
-                    </h3>
-                    <p className="text-xs text-slate-500 font-bold mt-1">
-                      {selectedCountry === 'ALL'
-                        ? `Showing ${displayedJobs.length} official career opportunities listed across ${uniqueCountriesWithJobs.length} destinations`
-                        : selectedCountry.startsWith('REGION_')
-                        ? `Showing ${displayedJobs.length} official career opportunities listed for the ${selectedCountry.replace('REGION_', '')} region`
-                        : `Showing ${displayedJobs.length} official career opportunities listed for ${selectedCountry}`}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {selectedCountry !== 'ALL' && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedCountry('ALL')}
-                        className="text-[10px] uppercase font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 border border-slate-700 px-3 py-1.5 rounded-full transition cursor-pointer"
-                      >
-                        Show All ({allJobsList.length} Jobs)
-                      </button>
-                    )}
-                    <span className="self-start sm:self-center text-[10px] uppercase font-black text-emerald-400 bg-emerald-950/40 border border-emerald-900/30 px-3 py-1.5 rounded-full font-mono">
-                      CGP Verified Demand
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                  {displayedJobs.filter(Boolean).map((job) => (
-                  <div 
+                return (
+                  <div
                     key={job.id}
                     id={`job-card-${job.id}`}
-                    className={`bg-slate-850 border rounded-2xl shadow-3xs hover:shadow-md hover:border-slate-600 transition-all duration-250 relative flex flex-col overflow-hidden ${
-                      job.isActive === false ? 'border-dashed border-slate-700 bg-slate-900/50 opacity-80' : 'border-slate-750'
+                    className={`bg-slate-900 border rounded-2xl overflow-hidden flex flex-col transition-all duration-200 text-left ${
+                      job.isActive === false
+                        ? 'border-dashed border-slate-700 opacity-75'
+                        : 'border-slate-800 hover:border-slate-700'
                     }`}
                   >
-                    {/* Header block with country/title */}
-                    <div className="p-5 pb-4 border-b border-slate-750 bg-slate-900/30 flex items-start justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-900/90 border border-slate-750 text-slate-100 text-[10px] font-extrabold tracking-wider uppercase rounded-lg shadow-2xs">
-                            {getCountryFlagUrl(job.country) ? (
-                              <img 
-                                src={getCountryFlagUrl(job.country)} 
-                                alt="" 
-                                className="w-4.5 h-3 object-cover rounded-xs border border-slate-700/80 shadow-3xs"
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <span className="text-xs">🌐</span>
-                            )}
-                            <span>{(job.country || 'Other').toUpperCase()}</span>
-                          </span>
-                          {job.isActive !== false ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-950/40 border border-emerald-900/30 text-emerald-400 text-[9px] font-bold tracking-wider uppercase rounded-full">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                              Active Demand
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-950/40 border border-amber-900/30 text-amber-400 text-[9px] font-bold tracking-wider uppercase rounded-full">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                              Demand Paused / Off
-                            </span>
-                          )}
+                    {/* Slim Card Top Bar (keeps status & actions off the image) */}
+                    <div className="px-3 py-2 bg-slate-950 border-b border-slate-800 flex items-center justify-between gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider border ${
+                          job.isActive !== false
+                            ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
+                            : 'bg-amber-500/10 border-amber-500/25 text-amber-400'
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            job.isActive !== false ? 'bg-emerald-400' : 'bg-amber-400'
+                          }`}
+                        />
+                        {job.isActive !== false ? 'Active' : 'Paused'}
+                      </span>
+
+                      {job.imageUrl && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewCreativeJob(job)}
+                            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-emerald-400 transition cursor-pointer"
+                            title="Enlarge Creative"
+                          >
+                            <ZoomIn className="w-3.5 h-3.5" />
+                          </button>
+                          <a
+                            href={job.imageUrl}
+                            download={`job_creative_${job.id}.webp`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-emerald-400 transition"
+                            title="Download WebP Creative"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </a>
                         </div>
-                        <h3 className="text-base font-black text-slate-100 tracking-tight leading-snug">
-                          {job.title}
-                        </h3>
-                        {job.salaryRange && (
-                          <div className="text-sm sm:text-base font-black text-emerald-700 tracking-wide mt-1.5">
-                            Salary Range: <span className="font-extrabold text-emerald-800">{job.salaryRange}</span>
+                      )}
+                    </div>
+
+                    {/* Edge-to-Edge Creative Showcase */}
+                    <div className="relative bg-slate-950 border-b border-slate-800 group">
+                      {job.imageUrl ? (
+                        <div
+                          onClick={() => setPreviewCreativeJob(job)}
+                          className="relative w-full aspect-square flex items-center justify-center overflow-hidden cursor-zoom-in bg-slate-950"
+                        >
+                          <img
+                            src={job.imageUrl}
+                            alt={displayServiceCharge}
+                            loading="lazy"
+                            className="w-full h-full object-contain transition-transform duration-200 group-hover:scale-[1.02]"
+                          />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center pointer-events-none">
+                            <span className="opacity-0 group-hover:opacity-100 transition-opacity px-3 py-1.5 rounded-lg bg-slate-950/90 border border-slate-700 text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                              <ZoomIn className="w-3.5 h-3.5 text-emerald-400" />
+                              Enlarge
+                            </span>
                           </div>
-                        )}
-                      </div>
-                      
-                      {/* Actions & Status Switch */}
-                      <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                        {currentUser?.role === 'admin' && (
-                          <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg p-1 shadow-3xs">
-                            <button
-                               type="button"
-                               onClick={(e) => handleOpenEdit(job, e)}
-                               className="p-1.5 text-slate-500 hover:text-accent-purple hover:bg-slate-700 rounded-md transition duration-150 cursor-pointer"
-                               title="Edit vacancy details"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
+                        </div>
+                      ) : (
+                        <div className="w-full aspect-square flex flex-col items-center justify-center p-5 text-center space-y-2 bg-slate-950/80">
+                          <ImageIcon className="w-8 h-8 text-slate-600" />
+                          {job.title && (
+                            <p className="text-sm font-extrabold text-slate-200 line-clamp-2">{job.title}</p>
+                          )}
+                          {job.country && (
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">{job.country}</p>
+                          )}
+                          {currentUser?.role === 'admin' && (
                             <button
                               type="button"
-                              onClick={(e) => handleDelete(job.id, e)}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-700 rounded-md transition duration-150 cursor-pointer"
-                              title="Delete vacancy"
+                              onClick={(e) => handleOpenEdit(job, e)}
+                              className="mt-2 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold cursor-pointer transition"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              Upload Creative Image
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
+                      )}
+                    </div>
 
-                        {currentUser?.role === 'admin' && (
-                          <div className="flex items-center gap-1.5 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700 shadow-3xs">
-                            <span className={`text-[8px] font-black uppercase tracking-wider ${job.isActive !== false ? 'text-emerald-400' : 'text-slate-400'}`}>
-                              {job.isActive !== false ? 'Demand ON' : 'Demand OFF'}
-                            </span>
+                    {/* Single Service Charge Heading Block */}
+                    <div className="p-4 flex-1 flex flex-col justify-between gap-3">
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 space-y-1">
+                        <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-1.5">
+                          <Coins className="w-3.5 h-3.5" />
+                          Service Charge
+                        </span>
+                        <h3 className="text-base font-black text-slate-100 leading-snug break-words tabular-nums">
+                          {displayServiceCharge}
+                        </h3>
+                      </div>
+
+                      {/* Card Footer: Timestamp, WebP metadata & Admin Controls */}
+                      <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-slate-800/80 text-[11px]">
+                        <div className="text-slate-500 font-mono truncate">
+                          {new Date(job.createdAt).toLocaleDateString()}
+                          {job.imageSizeBytes ? ` • ${formatBytes(job.imageSizeBytes)} WEBP` : ''}
+                        </div>
+
+                        {currentUser?.role === 'admin' ? (
+                          <div className="flex items-center gap-1.5 shrink-0">
                             <button
                               type="button"
                               onClick={async (e) => {
@@ -1373,136 +1215,59 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ isActive: job.isActive === false })
                                   });
-                                  if (res.ok) {
-                                    fetchJobs(selectedCountry || undefined);
-                                  }
+                                  if (res.ok) fetchJobs();
                                 } catch (err) {
                                   console.error('Failed to toggle job status', err);
                                 }
                               }}
-                              className={`relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ${
                                 job.isActive !== false ? 'bg-emerald-600' : 'bg-slate-700'
                               }`}
+                              title={job.isActive !== false ? 'Pause demand' : 'Activate demand'}
                             >
                               <span
-                                className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                  job.isActive !== false ? 'translate-x-3.5' : 'translate-x-0'
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ${
+                                  job.isActive !== false ? 'translate-x-4' : 'translate-x-0'
                                 }`}
                               />
                             </button>
+                            <button
+                              type="button"
+                              onClick={(e) => handleOpenEdit(job, e)}
+                              className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                              title="Edit Service Charge or Replace Creative"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => handleDelete(job.id, e)}
+                              className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                              title="Delete Job Creative"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
+                        ) : (
+                          job.imageUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewCreativeJob(job)}
+                              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition"
+                            >
+                              <ZoomIn className="w-3.5 h-3.5 text-emerald-400" />
+                              View
+                            </button>
+                          )
                         )}
                       </div>
                     </div>
-
-                    {/* Main parameters block */}
-                    <div className="p-5 space-y-4 flex-grow text-left">
-                      {/* 1. Demand & Processing Charge */}
-                      <div className="grid grid-cols-2 gap-3.5">
-                        <div className="bg-slate-900/50 p-3.5 rounded-xl border border-slate-750 space-y-0.5">
-                          <span className="text-[10px] font-black text-slate-500 flex items-center gap-1 uppercase tracking-wider">
-                            <Coins className="w-3 h-3 text-slate-400" /> Male Charge
-                          </span>
-                          <p className="text-base font-black text-slate-100">
-                            {job.processingFeeMale || 'N/A'}
-                          </p>
-                        </div>
-                        <div className="bg-slate-900/50 p-3.5 rounded-xl border border-slate-750 space-y-0.5">
-                          <span className="text-[10px] font-black text-slate-500 flex items-center gap-1 uppercase tracking-wider">
-                            <Coins className="w-3 h-3 text-slate-400" /> Female Charge
-                          </span>
-                          <p className="text-base font-black text-slate-100">
-                            {job.processingFeeFemale || 'N/A'}
-                          </p>
-                        </div>
-                      </div>
-
-                       {/* 2. Core specs list */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-y-3.5 gap-x-4 text-xs">
-                        <div className="flex items-start gap-2 md:col-span-2">
-                          <Briefcase className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
-                          <div className="w-full">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Positions & Salary Structure</p>
-                            {job.positions && Array.isArray(job.positions) && job.positions.length > 0 ? (
-                              <div className="space-y-1.5 mt-2">
-                                {job.positions.map((pos, idx) => (
-                                  <div key={idx} className="flex items-center justify-between text-xs bg-slate-950/60 hover:bg-slate-950 p-2.5 rounded-xl border border-slate-850">
-                                    <span className="font-extrabold text-slate-200">{pos.title}</span>
-                                    <span className="text-[9.5px] font-mono font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-lg">
-                                      {pos.salary || 'Commission based'}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-slate-200 font-bold mt-0.5">{job.requirement}</p>
-                            )}
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-start gap-2">
-                          <Clock className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
-                          <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Age Bracket</p>
-                            <p className="text-slate-200 font-bold">{job.ageLimit || 'Any'}</p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-start gap-2 md:col-span-2">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
-                          <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Accommodation & Transport</p>
-                            <p className="text-slate-200 font-bold leading-relaxed">{job.accommodation}</p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-start gap-2">
-                          <Video className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
-                          <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Interview Mode</p>
-                            <p className="text-slate-200 font-bold">{job.modeOfInterview}</p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-start gap-2">
-                          <Users className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
-                          <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Applicability</p>
-                            <p className="text-slate-200 font-bold">{job.applicability}</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 3. Mandatory conditions checklist */}
-                      {job.conditions && job.conditions.length > 0 && (
-                        <div className="space-y-2 pt-1.5">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Mandatory Criteria & Medicals</p>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
-                            {job.conditions.map((cond, idx) => (
-                              <div key={idx} className="flex items-center gap-1.5 text-slate-200 bg-slate-900/40 p-2 rounded-lg border border-slate-750 text-xs">
-                                <CheckCircle className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-                                <span className="font-bold truncate" title={cond}>{cond}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Footer text / Special other terms */}
-                    {job.otherTerms && (
-                      <div className="px-5 py-3.5 bg-purple-950/40 border-t border-slate-750 text-xs text-purple-400 font-bold leading-relaxed flex items-center gap-2 text-left">
-                        <ShieldCheck className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                        <p>{job.otherTerms}</p>
-                      </div>
-                    )}
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          );
-        })()}
-      </div>
+          )}
+        </div>
       )}
       </>
     )}
@@ -2279,9 +2044,9 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                   <AlertCircle className="w-6 h-6" />
                 </div>
                 <div className="space-y-2">
-                  <h3 className="text-lg font-bold text-slate-100">Remove Job Vacancy</h3>
+                  <h3 className="text-lg font-bold text-slate-100">Move Job Creative to Recovery Archive</h3>
                   <p className="text-sm text-slate-400">
-                    Are you sure you want to permanently remove this job vacancy from the database? This action cannot be undone.
+                    This hides the demand card from active view while keeping its WebP image and Service Charge safely backed up in the Recovery Archive. You can restore it anytime.
                   </p>
                 </div>
                 <div className="pt-4 flex items-center justify-center gap-3">
@@ -2297,7 +2062,7 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                     onClick={confirmDelete}
                     className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-bold rounded-xl transition shadow-md shadow-rose-600/10 cursor-pointer"
                   >
-                    Yes, Delete Vacancy
+                    Move to Archive
                   </button>
                 </div>
               </div>
@@ -2306,281 +2071,288 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
         </div>
       )}
 
-      {/* Slide-over Modal Form */}
-      {isFormOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            {/* Background overlay */}
-            <div 
-              className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity" 
-              onClick={() => setIsFormOpen(false)}
-            />
-
-            {/* Trick to center modal */}
-            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-
-            {/* Modal panel */}
-            <div className="relative z-10 inline-block align-middle bg-slate-850 rounded-3xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-xl sm:w-full border border-slate-750">
-              <div className="p-6 border-b border-slate-750 flex items-center justify-between bg-slate-900/30">
-                <div className="space-y-1">
-                  <h3 className="text-lg font-bold text-slate-100">
-                    {editingJob ? 'Edit Vacancy Demand' : 'Add New Active Job Demand'}
+      {/* Admin Recovery Archive Modal */}
+      {isArchiveModalOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-50 p-4 text-left">
+          <div className="bg-slate-900 rounded-3xl shadow-2xl border border-slate-750 w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh] text-slate-100">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/70">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400">
+                  <Archive className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-100 text-sm uppercase tracking-wider">
+                    Active Jobs Recovery Archive
                   </h3>
-                  <p className="text-xs text-slate-400">
-                    Provide precise pricing and criteria specifications. Accessible by anyone.
+                  <p className="text-[11px] text-slate-400">
+                    All archived job creatives are protected from accidental deletion and can be restored anytime.
                   </p>
                 </div>
-                <button 
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsArchiveModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded-lg cursor-pointer transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto flex-1 space-y-3">
+              {loadingArchived ? (
+                <div className="flex flex-col items-center justify-center py-12 space-y-3">
+                  <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
+                  <p className="text-xs text-slate-400 font-bold">Loading archived job creatives...</p>
+                </div>
+              ) : archivedJobs.length === 0 ? (
+                <div className="text-center py-12 border border-slate-800 border-dashed rounded-2xl bg-slate-950/40">
+                  <ShieldCheck className="w-10 h-10 text-emerald-400/70 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-slate-200">No archived job creatives</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Any removed demand creative will appear here safely for 1-click restoration.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {archivedJobs.map((job) => {
+                    const chargeLabel =
+                      job.serviceCharge ||
+                      [
+                        job.processingFeeMale ? `Male: ${job.processingFeeMale}` : '',
+                        job.processingFeeFemale ? `Female: ${job.processingFeeFemale}` : ''
+                      ]
+                        .filter(Boolean)
+                        .join(' • ') ||
+                      job.title ||
+                      'Untitled Job';
+
+                    return (
+                      <div
+                        key={job.id}
+                        className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3 flex items-center gap-3"
+                      >
+                        <div className="w-16 h-16 rounded-xl bg-slate-900 border border-slate-800 overflow-hidden shrink-0 flex items-center justify-center">
+                          {job.imageUrl ? (
+                            <img
+                              src={job.imageUrl}
+                              alt={chargeLabel}
+                              className="w-full h-full object-contain"
+                            />
+                          ) : (
+                            <ImageIcon className="w-6 h-6 text-slate-600" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <p className="text-xs font-black text-slate-100 truncate">{chargeLabel}</p>
+                          <p className="text-[10px] font-mono text-slate-500 truncate">
+                            Archived: {job.deletedAt ? new Date(job.deletedAt).toLocaleString() : new Date(job.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={restoringJobId === job.id}
+                          onClick={() => handleRestoreJob(job.id)}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-black inline-flex items-center gap-1.5 transition cursor-pointer shrink-0 disabled:opacity-50"
+                        >
+                          {restoringJobId === job.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          )}
+                          Restore
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-slate-950/80 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+              <span className="flex items-center gap-1.5 text-[11px]">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                Backed up in Firestore + Local Rolling Snapshots
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsArchiveModalOpen(false)}
+                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Streamlined Add/Edit Job Creative Modal (Image + Service Charge Only) */}
+      {isFormOpen && (
+        <div
+          className="fixed inset-0 z-50 overflow-y-auto"
+          aria-labelledby="modal-title"
+          role="dialog"
+          aria-modal="true"
+          onPaste={(e) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (let i = 0; i < items.length; i++) {
+              if (items[i].type.startsWith('image/')) {
+                const file = items[i].getAsFile();
+                if (file) {
+                  e.preventDefault();
+                  handleCreativeImageFile(file);
+                  break;
+                }
+              }
+            }
+          }}
+        >
+          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div
+              className="fixed inset-0 bg-black/65 backdrop-blur-xs transition-opacity"
+              onClick={() => !isUploadingCreative && !isSubmittingJob && setIsFormOpen(false)}
+            />
+
+            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+            <div className="relative z-10 inline-block align-middle bg-slate-900 rounded-3xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full border border-slate-750">
+              <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+                <div className="space-y-1">
+                  <h3 id="modal-title" className="text-lg font-bold text-slate-100">
+                    {editingJob ? 'Edit Active Job Creative' : 'Upload Active Job Creative'}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Upload or paste the client demand image (auto-converted to WebP) and set the Service Charge.
+                  </p>
+                </div>
+                <button
                   type="button"
-                  onClick={() => setIsFormOpen(false)}
-                  className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition"
+                  onClick={() => !isUploadingCreative && !isSubmittingJob && setIsFormOpen(false)}
+                  className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              <form onSubmit={handleSubmit} className="p-6 space-y-5">
                 {formError && (
                   <div className="bg-rose-950/40 border border-rose-900/30 text-rose-400 p-3.5 rounded-xl flex items-center gap-2 text-xs font-bold">
                     <AlertCircle className="w-4.5 h-4.5 flex-shrink-0 text-rose-500" />
                     <span>{formError}</span>
                   </div>
                 )}
-                
-                {/* Title */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Job Title / Company Name</label>
+
+                {/* 1. Creative Image Upload Zone */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-black text-slate-300 uppercase tracking-wider">
+                    Demand Creative Image *
+                  </label>
+
+                  <label
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDraggingCreative(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      setIsDraggingCreative(false);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDraggingCreative(false);
+                      const file = e.dataTransfer.files?.[0];
+                      if (file) handleCreativeImageFile(file);
+                    }}
+                    className={`block relative rounded-2xl border-2 border-dashed transition-all cursor-pointer overflow-hidden ${
+                      isDraggingCreative
+                        ? 'border-emerald-400 bg-emerald-500/10'
+                        : 'border-slate-700 hover:border-emerald-500/60 bg-slate-950/70'
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={isUploadingCreative}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleCreativeImageFile(file);
+                        e.target.value = '';
+                      }}
+                    />
+
+                    {isUploadingCreative ? (
+                      <div className="py-12 px-4 flex flex-col items-center justify-center gap-3 text-center">
+                        <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
+                        <p className="text-xs font-bold text-slate-200">
+                          Optimizing & converting creative to WebP...
+                        </p>
+                      </div>
+                    ) : imageUrl ? (
+                      <div className="p-3 space-y-3">
+                        <div className="relative bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center max-h-64">
+                          <img
+                            src={imageUrl}
+                            alt="Uploaded job creative"
+                            className="max-h-60 w-auto object-contain rounded-lg"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between gap-2 px-1 text-[11px]">
+                          <div className="flex items-center gap-2 text-emerald-400 font-mono font-bold truncate">
+                            <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span className="truncate">
+                              WebP Ready
+                              {imageSizeBytes ? ` • ${formatBytes(imageSizeBytes)}` : ''}
+                              {originalSizeBytes && imageSizeBytes && originalSizeBytes > imageSizeBytes
+                                ? ` (-${Math.round((1 - imageSizeBytes / originalSizeBytes) * 100)}%)`
+                                : ''}
+                            </span>
+                          </div>
+                          <span className="text-slate-300 font-bold underline shrink-0">
+                            Click or Drop to Replace
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="py-10 px-6 flex flex-col items-center justify-center text-center gap-2.5">
+                        <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                          <Upload className="w-5 h-5" />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-bold text-slate-200">
+                            Click to upload, drag & drop, or press Ctrl+V to paste
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            JPG, PNG, or any image — automatically compressed into lightweight WebP
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </label>
+                </div>
+
+                {/* 2. Single Service Charge Heading Input */}
+                <div className="space-y-1.5">
+                  <label htmlFor="job-service-charge" className="block text-xs font-black text-slate-300 uppercase tracking-wider">
+                    Service Charge *
+                  </label>
                   <input
+                    id="job-service-charge"
                     type="text"
                     required
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g. NESTO HYPERMARKET or HOTEL INTERCONTINENTAL QATAR"
-                    className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
+                    value={serviceCharge}
+                    onChange={(e) => setServiceCharge(e.target.value)}
+                    placeholder="e.g. INR 85,000 / Free Recruitment / 95k Male, 65k Female"
+                    className="w-full px-3.5 py-3 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-950 text-slate-100 font-bold"
                   />
                 </div>
 
-                {/* Country dropdown selection & Salary Range */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Target Country</label>
-                    <select
-                      value={country}
-                      onChange={(e) => setCountry(e.target.value)}
-                      className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                    >
-                      {safeCountries.map((c) => (
-                        <option key={c} value={c} className="bg-slate-850 text-slate-100">{c}</option>
-                      ))}
-                      <option value="Custom" className="bg-slate-850 text-slate-100">Custom (Type below)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Salary Range</label>
-                    <input
-                      type="text"
-                      value={salaryRange}
-                      onChange={(e) => setSalaryRange(e.target.value)}
-                      placeholder="e.g. 1400 - 2000 AED or $800 - $1200 / month"
-                      className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                    />
-                  </div>
-
-                  {country === 'Custom' && (
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Custom Country Name</label>
-                      <input
-                        type="text"
-                        required
-                        value={customCountry}
-                        onChange={(e) => setCustomCountry(e.target.value)}
-                        placeholder="e.g. Kuwait, Oman, Bahrain"
-                        className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* Requirements & Salary Structure - Multi position support */}
-                <div className="space-y-2 bg-slate-900/30 p-4.5 rounded-2xl border border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-wider">
-                      Requirements & Salary Structure
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setPositions([...positions, { title: '', salary: '' }])}
-                      className="px-2.5 py-1 bg-emerald-600/15 text-emerald-400 hover:bg-emerald-600/25 text-[10px] font-black uppercase tracking-wider rounded-lg border border-emerald-500/20 transition-all cursor-pointer select-none"
-                    >
-                      + Add Position
-                    </button>
-                  </div>
-                  
-                  <p className="text-[10px] text-slate-500 font-semibold leading-relaxed">
-                    Specify positions and salaries below. These are automatically unified into a single list for cross-agent compatibility.
-                  </p>
-
-                  <div className="space-y-3.5 mt-2.5 max-h-[190px] overflow-y-auto pr-1">
-                    {positions.map((pos, idx) => (
-                      <div key={idx} className="flex items-center gap-3.5 animate-fade-in">
-                        <div className="flex-grow grid grid-cols-2 gap-3">
-                          <div>
-                            <input
-                              type="text"
-                              required
-                              value={pos.title}
-                              onChange={(e) => {
-                                const updated = [...positions];
-                                updated[idx].title = e.target.value;
-                                setPositions(updated);
-                              }}
-                              placeholder="Position e.g. Waiter"
-                              className="w-full px-3 py-2 rounded-xl text-xs border border-slate-750 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-950 text-slate-100 font-bold placeholder-slate-600"
-                            />
-                          </div>
-                          <div>
-                            <input
-                              type="text"
-                              value={pos.salary}
-                              onChange={(e) => {
-                                const updated = [...positions];
-                                updated[idx].salary = e.target.value;
-                                setPositions(updated);
-                              }}
-                              placeholder="Salary e.g. 1400 AED"
-                              className="w-full px-3 py-2 rounded-xl text-xs border border-slate-750 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-950 text-slate-100 font-bold placeholder-slate-600"
-                            />
-                          </div>
-                        </div>
-
-                        {positions.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = positions.filter((_, i) => i !== idx);
-                              setPositions(updated);
-                            }}
-                            className="p-2 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 hover:bg-rose-500/20 transition hover:text-rose-300 shrink-0 cursor-pointer"
-                            title="Remove this position"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Processing Fee Grid */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Male Service Charge</label>
-                    <input
-                      type="text"
-                      value={processingFeeMale}
-                      onChange={(e) => setProcessingFeeMale(e.target.value)}
-                      placeholder="e.g. 95k"
-                      className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Female Service Charge</label>
-                    <input
-                      type="text"
-                      value={processingFeeFemale}
-                      onChange={(e) => setProcessingFeeFemale(e.target.value)}
-                      placeholder="e.g. 65k"
-                      className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                    />
-                  </div>
-                </div>
-
-                {/* Accommodation and Age limit */}
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="col-span-2">
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Accommodation & Flights</label>
-                    <input
-                      type="text"
-                      value={accommodation}
-                      onChange={(e) => setAccommodation(e.target.value)}
-                      placeholder="e.g. Free Accommodation, Meals & Transportation + Air ticket every 2 yrs"
-                      className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Age Limit</label>
-                    <input
-                      type="text"
-                      value={ageLimit}
-                      onChange={(e) => setAgeLimit(e.target.value)}
-                      placeholder="e.g. Max 32"
-                      className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                    />
-                  </div>
-                </div>
-
-                {/* Interview and Applicability */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Mode of Interview</label>
-                    <select
-                      value={modeOfInterview}
-                      onChange={(e) => setModeOfInterview(e.target.value)}
-                      className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                    >
-                      <option value="Online" className="bg-slate-850 text-slate-100">Online</option>
-                      <option value="Face to Face" className="bg-slate-850 text-slate-100">Face to Face</option>
-                      <option value="Online / CV Selection" className="bg-slate-850 text-slate-100">Online / CV Selection</option>
-                      <option value="CV Selection Only" className="bg-slate-850 text-slate-100">CV Selection Only</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Applicability</label>
-                    <select
-                      value={applicability}
-                      onChange={(e) => setApplicability(e.target.value)}
-                      className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                    >
-                      <option value="Both Male & Female Candidates can Apply" className="bg-slate-850 text-slate-100">Both Male & Female</option>
-                      <option value="Only Female Candidates can Apply" className="bg-slate-850 text-slate-100">Only Female</option>
-                      <option value="Only Male Candidates can Apply" className="bg-slate-850 text-slate-100">Only Male</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Conditions list */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">
-                    Mandatory Criteria & Medicals (One item per line)
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={conditionsText}
-                    onChange={(e) => setConditionsText(e.target.value)}
-                    placeholder="Pre Medical&#10;No Stamping Required&#10;Original Passport is mandatory"
-                    className="w-full px-3 py-2 border border-slate-700 rounded-xl text-sm font-sans focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                  />
-                </div>
-
-                {/* Other special terms */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Special Rules & flight terms</label>
-                  <input
-                    type="text"
-                    value={otherTerms}
-                    onChange={(e) => setOtherTerms(e.target.value)}
-                    placeholder="e.g. Includes International Flight Tickets. Freshers can Apply."
-                    className="w-full px-3 py-2.5 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-900/50 text-slate-100 font-bold"
-                  />
-                </div>
-
-                {/* Admin-only: Enable/Publish Toggle */}
+                {/* Publish Active Toggle */}
                 {currentUser?.role === 'admin' && (
-                  <div className="bg-slate-900/50 border border-slate-750 p-3.5 rounded-2xl flex items-center justify-between">
+                  <div className="bg-slate-950/60 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between">
                     <div className="space-y-0.5 text-left">
-                      <span className="block text-xs font-black text-slate-100 uppercase tracking-wide">Publish & Enable Demand</span>
-                      <span className="block text-[10px] text-slate-400 font-bold">Turn this on to make this vacancy active and visible to all agents.</span>
+                      <span className="block text-xs font-black text-slate-200 uppercase tracking-wide">Active & Visible</span>
+                      <span className="block text-[11px] text-slate-400">Show this creative in Active Jobs for all coordinators.</span>
                     </div>
                     <button
                       type="button"
@@ -2598,22 +2370,78 @@ export default function ActiveJobs({ currentUser, countries, view }: ActiveJobsP
                   </div>
                 )}
 
-                <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-750">
+                <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-800">
                   <button
                     type="button"
+                    disabled={isUploadingCreative || isSubmittingJob}
                     onClick={() => setIsFormOpen(false)}
-                    className="px-4 py-2 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 hover:bg-slate-800 transition cursor-pointer"
+                    className="px-4 py-2 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 hover:bg-slate-800 transition cursor-pointer disabled:opacity-50"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-zinc-950 text-xs font-bold rounded-xl transition shadow-md shadow-emerald-500/10 cursor-pointer"
+                    disabled={isUploadingCreative || isSubmittingJob || !imageUrl}
+                    className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-zinc-950 text-xs font-black rounded-xl transition shadow-md shadow-emerald-500/10 cursor-pointer disabled:opacity-50 inline-flex items-center gap-2"
                   >
-                    {editingJob ? 'Save Vacancy Changes' : 'Publish Active Vacancy'}
+                    {isSubmittingJob && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    <span>{editingJob ? 'Save Changes' : 'Publish Active Job'}</span>
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full-Screen Creative Lightbox Viewer */}
+      {previewCreativeJob && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setPreviewCreativeJob(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-750 rounded-3xl max-w-4xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[92vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-950/70">
+              <div className="min-w-0">
+                <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest block">
+                  Service Charge
+                </span>
+                <h3 className="text-base sm:text-lg font-black text-slate-100 truncate">
+                  {previewCreativeJob.serviceCharge || previewCreativeJob.title || 'Job Demand Creative'}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {previewCreativeJob.imageUrl && (
+                  <a
+                    href={previewCreativeJob.imageUrl}
+                    download={`job_creative_${previewCreativeJob.id}.webp`}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-zinc-950 font-black text-xs inline-flex items-center gap-1.5 transition"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download WebP</span>
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPreviewCreativeJob(null)}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 sm:p-6 bg-slate-950 flex-1 flex items-center justify-center overflow-auto">
+              {previewCreativeJob.imageUrl && (
+                <img
+                  src={previewCreativeJob.imageUrl}
+                  alt={previewCreativeJob.serviceCharge || 'Job creative'}
+                  className="max-w-full max-h-[75vh] object-contain rounded-xl"
+                />
+              )}
             </div>
           </div>
         </div>

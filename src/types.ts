@@ -102,8 +102,10 @@ export interface Lead {
   cvTextContent?: string;
   deletedDocuments?: DeletedDocument[];
   docOfficeVisited?: boolean;
+  docOfficeVisitedAt?: string;
   docOthers?: boolean;
   docInterviewAttended?: boolean;
+  docInterviewAttendedAt?: string;
   docEcrPassport?: boolean;
   reminderEnabled?: boolean;
   autoReplySent?: boolean;
@@ -179,21 +181,30 @@ export interface Coordinator {
 
 export interface Job {
   id: string;
-  title: string;
-  country: string;
+  imageUrl?: string;
+  serviceCharge?: string;
+  imageFormat?: string;
+  imageSizeBytes?: number;
+  originalFilename?: string;
+  // Optional / legacy compatibility fields
+  title?: string;
+  country?: string;
   salaryRange?: string;
-  requirement: string;
+  requirement?: string;
   positions?: { title: string; salary: string }[];
-  processingFeeMale: string;
-  processingFeeFemale: string;
-  accommodation: string;
-  ageLimit: string;
-  conditions: string[];
-  modeOfInterview: string;
-  applicability: string;
-  otherTerms: string;
+  processingFeeMale?: string;
+  processingFeeFemale?: string;
+  accommodation?: string;
+  ageLimit?: string;
+  conditions?: string[];
+  modeOfInterview?: string;
+  applicability?: string;
+  otherTerms?: string;
   isActive?: boolean;
+  isDeleted?: boolean;
+  deletedAt?: string | null;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface ImportantUpdate {

@@ -1,4 +1,72 @@
+import fs from 'fs';
+import path from 'path';
 import type { Lead, Message, WhatsAppTemplate } from '../types.ts';
+
+function resolveMimeTypeForMedia(fileNameOrUrl: string, mediaType?: string): string {
+  const lower = String(fileNameOrUrl || '').toLowerCase().split('?')[0];
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (lower.endsWith('.doc')) return 'application/msword';
+  if (lower.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (lower.endsWith('.xls')) return 'application/vnd.ms-excel';
+  if (lower.endsWith('.txt')) return 'text/plain';
+  if (mediaType === 'pdf') return 'application/pdf';
+  if (mediaType === 'image') return 'image/jpeg';
+  return 'application/octet-stream';
+}
+
+function resolveLocalUploadPath(mediaUrl: string): string | null {
+  if (!mediaUrl) return null;
+  const cleanUrl = mediaUrl.split('?')[0];
+  const uploadsIdx = cleanUrl.indexOf('/uploads/');
+  if (uploadsIdx === -1) return null;
+  const safeName = path.basename(cleanUrl.substring(uploadsIdx + '/uploads/'.length));
+  if (!safeName) return null;
+  const candidatePath = path.join(process.cwd(), 'uploads', safeName);
+  if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).size > 0) {
+    return candidatePath;
+  }
+  return null;
+}
+
+async function uploadMediaToMetaWhatsApp(
+  localFilePath: string,
+  mimeType: string,
+  fileName: string,
+  phoneNumberId: string,
+  metaToken: string
+): Promise<{ id?: string; error?: any }> {
+  const buffer = fs.readFileSync(localFilePath);
+  const uploadUrl = `https://graph.facebook.com/v20.0/${phoneNumberId.trim()}/media`;
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', mimeType);
+  form.append('file', new Blob([new Uint8Array(buffer)], { type: mimeType }), fileName || path.basename(localFilePath));
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 45000);
+  try {
+    const res = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${metaToken.trim()}`
+      },
+      body: form,
+      signal: controller.signal
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data?.id) {
+      return { id: String(data.id) };
+    }
+    return { error: data };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 export const DEFAULT_WHATSAPP_TEMPLATES: WhatsAppTemplate[] = [
   {
@@ -306,12 +374,45 @@ export async function sendWhatsAppMessage(
           }
         };
       } else if (mediaUrl) {
+        const localFilePath = resolveLocalUploadPath(mediaUrl);
+        let metaMediaId: string | undefined;
+        const resolvedMime = resolveMimeTypeForMedia(fileName || mediaUrl, mediaType);
+
+        if (localFilePath) {
+          console.log(`[Meta WhatsApp] Uploading local media directly to Meta Media API: ${path.basename(localFilePath)} (${resolvedMime})`);
+          const uploadResult = await uploadMediaToMetaWhatsApp(
+            localFilePath,
+            resolvedMime,
+            fileName || path.basename(localFilePath),
+            phoneNumberId,
+            metaToken
+          );
+          if (uploadResult.id) {
+            metaMediaId = uploadResult.id;
+            console.log(`[Meta WhatsApp] Direct Meta media upload succeeded. Media ID: ${metaMediaId}`);
+          } else {
+            console.error('[Meta WhatsApp] Direct Meta media upload failed:', JSON.stringify(uploadResult.error));
+            return {
+              success: false,
+              messageId,
+              channel: 'meta_cloud_api',
+              status: 'failed',
+              details: uploadResult.error || { error: { message: 'Failed to upload media file to Meta WhatsApp Cloud API.' } }
+            };
+          }
+        }
+
         if (mediaType === 'image') {
           type = 'image';
-          payload = { image: { link: mediaUrl, caption: text } };
+          payload = metaMediaId
+            ? { image: { id: metaMediaId, ...(text ? { caption: text } : {}) } }
+            : { image: { link: mediaUrl, ...(text ? { caption: text } : {}) } };
         } else if (mediaType === 'pdf' || mediaType === 'document') {
           type = 'document';
-          payload = { document: { link: mediaUrl, filename: fileName || 'document', caption: text } };
+          const resolvedFilename = fileName || (mediaUrl ? path.basename(mediaUrl.split('?')[0]) : 'document.pdf');
+          payload = metaMediaId
+            ? { document: { id: metaMediaId, filename: resolvedFilename, ...(text ? { caption: text } : {}) } }
+            : { document: { link: mediaUrl, filename: resolvedFilename, ...(text ? { caption: text } : {}) } };
         } else {
           type = 'text';
           payload = { text: { preview_url: false, body: text } };
@@ -322,7 +423,7 @@ export async function sendWhatsAppMessage(
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
       let response;
       try {
         response = await fetch(graphUrl, {
@@ -356,12 +457,24 @@ export async function sendWhatsAppMessage(
           buttons: matchedTemplate?.buttons
         };
       } else {
-        console.warn('Meta WhatsApp Cloud API error response (falling back to simulation):', JSON.stringify(data));
-        // Fall back to simulation if Meta API returns error
+        console.error('[Meta WhatsApp Cloud API] Error response from Meta:', JSON.stringify(data));
+        return {
+          success: false,
+          messageId,
+          channel: 'meta_cloud_api',
+          status: 'failed',
+          details: data
+        };
       }
     } catch (err: any) {
-      console.warn('Meta WhatsApp Cloud API timeout or exception (falling back to simulation):', err.message || err);
-      // Fall back to simulation on timeout or network error so messaging never hangs
+      console.error('[Meta WhatsApp Cloud API] Request timeout or exception:', err?.message || err);
+      return {
+        success: false,
+        messageId,
+        channel: 'meta_cloud_api',
+        status: 'failed',
+        details: { error: { message: err?.name === 'AbortError' ? 'WhatsApp Cloud API request timed out.' : (err?.message || 'Meta WhatsApp network error') } }
+      };
     }
   }
 

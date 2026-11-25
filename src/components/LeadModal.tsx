@@ -70,14 +70,16 @@ export default function LeadModal({
 
   // Skeleton loading state for fetching historical remarks & timeline data
   const [isTimelineLoading, setIsTimelineLoading] = useState(false);
+  const dirtyFieldsRef = useRef<Set<string>>(new Set());
 
-  // Fetch fresh activity timeline and historical remarks from server
+  // Fetch fresh activity timeline, historical remarks, and full fields from server
   const fetchTimelineData = async (showSkeleton = true) => {
-    if (!lead || !lead.id) return;
+    const targetId = lead?.id || initialLead.id;
+    if (!targetId) return;
     if (showSkeleton) setIsTimelineLoading(true);
     const start = Date.now();
     try {
-      const res = await fetch(`/api/leads/${encodeURIComponent(lead.id)}`);
+      const res = await fetch(`/api/leads/${encodeURIComponent(targetId)}`);
       if (res.ok) {
         const freshLead = await res.json();
         if (freshLead) {
@@ -86,6 +88,26 @@ export default function LeadModal({
             ...freshLead,
             timeline: freshLead.timeline || prev.timeline || []
           }));
+          // Hydrate non-dirty formFields so compacted/stale list data never hides existing remarks
+          setFormFields(prev => {
+            const dirty = dirtyFieldsRef.current;
+            return {
+              ...prev,
+              remarks1: dirty.has('remarks1') ? prev.remarks1 : (freshLead.remarks1 || ''),
+              remarks2: dirty.has('remarks2') ? prev.remarks2 : (freshLead.remarks2 || ''),
+              remarks3: dirty.has('remarks3') ? prev.remarks3 : (freshLead.remarks3 || ''),
+              adminRemarks: dirty.has('adminRemarks')
+                ? prev.adminRemarks
+                : (String(freshLead.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry' ? '' : (freshLead.adminRemarks || '')),
+              notes: dirty.has('notes') ? prev.notes : (freshLead.notes || ''),
+              stage: dirty.has('stage') ? prev.stage : (freshLead.stage || prev.stage),
+              callConnected: dirty.has('callConnected')
+                ? prev.callConnected
+                : (freshLead.callConnected || (freshLead.remarks1 ? 'connected' : prev.callConnected)),
+              cvTextContent: freshLead.cvTextContent ?? prev.cvTextContent,
+              deletedDocuments: (freshLead as any).deletedDocuments ?? prev.deletedDocuments
+            };
+          });
         }
       }
     } catch (err) {
@@ -99,11 +121,9 @@ export default function LeadModal({
     }
   };
 
-  // Trigger fetch when switching to the timeline tab or when lead changes
+  // Fetch full lead record once on lead change (timeline + uncompacted remarks/docs) and on timeline tab switch
   useEffect(() => {
-    if (activeLeftTab === 'timeline') {
-      fetchTimelineData(true);
-    }
+    fetchTimelineData(activeLeftTab === 'timeline');
   }, [activeLeftTab, initialLead.id]);
 
   // Computed timeline items filtered by category and search query
@@ -324,7 +344,10 @@ export default function LeadModal({
     position: initialLead.position || '',
     experience: initialLead.experience || '',
     qualification: initialLead.qualification || '',
-    adminRemarks: initialLead.adminRemarks || '',
+    adminRemarks:
+      String(initialLead.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry'
+        ? ''
+        : initialLead.adminRemarks || '',
     assignedTo: initialLead.assignedTo || '',
     importance: initialLead.importance !== undefined ? Number(initialLead.importance) : 3,
     remarks1: initialLead.remarks1 || '',
@@ -369,13 +392,18 @@ export default function LeadModal({
   });
   const [popupError, setPopupError] = useState<string | null>(null);
 
-  // Compute active tasks and strict disabled flag to prevent any saves without scheduled follow-ups
+  // Compute remarks changes and active tasks; never block Save when remarks are being committed
+  const remarksChanged =
+    (formFields.remarks1 || '').trim() !== (lead.remarks1 || '').trim() ||
+    (formFields.remarks2 || '').trim() !== (lead.remarks2 || '').trim() ||
+    (formFields.remarks3 || '').trim() !== (lead.remarks3 || '').trim();
   const activeTasksCount = (lead.tasks || []).filter((t: any) => !t.completed).length;
-  const isSaveButtonDisabled = formFields.callConnected === 'not_connected' && activeTasksCount === 0;
+  const isSaveButtonDisabled = !remarksChanged && formFields.callConnected === 'not_connected' && activeTasksCount === 0;
   const isFirstMountOrChangeRef = useRef<boolean>(true);
 
   // Sync state on lead changes
   useEffect(() => {
+    dirtyFieldsRef.current = new Set();
     setLead(initialLead);
     setTags(initialLead.tags || []);
     setFormFields({
@@ -400,7 +428,10 @@ export default function LeadModal({
       position: initialLead.position || '',
       experience: initialLead.experience || '',
       qualification: initialLead.qualification || '',
-      adminRemarks: initialLead.adminRemarks || '',
+      adminRemarks:
+        String(initialLead.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry'
+          ? ''
+          : initialLead.adminRemarks || '',
       assignedTo: initialLead.assignedTo || '',
       importance: initialLead.importance !== undefined ? Number(initialLead.importance) : 3,
       remarks1: initialLead.remarks1 || '',
@@ -465,6 +496,7 @@ export default function LeadModal({
 
   const handleFieldChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    dirtyFieldsRef.current.add(name);
     setFormFields(prev => {
       const updated = {
         ...prev,
@@ -478,6 +510,7 @@ export default function LeadModal({
         value.trim() !== ''
       ) {
         updated.stage = 'negotiating';
+        dirtyFieldsRef.current.add('stage');
       }
 
       // Automatically extract experience from remarks if experience is not explicitly filled
@@ -488,6 +521,7 @@ export default function LeadModal({
         const autoExtracted = extractExperienceFromRemarks(value);
         if (autoExtracted) {
           updated.experience = autoExtracted;
+          dirtyFieldsRef.current.add('experience');
         }
       }
       
@@ -574,7 +608,14 @@ export default function LeadModal({
           resumeName: data.resumeName,
           docResume: true
         }));
-        onLeadUpdated();
+        const nextLead = data.lead || {
+          ...lead,
+          resumeUrl: data.resumeUrl,
+          resumeName: data.resumeName,
+          docResume: true
+        };
+        setLead(nextLead);
+        onLeadUpdated(nextLead);
       } else {
         setResumeError(data.error || 'Failed to generate digital CV');
       }
@@ -643,15 +684,16 @@ export default function LeadModal({
     customTimeline?: any[]
   ) => {
     if (e) e.preventDefault();
+    if (savingForm) return;
 
     // Check if any of the three remarks was changed (entered or edited)
-    const remarksChanged = 
+    const hasRemarkEdits =
       (formFields.remarks1 || '').trim() !== (lead.remarks1 || '').trim() ||
       (formFields.remarks2 || '').trim() !== (lead.remarks2 || '').trim() ||
       (formFields.remarks3 || '').trim() !== (lead.remarks3 || '').trim();
 
     // Intercept with the connection popup modal if a remark changed and we aren't bypassed
-    if (remarksChanged && !isBypassed) {
+    if (hasRemarkEdits && !isBypassed) {
       setPopupError(null);
       setIsNotConnectedMode(false);
       setShowConnectionCheckModal(true);
@@ -662,8 +704,8 @@ export default function LeadModal({
     const effectiveCallConnected = overrideCallConnected || formFields.callConnected;
     if (effectiveCallConnected === 'not_connected') {
       const activeTasks = customTasks || lead.tasks || [];
-      const activeTasksCount = activeTasks.filter(t => !t.completed).length;
-      if (activeTasksCount === 0) {
+      const remainingTasks = activeTasks.filter(t => !t.completed).length;
+      if (remainingTasks === 0) {
         alert("Action Required: When the call is marked as 'Not Connected', you must schedule a callback task/reminder before saving.");
         return;
       }
@@ -685,13 +727,23 @@ export default function LeadModal({
         }
       }
 
+      // Only authorize clearing a remark when it was non-empty on lead, is now blank, and was explicitly edited
+      const remarkFieldNames = ['remarks1', 'remarks2', 'remarks3', 'adminRemarks', 'notes'] as const;
+      const clearedRemarks = remarkFieldNames.filter((key) => {
+        const prevVal = String((lead as any)[key] || '').trim();
+        const nextVal = String((formFields as any)[key] || '').trim();
+        return prevVal !== '' && nextVal === '' && dirtyFieldsRef.current.has(key);
+      });
+
       // Build fields payload with optional overrides
       const payload: any = {
         ...formFields,
         experience: finalExp,
         age: Number(formFields.age) || 0,
         importance: Number(formFields.importance) || 3,
-        tags
+        tags,
+        clearedRemarks,
+        allowClearRemarks: clearedRemarks.length > 0
       };
 
       if (overrideCallConnected) {
@@ -728,12 +780,29 @@ export default function LeadModal({
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setLead(data);
+        setTags(data.tags || []);
+        dirtyFieldsRef.current.clear();
         setFormFields(prev => ({
           ...prev,
-          stage: data.stage,
-          callConnected: data.callConnected || prev.callConnected
+          name: data.name ?? prev.name,
+          phone: data.phone ?? prev.phone,
+          alternateNo: data.alternateNo ?? '',
+          stage: data.stage ?? prev.stage,
+          callConnected: data.callConnected || prev.callConnected,
+          remarks1: data.remarks1 || '',
+          remarks2: data.remarks2 || '',
+          remarks3: data.remarks3 || '',
+          adminRemarks:
+            String(data.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry'
+              ? ''
+              : data.adminRemarks || '',
+          notes: data.notes || '',
+          experience: data.experience ?? prev.experience,
+          assignDate: data.assignDate ?? prev.assignDate,
+          serialNo: data.serialNo ?? prev.serialNo,
+          intake: getEffectiveIntake(data)
         }));
-        onLeadUpdated();
+        onLeadUpdated(data);
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 2500);
       } else {
@@ -758,7 +827,7 @@ export default function LeadModal({
       const data = await res.json();
       if (res.ok) {
         setLead(data);
-        onLeadUpdated();
+        onLeadUpdated(data);
       }
     } catch (err) {
       console.error('AI Requalification query failed', err);
@@ -808,7 +877,7 @@ export default function LeadModal({
       if (res.ok) {
         setLead(data);
         setNewTaskTitle('');
-        onLeadUpdated();
+        onLeadUpdated(data);
       }
     } catch (err) {
       console.error('Failed to save new task', err);
@@ -855,7 +924,7 @@ export default function LeadModal({
       const data = await res.json();
       if (res.ok) {
         setLead(data);
-        onLeadUpdated();
+        onLeadUpdated(data);
       }
     } catch (err) {
       console.error('Failed to toggle task status', err);
@@ -895,7 +964,7 @@ export default function LeadModal({
       const data = await res.json();
       if (res.ok) {
         setLead(data);
-        onLeadUpdated();
+        onLeadUpdated(data);
       }
     } catch (err) {
       console.error('Failed to remove task', err);
@@ -1376,7 +1445,7 @@ export default function LeadModal({
                         {saveSuccess && <CheckCircle2 className="h-4 w-4 text-white animate-bounce" />}
                       </button>
 
-                      {lead.adminRemarks && (
+                      {lead.adminRemarks && String(lead.adminRemarks).trim().toLowerCase() !== 'inbound whatsapp ad enquiry' && (
                         <div className="mt-2 p-2.5 bg-red-50 dark:bg-red-950/90 border border-red-200 dark:border-red-800/80 rounded-lg text-left shadow-xs">
                           <span className="text-[9px] font-bold text-red-700 dark:text-red-400 block uppercase">Admin Placement Instructions Directive</span>
                           <p className="font-bold text-red-950 dark:text-red-200 leading-relaxed mt-0.5">{lead.adminRemarks}</p>
@@ -1845,6 +1914,7 @@ export default function LeadModal({
                       value={formFields.notes}
                       onChange={(e) => {
                         const val = e.target.value;
+                        dirtyFieldsRef.current.add('notes');
                         setFormFields(prev => ({ ...prev, notes: val }));
                       }}
                       className="w-full text-xs p-3 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all font-bold font-sans min-h-[100px] text-slate-100 dark:text-slate-100 placeholder-slate-500 dark:placeholder-slate-500"
@@ -1854,6 +1924,7 @@ export default function LeadModal({
                         type="button"
                         onClick={async () => {
                           try {
+                            const notesCleared = String(lead.notes || '').trim() !== '' && formFields.notes.trim() === '' && dirtyFieldsRef.current.has('notes');
                             const res = await fetch(`/api/leads/${lead.id}`, {
                               method: 'PUT',
                               headers: { 
@@ -1861,12 +1932,23 @@ export default function LeadModal({
                                 'x-user-role': userRole,
                                 'x-agent-id': currentAgentId
                               },
-                              body: JSON.stringify({ ...formFields, notes: formFields.notes })
+                              body: JSON.stringify({
+                                notes: formFields.notes,
+                                ...(notesCleared ? { clearedRemarks: ['notes'], allowClearRemarks: true } : {})
+                              })
                             });
                             const data = await res.json();
                             if (res.ok) {
                               setLead(data);
-                              onLeadUpdated();
+                              dirtyFieldsRef.current.delete('notes');
+                              setFormFields(prev => ({
+                                ...prev,
+                                notes: data.notes || '',
+                                remarks1: data.remarks1 || prev.remarks1,
+                                remarks2: data.remarks2 || prev.remarks2,
+                                remarks3: data.remarks3 || prev.remarks3
+                              }));
+                              onLeadUpdated(data);
                               const btn = document.getElementById('quick-save-notes-btn');
                               if (btn) {
                                 const oldText = btn.innerHTML;
@@ -2655,13 +2737,22 @@ export default function LeadModal({
                                               
                                               const res = await fetch(`/api/leads/${lead.id}`, {
                                                 method: 'PUT',
-                                                headers: { 'Content-Type': 'application/json' },
+                                                headers: {
+                                                  'Content-Type': 'application/json',
+                                                  'x-user-role': userRole,
+                                                  'x-agent-id': currentAgentId
+                                                },
                                                 body: JSON.stringify({ [restoreAction.field]: restoreAction.content })
                                               });
                                               if (res.ok) {
                                                 const freshLead = await res.json();
                                                 setLead(freshLead);
-                                                onLeadUpdated();
+                                                dirtyFieldsRef.current.delete(restoreAction.field);
+                                                setFormFields(prev => ({
+                                                  ...prev,
+                                                  [restoreAction.field]: (freshLead as any)[restoreAction.field] || restoreAction.content
+                                                }));
+                                                onLeadUpdated(freshLead);
                                                 alert('Remark restored successfully!');
                                               } else {
                                                 alert('Failed to save restored remark.');
@@ -2737,8 +2828,10 @@ export default function LeadModal({
             <LeadWhatsAppChat
               lead={lead}
               onLeadUpdated={(updated) => {
-                if (updated) setLead(updated);
-                onLeadUpdated();
+                if (updated) {
+                  setLead(prev => ({ ...prev, ...updated }));
+                  onLeadUpdated(updated);
+                }
               }}
               userRole={userRole}
               currentAgentId={currentAgentId}

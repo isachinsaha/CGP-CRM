@@ -51,6 +51,7 @@ export default function LeadWhatsAppChat({
     costModel: 'Direct Meta Pricing (1000 Free conversations/mo)'
   });
   const [uploading, setUploading] = useState(false);
+  const [chatNotice, setChatNotice] = useState<string | null>(null);
   const [showCreateTemplate, setShowCreateTemplate] = useState(false);
   const [showCreateQuickReply, setShowCreateQuickReply] = useState(false);
   const [newTemplate, setNewTemplate] = useState({
@@ -408,13 +409,30 @@ export default function LeadWhatsAppChat({
     return () => { isCancelled = true; };
   }, [lead.id]);
 
-  // Poll for new incoming messages smoothly without causing screen blinking or full-state thrashing
+  // Poll for new incoming messages smoothly with ETag 304 validation and 429 cooldown protection
   useEffect(() => {
+    let lastEtag = '';
+    let localPausedUntil = 0;
+    const pollDelayMs = 15000 + Math.floor(Math.random() * 4000);
     const interval = setInterval(async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      const globalCooldown = typeof (window as any).__cgpRateLimitedUntil === 'function'
+        ? (window as any).__cgpRateLimitedUntil()
+        : 0;
+      if (Date.now() < Math.max(localPausedUntil, globalCooldown)) return;
+
       try {
-        const res = await fetch(`/api/leads/${lead.id}`);
+        const headers: Record<string, string> = {};
+        if (lastEtag) headers['If-None-Match'] = lastEtag;
+        const res = await fetch(`/api/leads/${lead.id}`, { headers });
+        if (res.status === 429) {
+          localPausedUntil = Date.now() + 60000;
+          return;
+        }
+        if (res.status === 304) return; // Unchanged: 0 bytes transferred!
         if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+          const etag = res.headers.get('ETag');
+          if (etag) lastEtag = etag;
           const updatedLead = await res.json();
           const prevLen = messagesRef.current.length;
           const newLen = (updatedLead.messages || []).length;
@@ -431,9 +449,9 @@ export default function LeadWhatsAppChat({
           console.warn('[Chat Poll] Poll skipped:', err?.message || err);
         }
       }
-    }, 3500);
+    }, pollDelayMs);
     return () => clearInterval(interval);
-  }, [lead.id]);
+  }, [lead.id, onLeadUpdated]);
 
   // Mark messages as read when viewing this active chat without causing parent re-sort flicker
   useEffect(() => {
@@ -495,10 +513,13 @@ export default function LeadWhatsAppChat({
     templateType?: 'template' | 'quick_reply'
   ) => {
     const textToSend = (customText !== undefined ? customText : inputText).trim();
-    if (!textToSend && !mediaParams && !sending) return;
+    if ((!textToSend && !mediaParams) || sending) return;
 
     setSending(true);
+    setChatNotice(null);
     const senderName = userRole === 'admin' ? 'Administrator' : `Coordinator (${currentAgentId})`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 50000);
 
     try {
       const res = await fetch(`/api/leads/${lead.id}/messages`, {
@@ -508,6 +529,7 @@ export default function LeadWhatsAppChat({
           'x-user-role': userRole,
           'x-agent-id': currentAgentId
         },
+        signal: controller.signal,
         body: JSON.stringify({
           text: textToSend,
           sender: 'user',
@@ -529,16 +551,22 @@ export default function LeadWhatsAppChat({
           setMessages(data.lead.messages || []);
           onLeadUpdated(data.lead);
         }
+        if (data.deliveryResult?.status === 'failed') {
+          const reason = data.deliveryResult?.details?.error?.message || 'WhatsApp Cloud API could not deliver this file.';
+          setChatNotice(`Delivery failed: ${reason}`);
+        }
         setInputText('');
         setShowTemplates(false);
         setReplyingToMessage(null);
       } else {
         const errData = await res.json().catch(() => ({}));
-        alert(`Failed to send message: ${errData.error || 'Unknown server error'}`);
+        setChatNotice(`Failed to send message: ${errData.error || 'Unknown server error'}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to send WhatsApp message', err);
+      setChatNotice(err?.name === 'AbortError' ? 'Sending timed out. Please try again.' : 'Failed to send message to CRM server.');
     } finally {
+      clearTimeout(timeoutId);
       setSending(false);
     }
   };
@@ -551,70 +579,83 @@ export default function LeadWhatsAppChat({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 25 * 1024 * 1024) {
+      setChatNotice(`File "${file.name}" is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Max allowed is 25 MB.`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     setUploading(true);
+    setChatNotice(null);
 
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64Data = reader.result as string;
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') resolve(reader.result);
+          else reject(new Error('Failed to read file contents'));
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
 
-        try {
-          const uploadRes = await fetch('/api/upload', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              fileName: file.name,
-              fileType: file.type,
-              base64Data
-            })
-          });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      let uploadRes: Response;
+      try {
+        uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            fileName: file.name,
+            fileType: file.type,
+            base64Data
+          })
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
-          if (!uploadRes.ok) {
-            throw new Error('Server upload failed');
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text().catch(() => 'Server upload failed');
+        throw new Error(errText || 'Server upload failed');
+      }
+
+      const uploadData = await uploadRes.json();
+      if (uploadData.success && uploadData.url) {
+        const sizeStr = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+        const isImg = file.type.startsWith('image/');
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        const computedType = isImg ? 'image' : (isPdf ? 'pdf' : 'document');
+
+        await handleSendMessage(
+          inputText || `Sent ${computedType === 'image' ? 'an image' : computedType === 'pdf' ? 'a PDF document' : 'a document'}: ${file.name}`,
+          undefined,
+          {
+            type: computedType,
+            mediaUrl: uploadData.url,
+            fileName: file.name,
+            fileSize: sizeStr
           }
-
-          const uploadData = await uploadRes.json();
-          if (uploadData.success && uploadData.url) {
-            const sizeStr = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
-            const isImg = file.type.startsWith('image/');
-            const isPdf = file.type === 'application/pdf' || file.name.endsWith('.pdf');
-            const computedType = isImg ? 'image' : (isPdf ? 'pdf' : 'document');
-
-            await handleSendMessage(
-              inputText || `Sent ${computedType === 'image' ? 'an image' : computedType === 'pdf' ? 'a PDF document' : 'a document'}: ${file.name}`,
-              undefined,
-              {
-                type: computedType,
-                mediaUrl: uploadData.url,
-                fileName: file.name,
-                fileSize: sizeStr
-              }
-            );
-          } else {
-            alert('Failed to upload file');
-          }
-        } catch (err) {
-          console.error('File upload error:', err);
-          alert('Failed to upload file to CRM server.');
-        } finally {
-          setUploading(false);
-          if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-          }
-        }
-      };
-
-      reader.onerror = () => {
-        setUploading(false);
-        alert('Failed to read file');
-      };
-
-      reader.readAsDataURL(file);
-    } catch (err) {
-      console.error('Error in handleFileChange:', err);
+        );
+      } else {
+        setChatNotice('Failed to upload file to CRM server.');
+      }
+    } catch (err: any) {
+      console.error('File upload error:', err);
+      setChatNotice(
+        err?.name === 'AbortError'
+          ? 'File upload timed out. Please check your connection and try again.'
+          : `Failed to upload file: ${err?.message || 'Server error'}`
+      );
+    } finally {
       setUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -2082,7 +2123,23 @@ export default function LeadWhatsAppChat({
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2.5">
+              <div>
+                {chatNotice && (
+                  <div className="mb-2 px-3 py-2 rounded-xl bg-rose-950/70 border border-rose-500/40 text-rose-200 text-xs flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+                      <span className="truncate">{chatNotice}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setChatNotice(null)}
+                      className="text-rose-300 hover:text-white p-0.5 cursor-pointer shrink-0"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+                <div className="flex items-center gap-2.5">
                 {/* Hidden File Input */}
                 <input
                   type="file"
@@ -2169,6 +2226,7 @@ export default function LeadWhatsAppChat({
                     <Send className="h-5 w-5 text-white ml-0.5 fill-current" />
                   )}
                 </button>
+                </div>
               </div>
             )}
           </>

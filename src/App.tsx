@@ -39,26 +39,89 @@ import { AiSentinelModal } from './components/AiSentinelModal.tsx';
 
 // Import local assets
 
-// Global fetch interceptor to inject secure session token header automatically into all outgoing requests
+// Global fetch interceptor: injects session token, deduplicates identical concurrent GETs,
+// and transparently retries HTTP 429 Rate Limit responses with exponential backoff + jitter.
 if (typeof window !== 'undefined') {
-  const originalFetch = window.fetch;
-  window.fetch = async (input, init) => {
-    const sessionStr = localStorage.getItem('cgp_crm_session');
-    if (sessionStr) {
-      try {
-        const session = JSON.parse(sessionStr);
-        if (session && session.token) {
-          init = init || {};
-          init.headers = {
-            ...init.headers,
-            'x-session-token': session.token
-          };
+  const originalFetch = window.fetch.bind(window);
+  const inFlightGets = new Map<string, Promise<Response>>();
+  let globalRateLimitedUntil = 0;
+  (window as any).__cgpRateLimitedUntil = () => globalRateLimitedUntil;
+
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const method = (init?.method || (typeof input !== 'string' && !(input instanceof URL) ? input.method : 'GET') || 'GET').toUpperCase();
+
+    const buildInit = (): RequestInit => {
+      const nextInit: RequestInit = { ...(init || {}) };
+      const headers = new Headers(nextInit.headers || (typeof input !== 'string' && !(input instanceof URL) ? input.headers : undefined));
+      const sessionStr = localStorage.getItem('cgp_crm_session');
+      if (sessionStr) {
+        try {
+          const session = JSON.parse(sessionStr);
+          if (session && session.token && !headers.has('x-session-token')) {
+            headers.set('x-session-token', session.token);
+          }
+        } catch {
+          // ignore parsing errors
         }
-      } catch (e) {
-        // ignore parsing errors
       }
+      nextInit.headers = headers;
+      return nextInit;
+    };
+
+    const runWithRetry = async (): Promise<Response> => {
+      const canRetry429 = method === 'GET' || method === 'HEAD' || method === 'PUT';
+      const maxRetries = canRetry429 ? 3 : 0;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (init?.signal?.aborted) {
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        }
+
+        const res = await originalFetch(input, buildInit());
+        if (res.status !== 429) {
+          return res;
+        }
+
+        globalRateLimitedUntil = Math.max(globalRateLimitedUntil, Date.now() + 30000);
+        if (attempt >= maxRetries || !canRetry429) {
+          return res;
+        }
+
+        const retryAfterRaw = res.headers.get('Retry-After');
+        const retryAfterSec = retryAfterRaw ? Number(retryAfterRaw) : NaN;
+        const baseDelay = !isNaN(retryAfterSec) && retryAfterSec > 0
+          ? Math.min(retryAfterSec * 1000, 12000)
+          : Math.min(1500 * Math.pow(2, attempt), 8000);
+        const jitter = Math.floor(Math.random() * 700);
+        await sleep(baseDelay + jitter);
+      }
+
+      return originalFetch(input, buildInit());
+    };
+
+    // Single-flight dedupe for identical concurrent GET calls without custom AbortSignal or ETag headers
+    const rawHeaders = init?.headers as Record<string, string> | undefined;
+    const hasCustomEtag = !!(rawHeaders && (rawHeaders['If-None-Match'] || rawHeaders['if-none-match']));
+    const canDedupe = method === 'GET' && !init?.signal && !hasCustomEtag && urlStr.startsWith('/api/');
+
+    if (canDedupe) {
+      const existing = inFlightGets.get(urlStr);
+      if (existing) {
+        const res = await existing;
+        return res.clone();
+      }
+      const p = runWithRetry().finally(() => {
+        inFlightGets.delete(urlStr);
+      });
+      inFlightGets.set(urlStr, p);
+      const res = await p;
+      return res.clone();
     }
-    return originalFetch(input, init);
+
+    return runWithRetry();
   };
 }
 
@@ -90,7 +153,23 @@ export default function App() {
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const adminMenuRef = useRef<HTMLDivElement>(null);
   const lastFetchTimeRef = useRef<number>(0);
-  const lastEtagRef = useRef<string>('');
+  const rateLimitedUntilRef = useRef<number>(0);
+  const lastEtagMapRef = useRef<Map<string, string>>(new Map());
+  const statsEtagRef = useRef<string>('');
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
+  const inFlightLoadKeyRef = useRef<string>('');
+  const lastKnownVersionRef = useRef<number>(0);
+  const loadedStateRef = useRef<{ user: string; mode: 'none' | 'light-all' | 'analytics-all' | 'list'; queryKey: string }>({
+    user: '',
+    mode: 'none',
+    queryKey: ''
+  });
+  const leadsRef = useRef<Lead[]>([]);
+  const loadRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    leadsRef.current = leads;
+  }, [leads]);
 
   // Authentication & session state
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string; displayName: string; role: 'admin' | 'agent'; token?: string } | null>(() => {
@@ -129,7 +208,8 @@ export default function App() {
   // Environment metadata
   const [apiMode, setApiMode] = useState<'live' | 'simulation'>('simulation');
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [logoError, setLogoError] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -346,8 +426,9 @@ export default function App() {
 
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
 
-  // Initial one-time app bootstrap for static rosters, health, and custom tags
+  // One-time app bootstrap when authenticated user logs in
   const fetchAppMetadata = useCallback(async () => {
+    if (!currentUser) return;
     try {
       const [coordsRes, healthRes, metaRes] = await Promise.all([
         fetch('/api/coordinators').catch(() => null),
@@ -382,13 +463,15 @@ export default function App() {
     } catch (err) {
       console.warn('Failed to load static app metadata:', err);
     }
-  }, []);
+  }, [currentUser?.username]);
 
   useEffect(() => {
+    if (!currentUser) return;
     fetchAppMetadata();
-  }, [fetchAppMetadata]);
+  }, [fetchAppMetadata, currentUser?.username]);
 
   useEffect(() => {
+    if (!currentUser) return;
     fetch('/api/whatsapp/templates')
       .then(res => {
         if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
@@ -404,75 +487,203 @@ export default function App() {
           console.error('[Sync] Templates fetch error:', err);
         }
       });
-  }, []);
+  }, [currentUser?.username]);
+
+  // Helper to build consistent /api/leads query params
+  const buildLeadsQuery = useCallback((forceRefresh = false) => {
+    const isListTab = activeTab === 'list';
+    const targetMode: 'light-all' | 'analytics-all' | 'list' = isListTab
+      ? 'list'
+      : activeTab === 'analytics'
+        ? 'analytics-all'
+        : 'light-all';
+
+    const params = new URLSearchParams({
+      page: String(currentPage),
+      limit: '100',
+      search: isListTab ? (filters.search || '') : '',
+      country: isListTab ? (filters.country || 'All') : 'All',
+      coordinator: isListTab ? (filters.coordinator || 'All') : 'All',
+      fitScore: isListTab ? (filters.fitScore || 'All') : 'All',
+      tag: isListTab ? (filters.tag || 'All') : 'All',
+      project: isListTab ? (filters.project || 'All') : 'All',
+      position: isListTab ? (filters.position || 'All') : 'All',
+      dateFilter: isListTab ? (filters.dateFilter || 'All') : 'All',
+      customStartDate: isListTab ? (filters.customStartDate || '') : '',
+      customEndDate: isListTab ? (filters.customEndDate || '') : '',
+      bucket: userRole === 'agent' ? 'my' : (isListTab ? (filters.bucket || 'all') : 'all'),
+      agentId: currentAgentId,
+      userRole: userRole,
+      all: !isListTab ? 'true' : 'false',
+      activeTab: targetMode === 'analytics-all' ? 'analytics' : (isListTab ? 'list' : 'board'),
+      gender: isListTab ? (filters.gender || 'All') : 'All',
+      remarksFilter: isListTab ? (filters.remarksFilter || 'All') : 'All',
+      stage: isListTab ? (filters.stage || 'All') : 'All'
+    });
+    if (forceRefresh) {
+      params.append('forceRefresh', 'true');
+    }
+    return { params, targetMode, queryKey: params.toString() };
+  }, [activeTab, currentPage, filters, userRole, currentAgentId]);
 
   // Synchronize data from Express REST API
   const pullCrmData = async (silent = false, forceRefresh = false) => {
+    if (!currentUser) {
+      setLoading(false);
+      return;
+    }
+
+    if (loadRetryTimerRef.current) {
+      clearTimeout(loadRetryTimerRef.current);
+      loadRetryTimerRef.current = null;
+    }
+
+    const { params, targetMode, queryKey } = buildLeadsQuery(forceRefresh);
+    const baseKey = (() => {
+      const p = new URLSearchParams(params);
+      p.delete('forceRefresh');
+      return `${currentAgentId}::${p.toString()}`;
+    })();
+
     const now = Date.now();
-    if (!forceRefresh && (now - lastFetchTimeRef.current < 2500)) {
-      return; // Skip duplicate rapid triggers within 2.5s
+    if (silent && now < rateLimitedUntilRef.current) {
+      return; // Pause background polling while Cloud Armor cooldown is active
+    }
+
+    // Do not abort an identical in-flight load (e.g., React StrictMode double-mount or duplicate effect trigger)
+    if (activeAbortControllerRef.current && !activeAbortControllerRef.current.signal.aborted && inFlightLoadKeyRef.current === baseKey) {
+      if (!forceRefresh || (now - lastFetchTimeRef.current < 3000)) {
+        return;
+      }
+    }
+
+    const minIntervalMs = silent ? 15000 : 1200;
+    if (!forceRefresh && (now - lastFetchTimeRef.current < minIntervalMs) && inFlightLoadKeyRef.current === baseKey) {
+      return; // Skip duplicate rapid triggers for the same query
     }
     lastFetchTimeRef.current = now;
 
-    if (!silent) setIsRefreshing(true);
+    if (!silent) {
+      setIsRefreshing(true);
+      if (leadsRef.current.length === 0) {
+        setLoading(true);
+      }
+    }
+
+    // Cancel any in-flight request only when genuinely superseded
+    if (activeAbortControllerRef.current) {
+      try {
+        if (!activeAbortControllerRef.current.signal.aborted) {
+          activeAbortControllerRef.current.abort(new DOMException('Superseded by newer sync request', 'AbortError'));
+        }
+      } catch {
+        // ignore abort error
+      }
+    }
+
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    activeAbortControllerRef.current = controller;
+    inFlightLoadKeyRef.current = baseKey;
+    let didTimeout = false;
+    const timeoutId = setTimeout(() => {
+      didTimeout = true;
+      try {
+        if (!controller.signal.aborted) {
+          controller.abort(new DOMException('Sync request timed out', 'AbortError'));
+        }
+      } catch {
+        // ignore abort error
+      }
+    }, 25000);
 
     try {
-      // 1. Fetch active job leads list with server-side queries & pagination parameters
-      const params = new URLSearchParams({
-        page: String(currentPage),
-        limit: '100', // Load 100 items at a time as requested!
-        search: filters.search || '',
-        country: filters.country || 'All',
-        coordinator: filters.coordinator || 'All',
-        fitScore: filters.fitScore || 'All',
-        tag: filters.tag || 'All',
-        project: filters.project || 'All',
-        position: filters.position || 'All',
-        dateFilter: filters.dateFilter || 'All',
-        customStartDate: filters.customStartDate || '',
-        customEndDate: filters.customEndDate || '',
-        bucket: userRole === 'agent' ? 'my' : (filters.bucket || 'all'),
-        agentId: currentAgentId,
-        userRole: userRole,
-        all: activeTab !== 'list' ? 'true' : 'false',
-        activeTab: activeTab,
-        gender: filters.gender || 'All',
-        remarksFilter: filters.remarksFilter || 'All',
-        stage: filters.stage || 'All'
-      });
-
-      if (forceRefresh) {
-        params.append('forceRefresh', 'true');
-      }
-
       const reqHeaders: Record<string, string> = {};
-      if (lastEtagRef.current && !forceRefresh) {
-        reqHeaders['If-None-Match'] = lastEtagRef.current;
+      if (forceRefresh) {
+        lastEtagMapRef.current.delete(queryKey);
+        statsEtagRef.current = '';
+      } else {
+        const cachedEtag = lastEtagMapRef.current.get(queryKey);
+        if (cachedEtag) {
+          reqHeaders['If-None-Match'] = cachedEtag;
+        }
       }
+
+      const statsHeaders: Record<string, string> = {};
+      if (!forceRefresh && statsEtagRef.current) {
+        statsHeaders['If-None-Match'] = statsEtagRef.current;
+      }
+
+      const safeFetch = (url: string, options: RequestInit) =>
+        fetch(url, options).catch(err => {
+          if (controller.signal.aborted || err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('abort')) {
+            return null;
+          }
+          throw err;
+        });
 
       const [leadsRes, statsRes] = await Promise.all([
-        fetch(`/api/leads?${params.toString()}`, { 
+        safeFetch(`/api/leads?${queryKey}`, {
           signal: controller.signal,
           headers: reqHeaders
         }),
-        fetch('/api/stats', { signal: controller.signal }).catch(() => null)
+        safeFetch('/api/stats', {
+          signal: controller.signal,
+          headers: statsHeaders
+        }).catch(() => null)
       ]);
 
       clearTimeout(timeoutId);
 
-      // Handle HTTP 304 Not Modified: 0 bytes bandwidth, state remains untouched
+      // If this request was aborted/superseded by a newer pullCrmData call, exit silently
+      if (controller.signal.aborted || activeAbortControllerRef.current !== controller) {
+        if (didTimeout && activeAbortControllerRef.current === controller && leadsRef.current.length === 0) {
+          setLoadError('Sync timed out — retrying automatically...');
+          loadRetryTimerRef.current = setTimeout(() => {
+            pullCrmData(false, false);
+          }, 3000);
+        }
+        return;
+      }
+
+      // Handle HTTP 429 Rate Limit gracefully with retry if leads haven't loaded yet
+      if ((leadsRes && leadsRes.status === 429) || (statsRes && statsRes.status === 429)) {
+        rateLimitedUntilRef.current = Date.now() + 30000;
+        console.warn('[Sync] Rate limit detected (429). Scheduling safe backoff.');
+        if (leadsRef.current.length === 0) {
+          setLoadError('Connection busy — automatically retrying to load your leads...');
+          loadRetryTimerRef.current = setTimeout(() => {
+            pullCrmData(false, false);
+          }, 4000);
+        }
+        return;
+      }
+
       if (leadsRes && leadsRes.status === 304) {
-        // Data is completely unchanged
+        setLoadError(null);
       } else if (leadsRes && leadsRes.ok && leadsRes.headers.get('content-type')?.includes('application/json')) {
         const etag = leadsRes.headers.get('ETag');
-        if (etag) lastEtagRef.current = etag;
+        if (etag) lastEtagMapRef.current.set(queryKey, etag);
 
-        const leadsData = await leadsRes.json();
+        const leadsData = await leadsRes.json().catch(err => {
+          if (controller.signal.aborted || err?.name === 'AbortError') return null;
+          throw err;
+        });
+        if (!leadsData || controller.signal.aborted || activeAbortControllerRef.current !== controller) {
+          return;
+        }
+
+        if (leadsData.version) {
+          lastKnownVersionRef.current = Number(leadsData.version);
+        }
         const leadsArray = Array.isArray(leadsData) ? leadsData : (leadsData.leads || []);
         setLeads(leadsArray);
-        
+        setLoadError(null);
+        loadedStateRef.current = {
+          user: currentAgentId,
+          mode: targetMode,
+          queryKey
+        };
+
         if (!Array.isArray(leadsData)) {
           setTotalLeadsCount(leadsData.totalCount || 0);
           setTotalPagesCount(leadsData.totalPages || 1);
@@ -486,49 +697,187 @@ export default function App() {
           setTotalLeadsCount(leadsData.length);
           setTotalPagesCount(1);
         }
-        
+
         // Match active modal with fresh server changes if and only if the modal is still open in the UI
         if (selectedLeadRef.current) {
           const updated = leadsArray.find((l: Lead) => l.id === selectedLeadRef.current?.id);
           if (updated) setSelectedLead(updated);
         }
+      } else if (leadsRef.current.length === 0) {
+        setLoadError('Unable to sync leads right now — retrying automatically...');
+        loadRetryTimerRef.current = setTimeout(() => {
+          pullCrmData(false, false);
+        }, 4000);
       }
 
       // 2. Fetch aggregate stats
       if (statsRes && statsRes.ok && statsRes.headers.get('content-type')?.includes('application/json')) {
-        const statsData = await statsRes.json();
-        setStats(statsData);
+        const sEtag = statsRes.headers.get('ETag');
+        if (sEtag) statsEtagRef.current = sEtag;
+        const statsData = await statsRes.json().catch(() => null);
+        if (statsData && !controller.signal.aborted && activeAbortControllerRef.current === controller) {
+          setStats(statsData);
+        }
       }
     } catch (err: any) {
       clearTimeout(timeoutId);
-      if (err.name === 'AbortError') {
-        console.warn('[Sync] API request timed out after 20s, retaining current view state.');
-      } else if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+      const isAbort =
+        controller.signal.aborted ||
+        err?.name === 'AbortError' ||
+        String(err?.message || '').toLowerCase().includes('abort');
+      if (isAbort) {
+        if (didTimeout && activeAbortControllerRef.current === controller && leadsRef.current.length === 0) {
+          setLoadError('Sync timed out — retrying automatically...');
+          loadRetryTimerRef.current = setTimeout(() => {
+            pullCrmData(false, false);
+          }, 3000);
+        }
+        return;
+      }
+      if (err instanceof TypeError && err.message?.includes('Failed to fetch')) {
         console.warn('[Sync] Express REST server offline or restarting, skipping poll sync.');
       } else {
         console.error('Failed to sync placement entries from Express REST routes:', err);
       }
+      if (activeAbortControllerRef.current === controller && leadsRef.current.length === 0) {
+        setLoadError('Network hiccup while loading leads — retrying automatically...');
+        loadRetryTimerRef.current = setTimeout(() => {
+          pullCrmData(false, false);
+        }, 4000);
+      }
     } finally {
-      setIsRefreshing(false);
-      setLoading(false);
+      clearTimeout(timeoutId);
+      if (activeAbortControllerRef.current === controller) {
+        activeAbortControllerRef.current = null;
+        inFlightLoadKeyRef.current = '';
+        setIsRefreshing(false);
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    pullCrmData();
-  }, [currentPage, filterKey, activeTab]);
+    if (!currentUser) {
+      // Clear cached state upon sign-out so next login starts completely fresh
+      loadedStateRef.current = { user: '', mode: 'none', queryKey: '' };
+      lastKnownVersionRef.current = 0;
+      lastEtagMapRef.current.clear();
+      statsEtagRef.current = '';
+      setLeads([]);
+      setStats(null);
+      setLoadError(null);
+      return;
+    }
 
-  // Set up background polling to fetch new WhatsApp replies or lead modifications every 15 seconds (5s on messages tab) when tab is active
+    const userChanged = loadedStateRef.current.user !== currentAgentId;
+    if (userChanged) {
+      loadedStateRef.current = { user: '', mode: 'none', queryKey: '' };
+      lastEtagMapRef.current.clear();
+      statsEtagRef.current = '';
+      setLeads([]);
+      setLoading(true);
+      pullCrmData(false, true);
+      return;
+    }
+
+    // Avoid re-fetching 2,400+ leads when switching between all-leads tabs (board, messages, jobs, wallet, etc.)
+    const { targetMode, queryKey } = buildLeadsQuery(false);
+    const loaded = loadedStateRef.current;
+    if (leadsRef.current.length > 0 && loaded.user === currentAgentId) {
+      if (targetMode === 'light-all' && (loaded.mode === 'light-all' || loaded.mode === 'analytics-all')) {
+        return;
+      }
+      if (targetMode === 'analytics-all' && loaded.mode === 'analytics-all') {
+        return;
+      }
+      if (targetMode === 'list' && loaded.mode === 'list' && loaded.queryKey === queryKey) {
+        return;
+      }
+    }
+
+    pullCrmData(false, false);
+  }, [currentUser?.username, currentAgentId, currentPage, filterKey, activeTab]);
+
+  // Ultra-lightweight background polling + Delta Sync (downloads only changed leads, not whole DB)
   useEffect(() => {
-    const pollIntervalMs = activeTab === 'messages' ? 5000 : 15000;
-    const timer = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        pullCrmData(true, false);
+    if (!currentUser) return;
+    const shouldPollLeads = activeTab === 'board' || activeTab === 'list' || activeTab === 'messages';
+    if (!shouldPollLeads) return;
+
+    const jitterMs = Math.floor(Math.random() * 6000);
+    const pollIntervalMs = (activeTab === 'messages' ? 25000 : 45000) + jitterMs;
+
+    const timer = setInterval(async () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (Date.now() < rateLimitedUntilRef.current) return;
+      try {
+        const res = await fetch('/api/sync/version');
+        if (res.status === 429) {
+          rateLimitedUntilRef.current = Date.now() + 60000;
+          return;
+        }
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+          const syncData = await res.json();
+          if (syncData.version && lastKnownVersionRef.current && syncData.version !== lastKnownVersionRef.current) {
+            const loaded = loadedStateRef.current;
+            if (loaded.mode === 'light-all' || loaded.mode === 'analytics-all') {
+              const deltaParams = new URLSearchParams({
+                sinceVersion: String(lastKnownVersionRef.current),
+                userRole,
+                agentId: currentAgentId,
+                activeTab: loaded.mode === 'analytics-all' ? 'analytics' : 'board'
+              });
+              const deltaRes = await fetch(`/api/leads/changes?${deltaParams.toString()}`);
+              if (deltaRes.ok && deltaRes.headers.get('content-type')?.includes('application/json')) {
+                const delta = await deltaRes.json();
+                if (delta.fullSyncRequired) {
+                  pullCrmData(true, false);
+                  return;
+                }
+                if (delta.version) {
+                  lastKnownVersionRef.current = Number(delta.version);
+                }
+                const changedLeads: Lead[] = delta.changedLeads || [];
+                const removedSet = new Set<string>(delta.removedIds || []);
+                if (changedLeads.length > 0 || removedSet.size > 0) {
+                  const changedMap = new Map(changedLeads.map(l => [l.id, l]));
+                  setLeads(prev => {
+                    const next: Lead[] = [];
+                    const seen = new Set<string>();
+                    for (const l of prev) {
+                      if (removedSet.has(l.id)) continue;
+                      const updated = changedMap.get(l.id);
+                      if (updated) {
+                        next.push({ ...l, ...updated });
+                        seen.add(l.id);
+                      } else {
+                        next.push(l);
+                        seen.add(l.id);
+                      }
+                    }
+                    changedLeads.forEach(cl => {
+                      if (!seen.has(cl.id)) next.unshift(cl);
+                    });
+                    return next;
+                  });
+                  if (selectedLeadRef.current) {
+                    const updatedOpen = changedMap.get(selectedLeadRef.current.id);
+                    if (updatedOpen) setSelectedLead(updatedOpen);
+                  }
+                }
+                return;
+              }
+            }
+            pullCrmData(true, false);
+          }
+        }
+      } catch {
+        // Suppress background heartbeat errors
       }
     }, pollIntervalMs);
 
     return () => clearInterval(timer);
-  }, [currentPage, filterKey, activeTab]);
+  }, [currentUser?.username, activeTab, userRole, currentAgentId]);
 
   // Handle in-place single lead updates without causing full-CRM re-fetching or flashing
   const handleSingleLeadUpdated = useCallback((updatedLead: Lead) => {
@@ -750,7 +1099,7 @@ export default function App() {
         const requestingCount = leads.filter(l => {
           const msgs = (l.messages || []).filter(m => m && m.text && !m.text.includes('Lead enrolled manually in CGP system database'));
           const isUnassigned = !l.assignedTo || l.assignedTo.toLowerCase() === 'unassigned' || l.assignedTo.toLowerCase() === 'all' || l.assignedTo.trim() === '';
-          return msgs.length > 0 && isUnassigned && !isOlderThan24Hours(l);
+          return msgs.length > 0 && isUnassigned;
         }).length;
 
         const navItems = [
@@ -923,7 +1272,7 @@ export default function App() {
 
                 {/* Refresh Cloud Data */}
                 <button
-                  onClick={() => pullCrmData()}
+                  onClick={() => pullCrmData(false, true)}
                   disabled={isRefreshing}
                   className="p-1.5 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
                   title="Pull Cloud Data"
@@ -962,11 +1311,11 @@ export default function App() {
             </header>
 
             {/* ROW 2: SEPARATE DEDICATED NAVIGATION MENU BAR WITH BREATHING SPACE AND INCREASED HEIGHT */}
-            <div className="px-3 sm:px-5 pt-2 pb-2.5 bg-slate-950/60 border-b border-slate-200 dark:border-slate-800">
-              <nav className="bg-slate-950 text-slate-100 rounded-2xl px-2.5 sm:px-4 py-1.5 sm:py-2.5 flex items-center justify-between gap-2 overflow-x-auto no-scrollbar shadow-md border border-slate-800/80 w-full">
+            <div className="px-2.5 sm:px-4 2xl:px-5 pt-1.5 2xl:pt-2 pb-2 2xl:pb-2.5 bg-slate-950/60 border-b border-slate-200 dark:border-slate-800">
+              <nav className="bg-slate-950 text-slate-100 rounded-2xl px-2 sm:px-3 2xl:px-4 py-1.5 2xl:py-2.5 flex items-center justify-between gap-1.5 2xl:gap-2 overflow-x-auto no-scrollbar shadow-md border border-slate-800/80 w-full">
                 
                 {/* Left Navigation Buttons */}
-                <div className="flex items-center gap-1.5 xl:gap-3 shrink-0">
+                <div className="flex items-center gap-1 xl:gap-1.5 2xl:gap-3 shrink-0">
                   {navItems.map((tab) => {
                     const Icon = tab.icon;
                     const isSelected = activeTab === tab.id;
@@ -974,23 +1323,23 @@ export default function App() {
                       <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id as any)}
-                        className={`group px-2 md:px-2.5 xl:px-4.5 py-1.5 md:py-2 rounded-xl text-[11px] xl:text-[13px] font-extrabold flex items-center gap-1.5 xl:gap-2 transition-all cursor-pointer shrink-0 ${
+                        className={`group px-2 md:px-2.5 xl:px-3 2xl:px-4.5 py-1.5 md:py-2 rounded-xl text-[0.7rem] xl:text-[0.75rem] 2xl:text-[0.8125rem] font-extrabold flex items-center gap-1.5 2xl:gap-2 transition-all cursor-pointer shrink-0 ${
                           isSelected
                             ? 'bg-indigo-600 text-white shadow-sm font-black'
                             : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
                         }`}
                       >
-                        <Icon className={`h-3.5 w-3.5 xl:h-4 xl:w-4 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`} />
+                        <Icon className={`h-3.5 w-3.5 2xl:h-4 2xl:w-4 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`} />
                         <span className="whitespace-nowrap">{tab.label}</span>
                         {tab.requestingBadge !== undefined && tab.requestingBadge > 0 && (
-                          <span className={`text-[9px] xl:text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full ${
+                          <span className={`text-[0.6rem] 2xl:text-[0.625rem] font-mono font-black px-1.5 py-0.2 rounded-full ${
                             isSelected ? 'bg-amber-400 text-slate-950' : 'bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse'
                           }`} title={`${tab.requestingBadge} requesting chats`}>
                             {tab.requestingBadge}
                           </span>
                         )}
                         {tab.badge !== undefined && tab.badge > 0 && (
-                          <span className={`text-[9px] xl:text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full ${
+                          <span className={`text-[0.6rem] 2xl:text-[0.625rem] font-mono font-black px-1.5 py-0.2 rounded-full ${
                             isSelected ? 'bg-white text-indigo-700' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                           }`}>
                             {tab.badge}
@@ -1002,9 +1351,9 @@ export default function App() {
                 </div>
 
                 {/* Right Status & Enrol Candidate CTA Button (Only for Admin) */}
-                <div className="flex items-center gap-2 xl:gap-3 shrink-0 ml-auto pl-2 xl:pl-3 border-l border-slate-800">
+                <div className="flex items-center gap-2 2xl:gap-3 shrink-0 ml-auto pl-2 2xl:pl-3 border-l border-slate-800">
                   {/* Synced Info */}
-                  <div className="text-[10px] xl:text-xs font-mono text-emerald-400 font-semibold hidden lg:flex items-center gap-1 xl:gap-1.5 whitespace-nowrap">
+                  <div className="text-[0.65rem] 2xl:text-xs font-mono text-emerald-400 font-semibold hidden min-[1360px]:flex items-center gap-1 2xl:gap-1.5 whitespace-nowrap">
                     <span>Synced: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
                     <span>•</span>
                     <strong className="text-emerald-300 font-black">{totalLeadsCount || leads.length} candidates</strong>
@@ -1014,9 +1363,9 @@ export default function App() {
                   {userRole === 'admin' && (
                     <button
                       onClick={() => setIsCreateModalOpen(true)}
-                      className="bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-[11px] xl:text-xs font-black py-1.5 xl:py-2 px-2.5 xl:px-3.5 rounded-xl shadow-xs flex items-center gap-1.5 uppercase cursor-pointer transition-all tracking-wider whitespace-nowrap"
+                      className="bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-[0.7rem] 2xl:text-xs font-black py-1.5 2xl:py-2 px-2.5 2xl:px-3.5 rounded-xl shadow-xs flex items-center gap-1.5 uppercase cursor-pointer transition-all tracking-wider whitespace-nowrap"
                     >
-                      <Plus className="h-3.5 w-3.5 xl:h-4 xl:w-4 stroke-[3]" />
+                      <Plus className="h-3.5 w-3.5 2xl:h-4 2xl:w-4 stroke-[3]" />
                       <span className="hidden sm:inline">ENROL CANDIDATE</span>
                     </button>
                   )}
@@ -1028,7 +1377,7 @@ export default function App() {
       })()}
 
       {/* MAIN WORKSPACE VIEWPORT */}
-      <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6 space-y-4 flex flex-col min-h-0">
+      <main className="flex-1 overflow-y-auto p-2.5 sm:p-4 2xl:p-6 space-y-3 2xl:space-y-4 flex flex-col min-h-0">
         {/* Dynamic Display Stage Router */}
         <div className="flex-1 flex flex-col min-h-0">
           <ErrorBoundary fallbackTitle="Could Not Display Selected View">
@@ -1038,39 +1387,75 @@ export default function App() {
                 <ErrorBoundary fallbackTitle="Updates Ticker Unavailable">
                   <ImportantUpdatesBar />
                 </ErrorBoundary>
-                
-                <LeadBoard
-                  leads={leads}
-                  onSelectLead={setSelectedLead}
-                  onUpdateStage={handleUpdateStage}
-                  userRole={userRole}
-                  currentAgentId={currentAgentId}
-                  coordinators={coordinatorsList}
-                />
+
+                {(loading || loadError) && leads.length === 0 ? (
+                  <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 flex flex-col items-center justify-center gap-3 text-center">
+                    <RefreshCw className="h-8 w-8 text-indigo-500 animate-spin" />
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                      {loadError || 'Loading your CRM pipeline leads...'}
+                    </p>
+                    {loadError && (
+                      <button
+                        type="button"
+                        onClick={() => pullCrmData(false, true)}
+                        className="mt-1 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-wider cursor-pointer transition-all"
+                      >
+                        Retry Now
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <LeadBoard
+                    leads={leads}
+                    onSelectLead={setSelectedLead}
+                    onUpdateStage={handleUpdateStage}
+                    userRole={userRole}
+                    currentAgentId={currentAgentId}
+                    coordinators={coordinatorsList}
+                  />
+                )}
               </div>
             )}
 
             {activeTab === 'list' && (
               <div key="list-tab" className="flex-1 flex flex-col min-h-0">
-                <LeadList
-                  leads={leads}
-                  onSelectLead={setSelectedLead}
-                  onUpdateStage={handleUpdateStage}
-                  onDeleteLead={handleDeleteLead}
-                  userRole={userRole}
-                  currentAgentId={currentAgentId}
-                  onRefreshData={() => pullCrmData(true, true)}
-                  coordinators={coordinatorsList}
-                  totalLeadsCount={totalLeadsCount}
-                  totalPagesCount={totalPagesCount}
-                  currentPageOverride={currentPage}
-                  onPageChange={setCurrentPage}
-                  onFiltersChange={handleFiltersChange}
-                  metaCountries={metaCountries}
-                  metaProjects={metaProjects}
-                  metaPositions={metaPositions}
-                  metaTags={metaTags}
-                />
+                {(loading || loadError) && leads.length === 0 ? (
+                  <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 flex flex-col items-center justify-center gap-3 text-center">
+                    <RefreshCw className="h-8 w-8 text-indigo-500 animate-spin" />
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                      {loadError || 'Loading spreadsheet records...'}
+                    </p>
+                    {loadError && (
+                      <button
+                        type="button"
+                        onClick={() => pullCrmData(false, true)}
+                        className="mt-1 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-wider cursor-pointer transition-all"
+                      >
+                        Retry Now
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <LeadList
+                    leads={leads}
+                    onSelectLead={setSelectedLead}
+                    onUpdateStage={handleUpdateStage}
+                    onDeleteLead={handleDeleteLead}
+                    userRole={userRole}
+                    currentAgentId={currentAgentId}
+                    onRefreshData={() => pullCrmData(true, true)}
+                    coordinators={coordinatorsList}
+                    totalLeadsCount={totalLeadsCount}
+                    totalPagesCount={totalPagesCount}
+                    currentPageOverride={currentPage}
+                    onPageChange={setCurrentPage}
+                    onFiltersChange={handleFiltersChange}
+                    metaCountries={metaCountries}
+                    metaProjects={metaProjects}
+                    metaPositions={metaPositions}
+                    metaTags={metaTags}
+                  />
+                )}
               </div>
             )}
 
@@ -1086,7 +1471,7 @@ export default function App() {
                   positions={positions}
                   onUpdatePositions={handleUpdatePositions}
                   projects={projects}
-                  onRefreshData={() => pullCrmData(true, false)}
+                  onRefreshData={() => pullCrmData(false, true)}
                   onLeadUpdated={handleSingleLeadUpdated}
                   isRefreshing={isRefreshing}
                 />
@@ -1142,6 +1527,7 @@ export default function App() {
                     handleSingleLeadUpdated(lead);
                   }}
                   userRole={userRole}
+                  currentUser={currentUser}
                 />
               </div>
             )}

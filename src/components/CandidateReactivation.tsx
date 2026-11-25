@@ -34,6 +34,26 @@ import {
 } from 'lucide-react';
 import { Lead, Job } from '../types';
 
+function normalizeStrictGender(raw: unknown): 'MALE' | 'FEMALE' | '' {
+  const g = String(raw || '').trim().toUpperCase();
+  if (!g) return '';
+  if (g === 'FEMALE' || g === 'F' || g === 'WOMAN' || g === 'GIRL' || g === 'LADY') return 'FEMALE';
+  if (g === 'MALE' || g === 'M' || g === 'MAN' || g === 'BOY' || g === 'GENT') return 'MALE';
+  return '';
+}
+
+interface ActiveBroadcastJob {
+  jobId: string;
+  campaignName: string;
+  jobTitle: string;
+  status: 'running' | 'completed' | 'failed';
+  total: number;
+  processed: number;
+  sentCount: number;
+  failedCount: number;
+  error?: string;
+}
+
 interface CandidateReactivationProps {
   onSelectLead: (lead: Lead) => void;
   onUpdateLead: (lead: Lead) => Promise<void>;
@@ -67,6 +87,9 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
   const [isScanning, setIsScanning] = useState(false);
   const [scanStep, setScanStep] = useState('');
   const [isLaunching, setIsLaunching] = useState(false);
+  const [activeBroadcastJob, setActiveBroadcastJob] = useState<ActiveBroadcastJob | null>(null);
+  const [confirmLaunchCount, setConfirmLaunchCount] = useState<number | null>(null);
+  const [statusNotice, setStatusNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   
   // Results
   const [matchedCandidates, setMatchedCandidates] = useState<Array<Lead & { 
@@ -78,7 +101,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
   
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(new Set());
   const [campaignLaunched, setCampaignLaunched] = useState(false);
-  const [launchSummary, setLaunchSummary] = useState<{ sentCount: number; jobTitle: string } | null>(null);
+  const [launchSummary, setLaunchSummary] = useState<{ sentCount: number; failedCount?: number; jobTitle: string } | null>(null);
   const [hasScanned, setHasScanned] = useState(false);
 
   // Campaign Dashboard statistics & tracking (loaded from DB/API)
@@ -411,15 +434,17 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
         coordinatorFilter === 'All' || 
         (coordinatorFilter === 'Unassigned' ? !lead.assignedTo : (lead.assignedTo?.toLowerCase() === coordinatorFilter.toLowerCase() || lead.assignedTo === coordinatorFilter));
 
-      // 8. Gender Filter
+      // 8. Strict Gender Filter (Step 1 Gender dropdown + Step 2 Target Gender)
+      // Strictly excludes 'Not defined', empty, null, unknown, and opposite genders
       let matchesGender = true;
-      if (genderFilter !== 'All') {
-        const g = String(lead.gender || '').toUpperCase().trim();
-        const filterG = String(genderFilter).toUpperCase().trim();
-        if (filterG === 'MALE' || filterG === 'M') {
-          matchesGender = g === 'M' || g === 'MALE';
-        } else if (filterG === 'FEMALE' || filterG === 'F') {
-          matchesGender = g === 'F' || g === 'FEMALE';
+      const strictPoolGender = normalizeStrictGender(genderFilter);
+      const strictJobGender = normalizeStrictGender(jobGender);
+      if (strictPoolGender && strictJobGender && strictPoolGender !== strictJobGender) {
+        matchesGender = false;
+      } else {
+        const effectiveGender = strictJobGender || strictPoolGender;
+        if (effectiveGender) {
+          matchesGender = normalizeStrictGender(lead.gender) === effectiveGender;
         }
       }
 
@@ -451,7 +476,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
 
       return matchesCountry && matchesProject && matchesPosition && matchesFit && matchesTag && matchesDate && matchesCoordinator && matchesGender && matchesRemarks;
     });
-  }, [matchedCandidates, countryFilter, projectFilter, selectedPositions, genderFilter, fitScoreFilter, selectedTags, dateFilter, customStartDate, customEndDate, userRole, coordinatorFilter, remarksFilter]);
+  }, [matchedCandidates, countryFilter, projectFilter, selectedPositions, genderFilter, jobGender, fitScoreFilter, selectedTags, dateFilter, customStartDate, customEndDate, userRole, coordinatorFilter, remarksFilter]);
 
   const fetchActiveJobs = () => {
     fetch('/api/jobs')
@@ -587,15 +612,16 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
 
   const handleSyncTemplates = async () => {
     setIsSyncingTemplates(true);
+    setStatusNotice(null);
     try {
       const res = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      alert(data.message || 'Successfully synced templates from Meta Business!');
+      setStatusNotice({ type: 'success', text: data.message || 'Successfully synced templates from Meta Business!' });
       fetchTemplates(); // Refresh template list
     } catch (err: any) {
       console.error('Error syncing templates:', err);
-      alert(`Template sync failed: ${err.message}`);
+      setStatusNotice({ type: 'error', text: `Template sync failed: ${err.message}` });
     } finally {
       setIsSyncingTemplates(false);
     }
@@ -622,11 +648,11 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
 
     const selected = jobs.find(j => j.id === id);
     if (selected) {
-      setJobTitle(selected.title);
-      setJobCountry(selected.country);
+      setJobTitle(selected.title || selected.serviceCharge || 'Active Job Demand');
+      setJobCountry(selected.country || 'Overseas');
       setJobSalary(selected.salaryRange || '₹60,000 - ₹75,000');
-      setJobExperience(selected.requirement.match(/\d+\s*(?:years?|yrs?)/gi)?.[0] || '2-3 years');
-      setJobRequirements(selected.requirement);
+      setJobExperience((selected.requirement || '').match(/\d+\s*(?:years?|yrs?)/gi)?.[0] || '2-3 years');
+      setJobRequirements(selected.requirement || selected.serviceCharge || '');
     }
   };
 
@@ -655,7 +681,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
       setShowAiModal(true);
     } catch (err: any) {
       console.error('Failed to get AI vacancy suggestion:', err);
-      alert(`AI Suggestion error: ${err.message || err}`);
+      setStatusNotice({ type: 'error', text: `AI Suggestion error: ${err.message || err}` });
     } finally {
       setIsAiSuggestingVacancy(false);
     }
@@ -753,6 +779,9 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
         })
       });
 
+      if (res.status === 429) {
+        throw new Error('Server rate limit reached temporarily. Please wait 15–30 seconds and try scanning again.');
+      }
       if (!res.ok) {
         throw new Error(await res.text());
       }
@@ -778,10 +807,11 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
           }
         });
         setSelectedCandidateIds(autoSelected);
+        setStatusNotice(null);
       }
     } catch (err: any) {
       console.error('Error scanning old database:', err);
-      alert(`Scan failed: ${err.message}`);
+      setStatusNotice({ type: 'error', text: `Scan failed: ${err.message}` });
     } finally {
       clearInterval(stepInterval);
       setIsScanning(false);
@@ -822,25 +852,116 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
     );
   };
 
-  // Launch campaign (Send WhatsApp Outreach)
-  const handleLaunchCampaign = async () => {
+  // Safe background broadcast job progress polling (3s interval, 429 backoff, no burst requests)
+  useEffect(() => {
+    if (!activeBroadcastJob || activeBroadcastJob.status !== 'running') return;
+    let isCancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let consecutiveErrors = 0;
+
+    const pollStatus = async (delayMs: number) => {
+      timeoutId = setTimeout(async () => {
+        if (isCancelled) return;
+        try {
+          const res = await fetch(`/api/reactivation/launch-status/${encodeURIComponent(activeBroadcastJob.jobId)}`);
+          if (res.status === 429) {
+            // Back off gently to avoid triggering Cloud Armor rate limit
+            if (!isCancelled) pollStatus(8000);
+            return;
+          }
+          if (!res.ok) {
+            consecutiveErrors++;
+            if (consecutiveErrors >= 5) {
+              setIsLaunching(false);
+              setActiveBroadcastJob(null);
+              setStatusNotice({
+                type: 'info',
+                text: 'Broadcast continues dispatching in the background. Click "Refresh Stats" below shortly to view delivery results.'
+              });
+              return;
+            }
+            if (!isCancelled) pollStatus(5000);
+            return;
+          }
+
+          consecutiveErrors = 0;
+          const jobData = await res.json();
+          if (isCancelled) return;
+
+          setActiveBroadcastJob(jobData);
+
+          if (jobData.status === 'completed') {
+            setIsLaunching(false);
+            setLaunchSummary({
+              sentCount: jobData.sentCount ?? jobData.total,
+              failedCount: jobData.failedCount ?? 0,
+              jobTitle: jobData.jobTitle || jobTitle
+            });
+            setCampaignLaunched(true);
+            setMatchedCandidates([]);
+            setSelectedCandidateIds(new Set());
+            setStatusNotice(null);
+            fetchReactivationCampaigns();
+          } else if (jobData.status === 'failed') {
+            setIsLaunching(false);
+            setStatusNotice({
+              type: 'error',
+              text: `Broadcast encountered an error: ${jobData.error || 'Unknown execution error'}`
+            });
+          } else {
+            pollStatus(3000);
+          }
+        } catch {
+          consecutiveErrors++;
+          if (consecutiveErrors >= 5) {
+            setIsLaunching(false);
+            setActiveBroadcastJob(null);
+            setStatusNotice({
+              type: 'info',
+              text: 'Connection interrupted while tracking progress. Broadcast is still running safely on the server; refresh stats in a moment.'
+            });
+            return;
+          }
+          if (!isCancelled) pollStatus(5000);
+        }
+      }, delayMs);
+    };
+
+    pollStatus(2000);
+
+    return () => {
+      isCancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [activeBroadcastJob?.jobId, activeBroadcastJob?.status]);
+
+  // Step 1: Open inline confirmation before launching blast
+  const handleLaunchCampaign = () => {
     const visibleSelectedTargets = filteredCandidates.filter(c => selectedCandidateIds.has(c.id));
     if (visibleSelectedTargets.length === 0) {
-      alert('Please select at least 1 candidate to launch the outreach campaign.');
+      setStatusNotice({ type: 'error', text: 'Please select at least 1 candidate to launch the outreach campaign.' });
       return;
     }
+    setStatusNotice(null);
+    setConfirmLaunchCount(visibleSelectedTargets.length);
+  };
 
-    if (!window.confirm(`Are you sure you want to launch the WhatsApp Reactivation Campaign for ${visibleSelectedTargets.length} candidate(s)? This will send personalized messages instantly.`)) {
-      return;
-    }
+  // Step 2: Execute non-blocking queued campaign launch
+  const handleConfirmLaunchCampaign = async () => {
+    setConfirmLaunchCount(null);
+    const visibleSelectedTargets = filteredCandidates.filter(c => selectedCandidateIds.has(c.id));
+    if (visibleSelectedTargets.length === 0) return;
 
     setIsLaunching(true);
+    setCampaignLaunched(false);
+    setStatusNotice(null);
     try {
       const targets = visibleSelectedTargets.map(c => ({
         leadId: c.id,
         message: c.customMessage,
         phone: c.phone,
-        name: c.name
+        name: c.name,
+        gender: c.gender
       }));
 
       const res = await fetch('/api/reactivation/launch', {
@@ -851,27 +972,46 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
           country: jobCountry,
           salary: jobSalary,
           targets,
-          templateId: selectedTemplateId
+          templateId: selectedTemplateId,
+          gender: jobGender
         })
       });
+
+      if (res.status === 429) {
+        throw new Error('Server rate limit reached temporarily. Please wait 30 seconds before launching again.');
+      }
 
       if (!res.ok) {
         throw new Error(await res.text());
       }
 
-      setLaunchSummary({
-        sentCount: visibleSelectedTargets.length,
-        jobTitle
-      });
-      setCampaignLaunched(true);
-      setMatchedCandidates([]);
-      setSelectedCandidateIds(new Set());
-      fetchReactivationCampaigns(); // Refresh campaigns dashboard
+      const data = await res.json();
+      if (data.queued && data.jobId) {
+        setActiveBroadcastJob({
+          jobId: data.jobId,
+          campaignName: data.campaignName || jobTitle,
+          jobTitle,
+          status: 'running',
+          total: data.total || visibleSelectedTargets.length,
+          processed: 0,
+          sentCount: 0,
+          failedCount: 0
+        });
+      } else {
+        setLaunchSummary({
+          sentCount: data.count ?? visibleSelectedTargets.length,
+          jobTitle
+        });
+        setCampaignLaunched(true);
+        setMatchedCandidates([]);
+        setSelectedCandidateIds(new Set());
+        setIsLaunching(false);
+        fetchReactivationCampaigns();
+      }
     } catch (err: any) {
       console.error('Error launching campaign:', err);
-      alert(`Failed to launch campaign: ${err.message}`);
-    } finally {
       setIsLaunching(false);
+      setStatusNotice({ type: 'error', text: `Failed to launch campaign: ${err.message}` });
     }
   };
 
@@ -884,13 +1024,16 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
         body: JSON.stringify({ leadId, replyText })
       });
       if (res.ok) {
-        alert(`Inbound message "${replyText}" successfully simulated for candidate! AI is executing pre-screening conversation in background.`);
+        setStatusNotice({
+          type: 'success',
+          text: `Inbound message "${replyText}" simulated for candidate. AI pre-screening is running in the background.`
+        });
         fetchReactivationCampaigns();
       } else {
         throw new Error(await res.text());
       }
     } catch (err: any) {
-      alert(`Simulation failed: ${err.message}`);
+      setStatusNotice({ type: 'error', text: `Simulation failed: ${err.message}` });
     }
   };
 
@@ -1212,7 +1355,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
                   <option value="">-- Custom Vacancy (Type Details Below) --</option>
                   {jobs.map(job => (
                     <option key={job.id} value={job.id}>
-                      💼 {job.title} — {job.country} ({job.salaryRange || 'N/A'})
+                      💼 {job.title || job.serviceCharge || 'Job Creative'} {job.country ? `— ${job.country}` : ''} ({job.serviceCharge || job.salaryRange || 'N/A'})
                     </option>
                   ))}
                 </select>
@@ -1404,6 +1547,115 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
         )}
       </div>
 
+      {/* Inline Status / Error / Info Notice */}
+      {statusNotice && (
+        <div
+          className={`p-4 rounded-2xl border flex items-center justify-between gap-3 text-left ${
+            statusNotice.type === 'error'
+              ? 'bg-rose-950/50 border-rose-500/40 text-rose-200'
+              : statusNotice.type === 'success'
+              ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+              : 'bg-indigo-950/50 border-indigo-500/40 text-indigo-200'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 text-xs font-bold">
+            {statusNotice.type === 'error' ? (
+              <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+            ) : statusNotice.type === 'success' ? (
+              <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0" />
+            ) : (
+              <Sparkles className="h-4 w-4 text-indigo-400 shrink-0" />
+            )}
+            <span>{statusNotice.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStatusNotice(null)}
+            className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Inline Launch Confirmation Modal */}
+      {confirmLaunchCount !== null && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl max-w-md w-full p-6 text-left shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center shrink-0">
+                <Send className="h-5 w-5 text-indigo-300" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                  Confirm WhatsApp Broadcast
+                </h3>
+                <p className="text-[11px] text-indigo-300 font-mono font-bold mt-0.5">
+                  {confirmLaunchCount} Candidate{confirmLaunchCount !== 1 ? 's' : ''} Selected
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              This will launch personalized WhatsApp outreach for <strong>{confirmLaunchCount}</strong> candidate(s). Messages are queued and dispatched safely in paced batches with live background progress tracking—zero timeouts.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setConfirmLaunchCount(null)}
+                className="text-xs px-4 py-2 rounded-xl border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmLaunchCampaign}
+                className="text-xs px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-wider cursor-pointer flex items-center gap-1.5 shadow-lg shadow-indigo-600/30"
+              >
+                <Send className="h-3.5 w-3.5" />
+                <span>Confirm & Launch ({confirmLaunchCount})</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Live Background Broadcast Progress Bar */}
+      {activeBroadcastJob && activeBroadcastJob.status === 'running' && (
+        <div className="bg-slate-900/80 border border-indigo-500/40 p-5 rounded-3xl text-left space-y-3 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <Loader2 className="h-5 w-5 text-indigo-400 animate-spin shrink-0" />
+              <div>
+                <h3 className="text-xs font-black text-white uppercase tracking-wider">
+                  Dispatching Broadcast Campaign in Background...
+                </h3>
+                <p className="text-[10.5px] text-slate-400 font-mono mt-0.5">
+                  {activeBroadcastJob.campaignName}
+                </p>
+              </div>
+            </div>
+            <div className="text-xs font-mono font-black text-indigo-300">
+              {activeBroadcastJob.processed} / {activeBroadcastJob.total} processed ({activeBroadcastJob.total > 0 ? Math.round((activeBroadcastJob.processed / activeBroadcastJob.total) * 100) : 0}%)
+            </div>
+          </div>
+          <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+            <div
+              className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 transition-all duration-500"
+              style={{
+                width: `${activeBroadcastJob.total > 0 ? Math.min(100, Math.round((activeBroadcastJob.processed / activeBroadcastJob.total) * 100)) : 5}%`
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-4 text-[10px] font-mono text-slate-400">
+            <span className="text-emerald-400 font-bold">Sent: {activeBroadcastJob.sentCount}</span>
+            {activeBroadcastJob.failedCount > 0 && (
+              <span className="text-rose-400 font-bold">Failed: {activeBroadcastJob.failedCount}</span>
+            )}
+            <span>Remaining: {Math.max(0, activeBroadcastJob.total - activeBroadcastJob.processed)}</span>
+          </div>
+        </div>
+      )}
+
       {/* Campaign Success Notification */}
       {campaignLaunched && launchSummary && (
         <div className="bg-emerald-950/40 border border-emerald-900/60 p-5 rounded-3xl text-left flex gap-4 items-center">
@@ -1414,6 +1666,7 @@ export default function CandidateReactivation({ onSelectLead, onUpdateLead, user
             <h3 className="text-sm font-black text-slate-100 uppercase tracking-wider">Campaign Dispatched Successfully!</h3>
             <p className="text-xs text-slate-300 mt-1">
               Personalized WhatsApp outreach sent to <strong>{launchSummary.sentCount}</strong> suitable candidates regarding the <strong>{launchSummary.jobTitle}</strong> opening.
+              {launchSummary.failedCount ? ` (${launchSummary.failedCount} failed to deliver)` : ''}
             </p>
             <p className="text-[10px] text-emerald-400 font-mono mt-1 font-bold">
               AI pre-screening chatbot is now active on their replies. The CRM will automatically notify you and shortlist candidates who reply YES.

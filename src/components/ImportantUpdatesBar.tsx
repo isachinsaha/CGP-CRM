@@ -32,23 +32,9 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
       if (retries > 0) {
         setTimeout(() => {
           fetchUpdates(retries - 1);
-        }, 1000);
-      } else {
-        // Safe, elegant fallback updates to keep the UI fully functional even during temporary local/cloud connection hiccups!
-        const defaultFallback: ImportantUpdate[] = [
-          {
-            id: 'fallback_1',
-            text: "Today's interviews: Nesto Hypermarket screening starting at 3:00 PM. Zoom link: https://zoom.us/j/9876543210",
-            createdAt: new Date().toISOString()
-          },
-          {
-            id: 'fallback_2',
-            text: "Guest Relations Dubai (Highend Fine Dine) second round interview via Google Meet: https://meet.google.com/abc-defg-hij on June 28 at 4:30 PM.",
-            createdAt: new Date().toISOString()
-          }
-        ];
-        setUpdates(defaultFallback);
+        }, 1500);
       }
+      // Do not overwrite with stale hardcoded job demand fallbacks on error
     } finally {
       setIsLoading(false);
     }
@@ -91,12 +77,7 @@ export default function ImportantUpdatesBar({ refreshTrigger = 0 }: ImportantUpd
   const displayUpdates = updates.length > 0 ? updates : [
     {
       id: 'system_default_1',
-      text: "Welcome to CAREER GROWTH PLACEMENT CRM! All overseas and local recruitment pipelines are fully active and synchronized.",
-      createdAt: new Date().toISOString()
-    },
-    {
-      id: 'system_default_2',
-      text: "Important Notice: Coordinators must verify candidate experience certificates and passport validity before stage updates.",
+      text: "Welcome to CAREER GROWTH PLACEMENT CRM! All overseas and local recruitment pipelines are active and synchronized.",
       createdAt: new Date().toISOString()
     }
   ];
