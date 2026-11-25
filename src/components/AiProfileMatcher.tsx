@@ -217,28 +217,29 @@ export default function AiProfileMatcher({
           ? assignedStatus[lead.id]
           : lead.project === projectTitle;
 
-      const updatedLead: Lead = {
-        ...lead,
-        project: isCurrentlyAssigned ? '' : projectTitle,
-        stage: !isCurrentlyAssigned && lead.stage === 'new' ? 'negotiating' : lead.stage,
-        updatedAt: new Date().toISOString()
-      };
+      const nextProject = isCurrentlyAssigned ? '' : projectTitle;
+      const nextStage = !isCurrentlyAssigned && lead.stage === 'new' ? 'negotiating' : lead.stage;
 
       const response = await fetch(`/api/leads/${lead.id}`, {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify(updatedLead)
+        body: JSON.stringify({
+          project: nextProject,
+          stage: nextStage
+        })
       });
 
       if (!response.ok) {
-        throw new Error('Failed to update lead');
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to update lead');
       }
 
-      await onUpdateLead(updatedLead);
+      const savedLead: Lead = await response.json();
+      await onUpdateLead(savedLead);
       setAssignedStatus(prev => ({ ...prev, [lead.id]: !isCurrentlyAssigned }));
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error shortlisting candidate:', err);
-      setActionNotice('Could not shortlist this candidate right now. Please try again.');
+      setActionNotice(err?.message || 'Could not shortlist this candidate right now. Please try again.');
     }
   };
 

@@ -9,6 +9,7 @@ import {
   collection, 
   getDocs, 
   getDoc,
+  getDocFromServer,
   setDoc,
   deleteDoc,
   doc, 
@@ -19,7 +20,7 @@ import {
   writeBatch,
   setLogLevel
 } from 'firebase/firestore';
-import type { Lead, Message, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem, AppNotification, MonthlyTargetSettings, MonthlyTargetProgress } from '../types.ts';
+import type { Lead, Message, LeadStage, StatSummary, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem, AppNotification, MonthlyTargetSettings, MonthlyTargetProgress, LeadAuditEntry, CloudBackupSnapshotMeta } from '../types.ts';
 import { getEffectiveIntake } from '../utils.ts';
 
 // Configure Firebase SDK to only log errors, suppressing gRPC connection warnings
@@ -42,6 +43,14 @@ const TEMPLATES_FILE = path.join(DATA_DIR, 'whatsapp_templates.json');
 const AUTOREPLY_FILE = path.join(DATA_DIR, 'whatsapp_autoreply.json');
 const MEDIA_FILE = path.join(DATA_DIR, 'media_library.json');
 const NOTIFICATIONS_FILE = path.join(DATA_DIR, 'notifications.json');
+const LEAD_AUDIT_FILE = path.join(DATA_DIR, 'lead_audit_logs.jsonl');
+const PENDING_AUDIT_FILE = path.join(DATA_DIR, 'pending_audit_logs.jsonl');
+const LEAD_ARCHIVES_DIR = path.join(DATA_DIR, 'lead_archives');
+if (!fs.existsSync(LEAD_ARCHIVES_DIR)) {
+  try {
+    fs.mkdirSync(LEAD_ARCHIVES_DIR, { recursive: true });
+  } catch {}
+}
 
 // --- SAFE ATOMIC JSON READ / WRITE / RECOVERY HELPERS ---
 
@@ -502,8 +511,110 @@ function initFirestore() {
   }
 }
 
+// Structured Firestore Error & Connection Validation (Zero-Data-Loss Diagnostics)
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: Array<{
+      providerId?: string | null;
+      email?: string | null;
+    }>;
+  };
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, pathStr: string | null): never {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: null,
+      email: null,
+      emailVerified: null,
+      isAnonymous: null,
+      tenantId: null,
+      providerInfo: []
+    },
+    operationType,
+    path: pathStr
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+function logFirestoreDiagnostic(error: unknown, operationType: OperationType, pathStr: string | null): string {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  try {
+    handleFirestoreError(error, operationType, pathStr);
+  } catch {
+    // handleFirestoreError already emitted structured JSON diagnostic log
+  }
+  return errMsg;
+}
+
+async function commitCloudWriteWithRetry<T>(
+  operation: () => Promise<T>,
+  operationType: OperationType,
+  pathStr: string,
+  contextLabel: string,
+  options?: { allowDeferredSync?: boolean; timeoutMs?: number }
+): Promise<T | null> {
+  if (!db) return null;
+  const maxAttempts = options?.allowDeferredSync ? 1 : 2;
+  const timeoutMs = options?.timeoutMs || 12000;
+  let lastErr: any = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const result = await runWithTimeout(operation(), timeoutMs);
+      cloudSyncEnabled = true;
+      cloudErrorCount = 0;
+      quotaLimitExceeded = false;
+      return result;
+    } catch (err: any) {
+      lastErr = err;
+      if (attempt < maxAttempts) {
+        await new Promise(r => setTimeout(r, 450));
+      }
+    }
+  }
+
+  const rawMsg = logFirestoreDiagnostic(lastErr, operationType, pathStr);
+  handleCloudError(contextLabel, lastErr);
+  if (!options?.allowDeferredSync) {
+    throw new Error(`Cloud save failed (${rawMsg || 'connection busy'}). Changes could not be confirmed in Cloud Firestore — please retry.`);
+  }
+  return null;
+}
+
+async function testConnection(): Promise<void> {
+  if (!db) return;
+  try {
+    await runWithTimeout(getDocFromServer(doc(db, 'test', 'connection')), 8000);
+  } catch (error) {
+    if (error instanceof Error && error.message.toLowerCase().includes('offline')) {
+      console.error('Please check your Firebase configuration.');
+    }
+  }
+}
+
 // Perform initial initialization
 initFirestore();
+testConnection().catch(() => {});
 setTimeout(() => {
   verifyDatabaseAccess().then(verified => {
     if (verified) {
@@ -617,6 +728,347 @@ function cleanForFirestore(obj: any): any {
   return obj;
 }
 
+// Enforce firestore.rules schema bounds on lead docs so valid saves are never rejected by rules
+function sanitizeLeadForFirestore(lead: Lead): any {
+  const safeLead: any = {
+    ...lead,
+    name: String(lead.name || 'Unnamed Candidate').slice(0, 200),
+    phone: String(lead.phone || '').slice(0, 50)
+  };
+  return cleanForFirestore(safeLead);
+}
+
+// ==========================================
+// 750 KB LEAD DOC SIZE GUARD & CLOUD ARCHIVE ENGINE
+// Prevents active high-chat leads from hitting Firestore's 1 MB limit while NEVER trimming remarks!
+// ==========================================
+
+const LEAD_DOC_SIZE_BUDGET_BYTES = 750 * 1024; // ~750 KB safety margin under 1 MB limit
+
+function getLocalArchivePath(leadId: string): string {
+  const safeId = String(leadId).replace(/[^a-zA-Z0-9_\-]/g, '_');
+  return path.join(LEAD_ARCHIVES_DIR, `${safeId}.json`);
+}
+
+async function persistLeadArchiveChunk(leadId: string, chunk: { id: string; leadId: string; kind: string; createdAt: string; count: number; items: any[] }): Promise<void> {
+  // Always persist locally first
+  try {
+    const localPath = getLocalArchivePath(leadId);
+    const existing = safeReadJsonSync<any[]>(localPath, []);
+    existing.push(chunk);
+    safeWriteJsonSync(localPath, existing);
+  } catch (e) {
+    console.warn(`[LeadArchive] Local archive write warning for ${leadId}:`, e);
+  }
+
+  // Persist to Firestore subcollection leads/{leadId}/archives/{chunkId}
+  if (db) {
+    try {
+      await runWithTimeout(
+        setDoc(doc(db, 'leads', leadId, 'archives', chunk.id), cleanForFirestore(chunk)),
+        12000
+      );
+    } catch (err: any) {
+      logFirestoreDiagnostic(err, OperationType.CREATE, `leads/${leadId}/archives/${chunk.id}`);
+      throw new Error(`Cloud save failed while archiving history for ${leadId}: ${err?.message || err}`);
+    }
+  }
+}
+
+async function enforceLeadDocSizeBudget(lead: Lead): Promise<Lead> {
+  const candidate = { ...lead };
+  const byteSize = () => Buffer.byteLength(JSON.stringify(sanitizeLeadForFirestore(candidate)), 'utf8');
+
+  if (byteSize() <= LEAD_DOC_SIZE_BUDGET_BYTES) {
+    return candidate;
+  }
+
+  console.warn(`[SizeGuard] Lead ${candidate.id} (${candidate.name}) reached ${Math.round(byteSize() / 1024)} KB (>750 KB budget). Archiving oldest excess chat/system history without touching remarks...`);
+
+  const archivedMessages: any[] = [];
+  const archivedTimeline: any[] = [];
+
+  // 1. Archive excess older messages first (keep at least newest 40 messages active)
+  if (Array.isArray(candidate.messages) && candidate.messages.length > 40) {
+    const keepTarget = candidate.messages.length > 150 ? 120 : Math.max(40, Math.floor(candidate.messages.length / 2));
+    const cutCount = candidate.messages.length - keepTarget;
+    if (cutCount > 0) {
+      archivedMessages.push(...candidate.messages.slice(0, cutCount));
+      candidate.messages = candidate.messages.slice(cutCount);
+    }
+    // If still over budget, trim down to newest 40 messages max
+    while (byteSize() > LEAD_DOC_SIZE_BUDGET_BYTES && candidate.messages.length > 40) {
+      const sliceN = Math.min(25, candidate.messages.length - 40);
+      archivedMessages.push(...candidate.messages.slice(0, sliceN));
+      candidate.messages = candidate.messages.slice(sliceN);
+    }
+  }
+
+  // 2. If still over budget, archive excess OLDER non-remark/non-stage timeline items (NEVER remove remark, creation, status, or assignment events!)
+  if (byteSize() > LEAD_DOC_SIZE_BUDGET_BYTES && Array.isArray(candidate.timeline) && candidate.timeline.length > 80) {
+    const preservedTypes = new Set(['remark', 'creation', 'status', 'assignment']);
+    const importantEvents = candidate.timeline.filter(ev => ev && preservedTypes.has(ev.type));
+    const chatSysEvents = candidate.timeline.filter(ev => !ev || !preservedTypes.has(ev.type));
+    if (chatSysEvents.length > 40) {
+      const cutN = chatSysEvents.length - 40;
+      archivedTimeline.push(...chatSysEvents.slice(0, cutN));
+      const keptChatSys = chatSysEvents.slice(cutN);
+      candidate.timeline = [...importantEvents, ...keptChatSys].sort(
+        (a, b) => new Date(a?.timestamp || 0).getTime() - new Date(b?.timestamp || 0).getTime()
+      );
+    }
+  }
+
+  const archivedCount = archivedMessages.length + archivedTimeline.length;
+  if (archivedCount > 0) {
+    const nowIso = new Date().toISOString();
+    const chunkId = `arch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    await persistLeadArchiveChunk(candidate.id, {
+      id: chunkId,
+      leadId: candidate.id,
+      kind: archivedMessages.length > 0 && archivedTimeline.length > 0 ? 'messages_and_timeline' : (archivedMessages.length > 0 ? 'messages' : 'timeline'),
+      createdAt: nowIso,
+      count: archivedCount,
+      items: [
+        ...archivedMessages.map(m => ({ archiveCategory: 'message', ...m })),
+        ...archivedTimeline.map(t => ({ archiveCategory: 'timeline', ...t }))
+      ]
+    });
+    candidate.hasArchivedHistory = true;
+    candidate.archivedChunksCount = (candidate.archivedChunksCount || 0) + 1;
+    console.log(`[SizeGuard] Archived ${archivedCount} legacy items for ${candidate.id} into ${chunkId}. New active size: ${Math.round(byteSize() / 1024)} KB.`);
+  }
+
+  return candidate;
+}
+
+export async function getLeadArchives(leadId: string): Promise<any[]> {
+  const chunkMap = new Map<string, any>();
+
+  // Local archive chunks
+  const localChunks = safeReadJsonSync<any[]>(getLocalArchivePath(leadId), []);
+  localChunks.forEach(c => {
+    if (c && c.id) chunkMap.set(c.id, c);
+  });
+
+  // Cloud archive chunks
+  if (db) {
+    try {
+      const snap = await runWithTimeout(getDocs(collection(db, 'leads', leadId, 'archives')), 10000);
+      snap.forEach(d => {
+        const data = d.data();
+        if (data) {
+          chunkMap.set(d.id, { ...data, id: d.id });
+        }
+      });
+    } catch (err: any) {
+      logFirestoreDiagnostic(err, OperationType.LIST, `leads/${leadId}/archives`);
+    }
+  }
+
+  return Array.from(chunkMap.values()).sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  );
+}
+
+// ==========================================
+// IMMUTABLE CLOUD AUDIT LEDGER (lead_audit_logs)
+// Records every remark, note, stage, coordinator, or deletion transition permanently!
+// ==========================================
+
+const AUDITED_LEAD_FIELDS: Array<keyof Lead> = [
+  'remarks1',
+  'remarks2',
+  'remarks3',
+  'adminRemarks',
+  'notes',
+  'stage',
+  'assignedTo',
+  'isDeleted'
+];
+
+function appendJsonlEntries(filePath: string, entries: any[]) {
+  if (!entries || entries.length === 0) return;
+  try {
+    const lines = entries.map(e => JSON.stringify(e)).join('\n') + '\n';
+    fs.appendFileSync(filePath, lines, 'utf-8');
+  } catch (e) {
+    console.warn(`[LeadAudit] Failed appending to ${filePath}:`, e);
+  }
+}
+
+function readJsonlEntries<T>(filePath: string): T[] {
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const out: T[] = [];
+    raw.split('\n').forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      try {
+        out.push(JSON.parse(trimmed) as T);
+      } catch {}
+    });
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function sanitizeAuditEntryForFirestore(entry: LeadAuditEntry): LeadAuditEntry {
+  return {
+    id: String(entry.id).replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120),
+    leadId: String(entry.leadId).slice(0, 128),
+    phone: String(entry.phone || '').slice(0, 50),
+    candidateName: String(entry.candidateName || 'Unnamed').slice(0, 200),
+    field: String(entry.field).slice(0, 64),
+    previousValue: String(entry.previousValue ?? '').slice(0, 8000),
+    newValue: String(entry.newValue ?? '').slice(0, 8000),
+    actor: String(entry.actor || 'System').slice(0, 120),
+    sourceView: String(entry.sourceView || 'crm').slice(0, 80),
+    timestamp: String(entry.timestamp || new Date().toISOString()).slice(0, 64)
+  };
+}
+
+let isFlushingAuditLogs = false;
+
+export async function flushPendingAuditLogs(): Promise<number> {
+  if (!db || isFlushingAuditLogs || !fs.existsSync(PENDING_AUDIT_FILE)) return 0;
+  isFlushingAuditLogs = true;
+  let flushed = 0;
+  try {
+    const pending = readJsonlEntries<LeadAuditEntry>(PENDING_AUDIT_FILE);
+    if (pending.length === 0) return 0;
+    const remaining: LeadAuditEntry[] = [];
+    for (let i = 0; i < pending.length; i += 50) {
+      const chunk = pending.slice(i, i + 50);
+      try {
+        const batch = writeBatch(db);
+        chunk.forEach(entry => {
+          const safe = sanitizeAuditEntryForFirestore(entry);
+          batch.set(doc(db, 'lead_audit_logs', safe.id), cleanForFirestore(safe));
+        });
+        await runWithTimeout(batch.commit(), 10000);
+        flushed += chunk.length;
+      } catch {
+        remaining.push(...chunk);
+      }
+    }
+    if (remaining.length === 0) {
+      fs.writeFileSync(PENDING_AUDIT_FILE, '', 'utf-8');
+    } else {
+      fs.writeFileSync(PENDING_AUDIT_FILE, remaining.map(e => JSON.stringify(e)).join('\n') + '\n', 'utf-8');
+    }
+  } finally {
+    isFlushingAuditLogs = false;
+  }
+  return flushed;
+}
+
+async function writeLeadAuditEntries(
+  prevLead: Lead | null,
+  nextLead: Lead,
+  actor = 'System',
+  sourceView = 'crm'
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const entries: LeadAuditEntry[] = [];
+
+  for (let i = 0; i < AUDITED_LEAD_FIELDS.length; i++) {
+    const field = AUDITED_LEAD_FIELDS[i];
+    const prevRaw = prevLead ? (prevLead as any)[field] : undefined;
+    const nextRaw = (nextLead as any)[field];
+    const prevVal = prevRaw === undefined || prevRaw === null ? '' : String(prevRaw);
+    const nextVal = nextRaw === undefined || nextRaw === null ? '' : String(nextRaw);
+
+    if (prevLead === null) {
+      // Initial enrollment: log non-empty remarks/stage/assignedTo
+      if (nextVal !== '' && (field !== 'isDeleted' || nextVal === 'true')) {
+        entries.push(sanitizeAuditEntryForFirestore({
+          id: `audit_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`,
+          leadId: nextLead.id,
+          phone: nextLead.phone || '',
+          candidateName: nextLead.name || 'Unnamed',
+          field: String(field),
+          previousValue: '',
+          newValue: nextVal,
+          actor,
+          sourceView,
+          timestamp: nowIso
+        }));
+      }
+    } else if (prevVal !== nextVal) {
+      entries.push(sanitizeAuditEntryForFirestore({
+        id: `audit_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`,
+        leadId: nextLead.id,
+        phone: nextLead.phone || '',
+        candidateName: nextLead.name || 'Unnamed',
+        field: String(field),
+        previousValue: prevVal,
+        newValue: nextVal,
+        actor,
+        sourceView,
+        timestamp: nowIso
+      }));
+    }
+  }
+
+  if (entries.length === 0) return;
+
+  // 1. Always write synchronously to local immutable audit ledger
+  appendJsonlEntries(LEAD_AUDIT_FILE, entries);
+
+  // 2. Write append-only audit records to Firestore (queue locally if transient error)
+  if (db) {
+    try {
+      const batch = writeBatch(db);
+      entries.forEach(entry => {
+        batch.set(doc(db, 'lead_audit_logs', entry.id), cleanForFirestore(entry));
+      });
+      await runWithTimeout(batch.commit(), 8000);
+    } catch (err: any) {
+      logFirestoreDiagnostic(err, OperationType.CREATE, 'lead_audit_logs');
+      appendJsonlEntries(PENDING_AUDIT_FILE, entries);
+    }
+  } else {
+    appendJsonlEntries(PENDING_AUDIT_FILE, entries);
+  }
+}
+
+export async function getLeadAuditLogs(leadId: string): Promise<LeadAuditEntry[]> {
+  const byId = new Map<string, LeadAuditEntry>();
+
+  readJsonlEntries<LeadAuditEntry>(LEAD_AUDIT_FILE).forEach(entry => {
+    if (entry && entry.leadId === leadId && entry.id) {
+      byId.set(entry.id, entry);
+    }
+  });
+  readJsonlEntries<LeadAuditEntry>(PENDING_AUDIT_FILE).forEach(entry => {
+    if (entry && entry.leadId === leadId && entry.id) {
+      byId.set(entry.id, entry);
+    }
+  });
+
+  if (db) {
+    try {
+      const q = query(collection(db, 'lead_audit_logs'), where('leadId', '==', leadId));
+      const snap = await runWithTimeout(getDocs(q), 10000);
+      snap.forEach(d => {
+        const data = d.data() as LeadAuditEntry;
+        if (data) {
+          byId.set(d.id, { ...data, id: d.id });
+        }
+      });
+    } catch (err: any) {
+      logFirestoreDiagnostic(err, OperationType.LIST, 'lead_audit_logs');
+    }
+  }
+
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
+  );
+}
+
 let coordinatorsInitialized = false;
 
 // Helper to ensure coordinators database exists with default seed accounts
@@ -674,7 +1126,7 @@ export async function getCoordinators(): Promise<Coordinator[]> {
 
   // Check in-memory cache first
   if (dbCache.coordinators && (Date.now() - dbCache.coordinators.timestamp < CACHE_TTL_MS)) {
-    return dbCache.coordinators.data;
+    return dbCache.coordinators.data.filter(c => !c.isDeleted);
   }
 
   if (checkCloudStatus()) {
@@ -682,7 +1134,10 @@ export async function getCoordinators(): Promise<Coordinator[]> {
       const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 15000);
       const coords: Coordinator[] = [];
       snapshot.forEach(docSnap => {
-        coords.push(docSnap.data() as Coordinator);
+        const c = docSnap.data() as Coordinator;
+        if (c && !c.isDeleted) {
+          coords.push(c);
+        }
       });
 
       // Update in-memory cache
@@ -697,48 +1152,42 @@ export async function getCoordinators(): Promise<Coordinator[]> {
       handleCloudError(err);
     }
   }
-  const coords = safeReadJsonSync<Coordinator[]>(COORDINATORS_FILE, []);
+  const coords = safeReadJsonSync<Coordinator[]>(COORDINATORS_FILE, []).filter(c => !c.isDeleted);
   dbCache.coordinators = { data: coords, timestamp: Date.now() };
   return coords;
 }
 
-// Save all coordinators
+// Save all coordinators (strict retryable cloud confirmation, with soft-delete marker for removed entries)
 export async function saveCoordinators(coordinators: Coordinator[]): Promise<void> {
   await initializeCoordinatorsDatabase();
 
-  // Update in-memory cache immediately so changes are instantly reflected on reads
-  dbCache.coordinators = { data: coordinators, timestamp: Date.now() };
+  const previousCoords = dbCache.coordinators?.data || safeReadJsonSync<Coordinator[]>(COORDINATORS_FILE, []);
+  const activeCoords = coordinators.map(c => ({ ...c, isDeleted: false }));
+  const activeIds = new Set(activeCoords.map(c => c.id));
+  const removedCoords = previousCoords.filter(c => c && c.id && !activeIds.has(c.id));
 
-  // Write to local JSON file first so we ALWAYS have a local copy and stay fully functional!
-  safeWriteJsonSync(COORDINATORS_FILE, coordinators);
+  // Write to local JSON file first for immediate crash safety
+  dbCache.coordinators = { data: activeCoords, timestamp: Date.now() };
+  safeWriteJsonSync(COORDINATORS_FILE, activeCoords);
 
-  if (checkCloudStatus()) {
-    // Await cloud sync to guarantee data persistence under Cloud Run
-    try {
-      const batch = writeBatch(db);
-      coordinators.forEach(c => {
-        const docRef = doc(db, 'coordinators', c.id);
-        batch.set(docRef, cleanForFirestore(c));
-      });
-      await runWithTimeout(batch.commit(), 8000);
-
-      // Delete any removed coordinators
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'coordinators')), 8000);
-      const deleteBatch = writeBatch(db);
-      let hasDeletes = false;
-      snapshot.forEach(docSnap => {
-        if (!coordinators.some(c => c.id === docSnap.id)) {
-          deleteBatch.delete(docSnap.ref);
-          hasDeletes = true;
-        }
-      });
-      if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 8000);
-      }
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save coordinators to cloud:', err);
-      handleCloudError(err);
-    }
+  if (db) {
+    await commitCloudWriteWithRetry(
+      async () => {
+        const batch = writeBatch(db);
+        activeCoords.forEach(c => {
+          const docRef = doc(db, 'coordinators', c.id);
+          batch.set(docRef, cleanForFirestore(c));
+        });
+        removedCoords.forEach(c => {
+          const docRef = doc(db, 'coordinators', c.id);
+          batch.set(docRef, cleanForFirestore({ ...c, isDeleted: true }));
+        });
+        await batch.commit();
+      },
+      OperationType.WRITE,
+      'coordinators',
+      'saveCoordinators'
+    );
   }
 }
 
@@ -1373,15 +1822,56 @@ export function normalizeLeadsMediaUrls(leads: Lead[]): Lead[] {
   return leads.map(l => normalizeSingleLeadMediaUrls(l) as Lead);
 }
 
-// Find lead by id
-export async function getLeadById(id: string): Promise<Lead | undefined> {
+// Find lead by id (with optional fresh cloud pre-read bypassing container cache)
+export async function getLeadById(id: string, options?: { fresh?: boolean }): Promise<Lead | undefined> {
+  let localLead: Lead | undefined;
   if (dbCache.leads && dbCache.leads.data) {
-    const found = dbCache.leads.data.find(l => l.id === id);
-    if (found) return normalizeSingleLeadMediaUrls(found) as Lead;
+    localLead = dbCache.leads.data.find(l => l.id === id);
   }
-  const localLeads = safeReadJsonSync<Lead[]>(DATA_FILE, []);
-  const found = localLeads.find(l => l.id === id);
-  if (found) return normalizeSingleLeadMediaUrls(found) as Lead;
+  if (!localLead) {
+    const localLeads = safeReadJsonSync<Lead[]>(DATA_FILE, []);
+    localLead = localLeads.find(l => l.id === id);
+  }
+
+  if (options?.fresh && db) {
+    try {
+      const snap = await runWithTimeout(getDoc(doc(db, 'leads', id)), 4500);
+      if (snap.exists()) {
+        const remoteLead = normalizeSingleLeadMediaUrls(snap.data() as Lead) as Lead;
+        if (!localLead) {
+          if (dbCache.leads && Array.isArray(dbCache.leads.data)) {
+            dbCache.leads.data.unshift(remoteLead);
+          }
+          return remoteLead;
+        }
+
+        const localTime = new Date(localLead.updatedAt || localLead.createdAt || 0).getTime();
+        const remoteTime = new Date(remoteLead.updatedAt || remoteLead.createdAt || 0).getTime();
+        const isLocalDirty = dirtyLeadIds.has(id);
+        const useRemoteAsNewer = !isLocalDirty && remoteTime >= localTime;
+        const merged = useRemoteAsNewer
+          ? mergeLeadProfiles(localLead, remoteLead)
+          : mergeLeadProfiles(remoteLead, localLead);
+        merged.messages = mergeMessagesList(remoteLead.messages || [], localLead.messages || []);
+        merged.timeline = mergeTimelineList(remoteLead.timeline || [], localLead.timeline || []);
+        merged.tasks = mergeTasksList(remoteLead.tasks || [], localLead.tasks || []);
+        if (localLead.autoReplySent || remoteLead.autoReplySent) merged.autoReplySent = true;
+        if (localLead.isDeleted || remoteLead.isDeleted) merged.isDeleted = true;
+        if (localLead.hasArchivedHistory || remoteLead.hasArchivedHistory) merged.hasArchivedHistory = true;
+
+        const normalizedMerged = normalizeSingleLeadMediaUrls(merged) as Lead;
+        if (dbCache.leads && Array.isArray(dbCache.leads.data)) {
+          const cIdx = dbCache.leads.data.findIndex(l => l.id === id);
+          if (cIdx !== -1) dbCache.leads.data[cIdx] = normalizedMerged;
+        }
+        return normalizedMerged;
+      }
+    } catch (err: any) {
+      logFirestoreDiagnostic(err, OperationType.GET, `leads/${id}`);
+    }
+  }
+
+  if (localLead) return normalizeSingleLeadMediaUrls(localLead) as Lead;
 
   const leads = await getLeads();
   return normalizeSingleLeadMediaUrls(leads.find(l => l.id === id));
@@ -1488,7 +1978,7 @@ export async function flushDirtyLeadsToFirestore(): Promise<number> {
       for (const id of chunkIds) {
         const leadObj = localMap.get(id);
         if (leadObj) {
-          batch.set(doc(db, 'leads', id), cleanForFirestore(leadObj), { merge: true });
+          batch.set(doc(db, 'leads', id), sanitizeLeadForFirestore(leadObj), { merge: true });
           validIds.push(id);
         } else {
           dirtyLeadIds.delete(id);
@@ -1518,16 +2008,16 @@ export async function flushDirtyLeadsToFirestore(): Promise<number> {
   return flushedCount;
 }
 
-// Background safety timer: retry any dirty leads or pending bulk syncs every 25s when Firestore recovers
+// Background safety timer: retry any dirty leads or pending bulk syncs every 8s when Firestore recovers
 setInterval(() => {
-  if (!checkCloudStatus()) return;
-  if (dirtyLeadIds.size > 0 && !isFlushingDirtyLeads) {
+  if (!db) return;
+  if (dirtyLeadIds.size > 0 && !isFlushingDirtyLeads && checkCloudStatus()) {
     flushDirtyLeadsToFirestore().catch(() => {});
   }
-  if (hasPendingCloudSync && !isSyncingToCloud) {
+  if (hasPendingCloudSync && !isSyncingToCloud && checkCloudStatus()) {
     triggerBackgroundCloudSync().catch(() => {});
   }
-}, 25000);
+}, 8000);
 
 // Non-blocking background sync queue state
 let isSyncingToCloud = false;
@@ -1670,7 +2160,7 @@ async function runCloudSyncInternal(forceFull = false): Promise<void> {
           const batch = writeBatch(db);
           chunk.forEach(l => {
             const docRef = doc(db, 'leads', l.id);
-            batch.set(docRef, cleanForFirestore(l), { merge: true });
+            batch.set(docRef, sanitizeLeadForFirestore(l), { merge: true });
           });
           await runWithTimeout(batch.commit(), 15000);
           chunk.forEach(l => clearLeadDirty(l.id));
@@ -1697,20 +2187,85 @@ async function runCloudSyncInternal(forceFull = false): Promise<void> {
   }
 }
 
-// Save all leads using smart delta-saving for Firestore
+// Save all leads using non-clobbering merge protection + dirty-lead tracking + synchronous Firestore flush
 async function saveLeadsInternal(leads: Lead[]): Promise<void> {
   await initializeDatabase();
 
-  const normalizedLeads = normalizeLeadsMediaUrls(leads);
+  const previousLeads: Lead[] =
+    dbCache.leads && Array.isArray(dbCache.leads.data) && dbCache.leads.data.length > 0
+      ? dbCache.leads.data
+      : safeReadJsonSync<Lead[]>(DATA_FILE, []);
+  const prevMap = new Map<string, Lead>();
+  previousLeads.forEach(l => {
+    if (l && l.id) prevMap.set(l.id, l);
+  });
+
+  const normalizedIncoming = normalizeLeadsMediaUrls(leads);
+  const protectedLeads: Lead[] = normalizedIncoming.map(inc => {
+    if (!inc || !inc.id) return inc;
+    const prev = prevMap.get(inc.id);
+    if (!prev) return inc;
+    const prevTime = new Date(prev.updatedAt || prev.createdAt || 0).getTime();
+    const incTime = new Date(inc.updatedAt || inc.createdAt || 0).getTime();
+    if (prevTime > incTime) {
+      // Never let a stale bulk caller revert newer remarks, messages, timeline, stage, or assignment
+      const merged = mergeLeadProfiles(inc, prev);
+      merged.messages = mergeMessagesList(inc.messages || [], prev.messages || []);
+      merged.timeline = mergeTimelineList(inc.timeline || [], prev.timeline || []);
+      merged.tasks = mergeTasksList(inc.tasks || [], prev.tasks || []);
+      return merged;
+    }
+    return inc;
+  });
+
+  const syncedList = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, []);
+  const syncedMap = new Map<string, string>();
+  syncedList.forEach(l => {
+    if (l && l.id) syncedMap.set(l.id, String(l.updatedAt || l.createdAt || ''));
+  });
+
+  const changedLeads: Lead[] = [];
+  protectedLeads.forEach(l => {
+    if (!l || !l.id) return;
+    const prev = prevMap.get(l.id);
+    const curTs = String(l.updatedAt || l.createdAt || '');
+    const syncedTs = syncedMap.get(l.id);
+    const prevTs = prev ? String(prev.updatedAt || prev.createdAt || '') : undefined;
+    if (prevTs !== curTs || syncedTs !== curTs) {
+      changedLeads.push(l);
+      markLeadDirty(l.id);
+    }
+  });
 
   // Update in-memory cache immediately so local changes are instantly reflected on reads
-  dbCache.leads = { data: normalizedLeads, timestamp: Date.now() };
+  dbCache.leads = { data: protectedLeads, timestamp: Date.now() };
   incrementDatabaseVersion();
 
   // Atomically and synchronously persist to disk so zero stale-read window exists
-  safeWriteJsonSync(DATA_FILE, normalizedLeads);
+  safeWriteJsonSync(DATA_FILE, protectedLeads);
 
-  if (checkCloudStatus()) {
+  if (db && changedLeads.length > 0 && changedLeads.length <= 150) {
+    try {
+      const CHUNK_SIZE = 25;
+      for (let i = 0; i < changedLeads.length; i += CHUNK_SIZE) {
+        const chunk = changedLeads.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach(l => {
+          batch.set(doc(db, 'leads', l.id), sanitizeLeadForFirestore(l), { merge: true });
+        });
+        await runWithTimeout(batch.commit(), 15000);
+        chunk.forEach(l => clearLeadDirty(l.id));
+      }
+      safeWriteJsonSync(DATA_FILE_SYNCED, protectedLeads);
+      markDatabaseUpdated('leads')
+        .then(ts => { if (ts) lastReadLeadsTimestamp = ts; })
+        .catch(() => {});
+    } catch (err: any) {
+      console.warn('[saveLeadsInternal] Batch Firestore commit deferred to dirty queue:', err?.message || err);
+      handleCloudError('saveLeadsInternal', err);
+      hasPendingCloudSync = true;
+    }
+  } else if (checkCloudStatus()) {
     triggerBackgroundCloudSync().catch(err => {
       console.error('[Cloud Sync Queue] Failed to trigger background cloud sync:', err);
     });
@@ -1719,12 +2274,24 @@ async function saveLeadsInternal(leads: Lead[]): Promise<void> {
   }
 }
 
-// Atomically update a single lead in-memory, write to disk, and push to Firestore without full-table locking
-export async function updateSingleLead(id: string, updater: (current: Lead) => Lead | Promise<Lead>): Promise<Lead | null> {
+export interface UpdateLeadOptions {
+  allowDeferredSync?: boolean;
+  skipRemotePull?: boolean;
+  auditMeta?: {
+    actor?: string;
+    sourceView?: string;
+  };
+}
+
+// Atomically update a single lead with fresh Firestore read-merge, 750 KB size guard, audit trail, atomic disk write, and verified Firestore commit
+export async function updateSingleLead(
+  id: string,
+  updater: (current: Lead) => Lead | Promise<Lead>,
+  options: UpdateLeadOptions = {}
+): Promise<Lead | null> {
   return dbMutex.run(async () => {
     await initializeDatabase();
-    
-    // Read from memory cache if available, else disk
+
     let leads: Lead[] = [];
     if (dbCache.leads && Array.isArray(dbCache.leads.data) && dbCache.leads.data.length > 0) {
       leads = dbCache.leads.data;
@@ -1733,47 +2300,96 @@ export async function updateSingleLead(id: string, updater: (current: Lead) => L
     }
 
     let idx = leads.findIndex(l => l.id === id);
-    if (idx === -1) {
-      if (checkCloudStatus()) {
-        try {
-          const docRef = doc(db, 'leads', id);
-          const snap = await runWithTimeout(getDoc(docRef), 5000);
-          if (snap.exists()) {
-            const data = snap.data() as Lead;
-            leads.push(data);
-            idx = leads.length - 1;
-          }
-        } catch (e) {
-          console.warn(`[updateSingleLead] Failed to fetch doc ${id} from firestore:`, e);
+
+    // Pull latest remote version from Firestore before mutating so multi-container edits never clobber each other
+    let remoteLead: Lead | null = null;
+    if (db && !options.skipRemotePull) {
+      try {
+        const docRef = doc(db, 'leads', id);
+        const snap = await runWithTimeout(getDoc(docRef), 4000);
+        if (snap.exists()) {
+          remoteLead = normalizeSingleLeadMediaUrls(snap.data() as Lead) as Lead;
         }
+      } catch (e: any) {
+        // Non-fatal: continue with local copy if remote read times out
+        console.warn(`[updateSingleLead] Remote pre-read skipped for ${id}:`, e?.message || e);
       }
-      if (idx === -1) {
+    }
+
+    if (idx === -1) {
+      if (remoteLead) {
+        leads.push(remoteLead);
+        idx = leads.length - 1;
+      } else {
         return null;
       }
     }
 
-    const currentLead = leads[idx];
-    const updatedLead = await updater({ ...currentLead });
-    updatedLead.updatedAt = new Date().toISOString();
+    let baseLead = leads[idx];
+    if (remoteLead) {
+      const localTime = new Date(baseLead.updatedAt || baseLead.createdAt || 0).getTime();
+      const remoteTime = new Date(remoteLead.updatedAt || remoteLead.createdAt || 0).getTime();
+      const isLocalDirty = dirtyLeadIds.has(id);
+      const useRemoteAsNewer = !isLocalDirty && remoteTime >= localTime;
+      const merged = useRemoteAsNewer
+        ? mergeLeadProfiles(baseLead, remoteLead)
+        : mergeLeadProfiles(remoteLead, baseLead);
+      merged.messages = mergeMessagesList(remoteLead.messages || [], baseLead.messages || []);
+      merged.timeline = mergeTimelineList(remoteLead.timeline || [], baseLead.timeline || []);
+      merged.tasks = mergeTasksList(remoteLead.tasks || [], baseLead.tasks || []);
+      if (baseLead.autoReplySent || remoteLead.autoReplySent) merged.autoReplySent = true;
+      if (baseLead.isDeleted || remoteLead.isDeleted) merged.isDeleted = true;
+      if (baseLead.hasArchivedHistory || remoteLead.hasArchivedHistory) merged.hasArchivedHistory = true;
+      baseLead = merged;
+    }
 
-    const normalized = normalizeSingleLeadMediaUrls(updatedLead) as Lead;
+    const prevUpdatedMs = new Date(baseLead.updatedAt || baseLead.createdAt || 0).getTime() || 0;
+    const updatedLead = await updater({ ...baseLead });
+    const nextMs = Math.max(Date.now(), prevUpdatedMs + 1);
+    updatedLead.updatedAt = new Date(nextMs).toISOString();
+
+    const normalizedPreBudget = normalizeSingleLeadMediaUrls(updatedLead) as Lead;
+    const normalized = await enforceLeadDocSizeBudget(normalizedPreBudget);
     leads[idx] = normalized;
 
     // 1. Instantly update in-memory cache so subsequent reads see this change in < 1ms
     dbCache.leads = { data: leads, timestamp: Date.now() };
     incrementDatabaseVersion(id);
 
-    // 2. Persist to disk atomically
+    // 2. Persist to disk atomically and enqueue dirty protection
     safeWriteJsonSync(DATA_FILE, leads);
-
-    // 3. Synchronously commit this single modified lead to Firestore (or queue in dirty_leads.json if offline/throttled)
     markLeadDirty(id);
-    if (checkCloudStatus()) {
-      try {
-        const docRef = doc(db, 'leads', id);
-        await runWithTimeout(setDoc(docRef, cleanForFirestore(normalized), { merge: true }), 15000);
-        clearLeadDirty(id);
 
+    // 3. Commit directly to Firestore (with retry for interactive saves)
+    if (db && (!options.allowDeferredSync || checkCloudStatus())) {
+      const maxAttempts = options.allowDeferredSync ? 1 : 2;
+      let lastCloudErr: any = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const docRef = doc(db, 'leads', id);
+          await runWithTimeout(setDoc(docRef, sanitizeLeadForFirestore(normalized), { merge: true }), 15000);
+          clearLeadDirty(id);
+          lastCloudErr = null;
+          cloudSyncEnabled = true;
+          cloudErrorCount = 0;
+          quotaLimitExceeded = false;
+          break;
+        } catch (err: any) {
+          lastCloudErr = err;
+          if (attempt < maxAttempts) {
+            await new Promise(r => setTimeout(r, 450));
+          }
+        }
+      }
+
+      if (lastCloudErr) {
+        logFirestoreDiagnostic(lastCloudErr, OperationType.WRITE, `leads/${id}`);
+        handleCloudError(`updateSingleLead(${id})`, lastCloudErr);
+        console.warn(`[Firestore Client] Single lead sync for ${id} queued in dirty_leads.json:`, lastCloudErr?.message || lastCloudErr);
+        if (!options.allowDeferredSync) {
+          throw new Error(`Cloud save failed (${lastCloudErr?.message || 'connection busy'}). Your changes were not confirmed saved to cloud — please click Save again.`);
+        }
+      } else {
         const syncedList = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, []);
         const sIdx = syncedList.findIndex(l => l.id === id);
         if (sIdx !== -1) syncedList[sIdx] = normalized;
@@ -1786,17 +2402,102 @@ export async function updateSingleLead(id: string, updater: (current: Lead) => L
           })
           .catch(() => {});
 
-        // Also drain any earlier dirty leads if Firestore is healthy again
         if (dirtyLeadIds.size > 0) {
           flushDirtyLeadsToFirestore().catch(() => {});
         }
-      } catch (err: any) {
-        console.warn(`[Firestore Client] Single lead sync for ${id} queued in dirty_leads.json:`, err?.message || err);
-        handleCloudError(`updateSingleLead(${id})`, err);
       }
     }
 
+    // 4. Write immutable cloud + local remark/edit audit entries
+    const auditActor = options.auditMeta?.actor || normalized.assignedTo || 'System';
+    const auditSource = options.auditMeta?.sourceView || 'crm';
+    await writeLeadAuditEntries(baseLead, normalized, auditActor, auditSource).catch(() => {});
+
     return normalized;
+  });
+}
+
+// Atomically update multiple matching leads inside dbMutex without clobbering untouched leads
+export async function updateMultipleLeads(
+  matcher: string[] | ((lead: Lead) => boolean),
+  mutator: (current: Lead) => Lead | null | undefined,
+  options: { allowDeferredSync?: boolean } = {}
+): Promise<Lead[]> {
+  return dbMutex.run(async () => {
+    await initializeDatabase();
+
+    let leads: Lead[] = [];
+    if (dbCache.leads && Array.isArray(dbCache.leads.data) && dbCache.leads.data.length > 0) {
+      leads = dbCache.leads.data;
+    } else {
+      leads = safeReadJsonSync<Lead[]>(DATA_FILE, []);
+    }
+
+    const idSet = Array.isArray(matcher) ? new Set(matcher.map(String)) : null;
+    const isMatch = idSet ? (l: Lead) => idSet.has(l.id) : (matcher as (lead: Lead) => boolean);
+
+    const modifiedLeads: Lead[] = [];
+    const nowBase = Date.now();
+
+    for (let i = 0; i < leads.length; i++) {
+      const current = leads[i];
+      if (!current || !isMatch(current)) continue;
+      const mutated = mutator({ ...current });
+      if (!mutated) continue;
+      const prevMs = new Date(current.updatedAt || current.createdAt || 0).getTime() || 0;
+      mutated.updatedAt = new Date(Math.max(nowBase, prevMs + 1)).toISOString();
+      const normalized = normalizeSingleLeadMediaUrls(mutated) as Lead;
+      leads[i] = normalized;
+      modifiedLeads.push(normalized);
+      markLeadDirty(normalized.id);
+    }
+
+    if (modifiedLeads.length === 0) return [];
+
+    dbCache.leads = { data: leads, timestamp: Date.now() };
+    if (modifiedLeads.length <= 25) {
+      modifiedLeads.forEach(l => incrementDatabaseVersion(l.id));
+    } else {
+      incrementDatabaseVersion();
+    }
+    safeWriteJsonSync(DATA_FILE, leads);
+
+    if (db && (!options.allowDeferredSync || checkCloudStatus())) {
+      try {
+        const CHUNK_SIZE = 25;
+        for (let i = 0; i < modifiedLeads.length; i += CHUNK_SIZE) {
+          const chunk = modifiedLeads.slice(i, i + CHUNK_SIZE);
+          const batch = writeBatch(db);
+          chunk.forEach(l => {
+            batch.set(doc(db, 'leads', l.id), sanitizeLeadForFirestore(l), { merge: true });
+          });
+          await runWithTimeout(batch.commit(), 15000);
+          chunk.forEach(l => clearLeadDirty(l.id));
+        }
+
+        const syncedList = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, []);
+        const syncedMap = new Map<string, number>();
+        syncedList.forEach((l, i) => { if (l && l.id) syncedMap.set(l.id, i); });
+        modifiedLeads.forEach(l => {
+          const si = syncedMap.get(l.id);
+          if (si !== undefined) syncedList[si] = l;
+          else syncedList.unshift(l);
+        });
+        safeWriteJsonSync(DATA_FILE_SYNCED, syncedList);
+
+        markDatabaseUpdated('leads')
+          .then(ts => { if (ts) lastReadLeadsTimestamp = ts; })
+          .catch(() => {});
+      } catch (err: any) {
+        handleCloudError('updateMultipleLeads', err);
+        console.warn('[Firestore Client] Batch update queued in dirty_leads.json:', err?.message || err);
+        if (!options.allowDeferredSync) {
+          throw new Error(`Cloud batch save failed (${err?.message || 'connection busy'}). Please retry.`);
+        }
+      }
+    }
+
+    return modifiedLeads;
   });
 }
 
@@ -1815,7 +2516,10 @@ export async function saveLeads(leads: Lead[]): Promise<void> {
 }
 
 // Add custom lead and synchronously persist it directly to Firestore so it survives Republish/restarts
-export async function addLead(lead: Lead): Promise<void> {
+export async function addLead(
+  lead: Lead,
+  options: { allowDeferredSync?: boolean; auditMeta?: { actor?: string; sourceView?: string } } = {}
+): Promise<void> {
   await dbMutex.run(async () => {
     await initializeDatabase();
 
@@ -1826,7 +2530,8 @@ export async function addLead(lead: Lead): Promise<void> {
       leads = safeReadJsonSync<Lead[]>(DATA_FILE, []);
     }
 
-    const normalized = normalizeSingleLeadMediaUrls(lead) as Lead;
+    const normalizedPreBudget = normalizeSingleLeadMediaUrls(lead) as Lead;
+    const normalized = await enforceLeadDocSizeBudget(normalizedPreBudget);
     const existingIdx = leads.findIndex(l => l.id === normalized.id);
     if (existingIdx !== -1) {
       leads[existingIdx] = normalized;
@@ -1839,12 +2544,35 @@ export async function addLead(lead: Lead): Promise<void> {
     safeWriteJsonSync(DATA_FILE, leads);
 
     markLeadDirty(normalized.id);
-    if (checkCloudStatus()) {
-      try {
-        const docRef = doc(db, 'leads', normalized.id);
-        await runWithTimeout(setDoc(docRef, cleanForFirestore(normalized), { merge: true }), 15000);
-        clearLeadDirty(normalized.id);
+    if (db && (!options.allowDeferredSync || checkCloudStatus())) {
+      const maxAttempts = options.allowDeferredSync ? 1 : 2;
+      let lastErr: any = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const docRef = doc(db, 'leads', normalized.id);
+          await runWithTimeout(setDoc(docRef, sanitizeLeadForFirestore(normalized), { merge: true }), 15000);
+          clearLeadDirty(normalized.id);
+          lastErr = null;
+          cloudSyncEnabled = true;
+          cloudErrorCount = 0;
+          quotaLimitExceeded = false;
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          if (attempt < maxAttempts) {
+            await new Promise(r => setTimeout(r, 450));
+          }
+        }
+      }
 
+      if (lastErr) {
+        logFirestoreDiagnostic(lastErr, OperationType.CREATE, `leads/${normalized.id}`);
+        console.error(`[Firestore Client] Immediate cloud write failed for new lead ${normalized.id} (queued for retry):`, lastErr?.message || lastErr);
+        handleCloudError(`addLead(${normalized.id})`, lastErr);
+        if (!options.allowDeferredSync) {
+          throw new Error(`Cloud save failed (${lastErr?.message || 'connection busy'}). Please retry.`);
+        }
+      } else {
         const syncedList = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, []);
         const sIdx = syncedList.findIndex(l => l.id === normalized.id);
         if (sIdx !== -1) syncedList[sIdx] = normalized;
@@ -1854,11 +2582,15 @@ export async function addLead(lead: Lead): Promise<void> {
         const ts = await markDatabaseUpdated('leads');
         if (ts) lastReadLeadsTimestamp = ts;
         console.log(`[Firestore Client] Persisted new lead ${normalized.id} (${normalized.name}) directly to Firestore.`);
-      } catch (err: any) {
-        console.error(`[Firestore Client] Immediate cloud write failed for new lead ${normalized.id} (queued for retry):`, err?.message || err);
-        handleCloudError(`addLead(${normalized.id})`, err);
       }
     }
+
+    await writeLeadAuditEntries(
+      null,
+      normalized,
+      options.auditMeta?.actor || normalized.assignedTo || 'System',
+      options.auditMeta?.sourceView || 'lead_create'
+    ).catch(() => {});
   });
 }
 
@@ -2447,13 +3179,13 @@ export async function upsertSingleJob(job: Job, reason = 'upsert'): Promise<Job>
   dbCache.jobs = { data: sorted, timestamp: Date.now() };
   safeWriteJsonSync(JOBS_FILE, sorted);
 
-  if (checkCloudStatus()) {
-    try {
-      await runWithTimeout(setDoc(doc(db, 'jobs', normalized.id), cleanForFirestore(normalized)), 10000);
-    } catch (err: any) {
-      console.error(`[Firestore Client] Failed to upsert job ${normalized.id}:`, err);
-      handleCloudError(err);
-    }
+  if (db) {
+    await commitCloudWriteWithRetry(
+      () => setDoc(doc(db, 'jobs', normalized.id), cleanForFirestore(normalized)),
+      OperationType.WRITE,
+      `jobs/${normalized.id}`,
+      `upsertSingleJob(${normalized.id})`
+    );
   }
 
   // Rolling snapshot in background
@@ -2507,18 +3239,20 @@ export async function saveJobs(jobs: Job[]): Promise<void> {
   dbCache.jobs = { data: validJobs, timestamp: Date.now() };
   safeWriteJsonSync(JOBS_FILE, validJobs);
 
-  if (checkCloudStatus()) {
-    try {
-      const batch = writeBatch(db);
-      validJobs.forEach(j => {
-        const docRef = doc(db, 'jobs', j.id);
-        batch.set(docRef, cleanForFirestore(j));
-      });
-      await runWithTimeout(batch.commit(), 10000);
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save jobs to cloud:', err);
-      handleCloudError(err);
-    }
+  if (db && validJobs.length > 0) {
+    await commitCloudWriteWithRetry(
+      async () => {
+        const batch = writeBatch(db);
+        validJobs.forEach(j => {
+          const docRef = doc(db, 'jobs', j.id);
+          batch.set(docRef, cleanForFirestore(j));
+        });
+        await batch.commit();
+      },
+      OperationType.WRITE,
+      'jobs',
+      'saveJobs'
+    );
   }
 }
 
@@ -2614,46 +3348,43 @@ export async function getUpdates(): Promise<ImportantUpdate[]> {
   return sortedSanitized;
 }
 
-// Save all updates
+// Save all updates (strict retryable cloud confirmation)
 export async function saveUpdates(updates: ImportantUpdate[]): Promise<void> {
   await initializeUpdatesDatabase();
   const validUpdates = (updates || []).filter(u => u && typeof u === 'object' && u.id);
 
-  // Update in-memory cache immediately so changes are instantly reflected on reads
   dbCache.updates = { data: validUpdates, timestamp: Date.now() };
-
   safeWriteJsonSync(UPDATES_FILE, validUpdates);
 
-  if (checkCloudStatus()) {
-    // Await cloud sync to guarantee data persistence under Cloud Run
-    try {
-      if (validUpdates.length > 0) {
-        const batch = writeBatch(db);
-        validUpdates.forEach(u => {
-          const docRef = doc(db, 'updates', u.id);
-          batch.set(docRef, cleanForFirestore(u));
-        });
-        await runWithTimeout(batch.commit(), 10000);
-      }
-
-      // Delete any removed updates
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 10000);
-      const deleteBatch = writeBatch(db);
-      let hasDeletes = false;
-      snapshot.forEach(docSnap => {
-        if (!validUpdates.some(u => u.id === docSnap.id)) {
-          deleteBatch.delete(docSnap.ref);
-          hasDeletes = true;
+  if (db) {
+    await commitCloudWriteWithRetry(
+      async () => {
+        if (validUpdates.length > 0) {
+          const batch = writeBatch(db);
+          validUpdates.forEach(u => {
+            const docRef = doc(db, 'updates', u.id);
+            batch.set(docRef, cleanForFirestore(u));
+          });
+          await batch.commit();
         }
-      });
-      if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 10000);
-      }
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save updates to cloud:', err);
-      handleCloudError('saveUpdates', err);
-      throw err;
-    }
+
+        const snapshot = await getDocs(collection(db, 'updates'));
+        const deleteBatch = writeBatch(db);
+        let hasDeletes = false;
+        snapshot.forEach(docSnap => {
+          if (!validUpdates.some(u => u.id === docSnap.id)) {
+            deleteBatch.delete(docSnap.ref);
+            hasDeletes = true;
+          }
+        });
+        if (hasDeletes) {
+          await deleteBatch.commit();
+        }
+      },
+      OperationType.WRITE,
+      'updates',
+      'saveUpdates'
+    );
   }
 }
 
@@ -2666,27 +3397,27 @@ export async function deleteUpdateById(id: string): Promise<boolean> {
   dbCache.updates = { data: filtered, timestamp: Date.now() };
   safeWriteJsonSync(UPDATES_FILE, filtered);
 
-  if (checkCloudStatus()) {
-    try {
-      await runWithTimeout(deleteDoc(doc(db, 'updates', id)), 10000);
-      // Also sweep any stale docs not in filtered
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'updates')), 10000);
-      const deleteBatch = writeBatch(db);
-      let hasDeletes = false;
-      snapshot.forEach(docSnap => {
-        if (docSnap.id === id || !filtered.some(u => u.id === docSnap.id)) {
-          deleteBatch.delete(docSnap.ref);
-          hasDeletes = true;
+  if (db) {
+    await commitCloudWriteWithRetry(
+      async () => {
+        await deleteDoc(doc(db, 'updates', id));
+        const snapshot = await getDocs(collection(db, 'updates'));
+        const deleteBatch = writeBatch(db);
+        let hasDeletes = false;
+        snapshot.forEach(docSnap => {
+          if (docSnap.id === id || !filtered.some(u => u.id === docSnap.id)) {
+            deleteBatch.delete(docSnap.ref);
+            hasDeletes = true;
+          }
+        });
+        if (hasDeletes) {
+          await deleteBatch.commit();
         }
-      });
-      if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 10000);
-      }
-    } catch (err: any) {
-      console.error(`[Firestore Client] Failed to delete update ${id} from cloud:`, err);
-      handleCloudError(`deleteUpdateById(${id})`, err);
-      throw err;
-    }
+      },
+      OperationType.DELETE,
+      `updates/${id}`,
+      `deleteUpdateById(${id})`
+    );
   }
 
   return existedLocally;
@@ -2787,19 +3518,16 @@ export async function getMetadata(): Promise<CgpMetadata> {
 export async function saveMetadata(metadata: CgpMetadata): Promise<void> {
   await initializeMetadataDatabase();
 
-  // Update in-memory cache immediately so changes are instantly reflected on reads
   dbCache.metadata = { data: metadata, timestamp: Date.now() };
-
   safeWriteJsonSync(METADATA_FILE, metadata);
 
-  if (checkCloudStatus()) {
-    // Await cloud sync to guarantee data persistence under Cloud Run
-    try {
-      await runWithTimeout(setDoc(doc(db, 'metadata', 'options'), cleanForFirestore(metadata)), 10000);
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save metadata to cloud:', err);
-      handleCloudError(err);
-    }
+  if (db) {
+    await commitCloudWriteWithRetry(
+      () => setDoc(doc(db, 'metadata', 'options'), cleanForFirestore(metadata)),
+      OperationType.WRITE,
+      'metadata/options',
+      'saveMetadata'
+    );
   }
 }
 
@@ -4010,7 +4738,7 @@ export async function getWallets(forceRefresh = false, includeCloudLedger = fals
 async function saveWalletsInternal(
   wallets: Wallet[],
   snapshotReason = 'Automatic state sync',
-  options?: { deletedTxIds?: string[]; bypassCloudMerge?: boolean }
+  options?: { deletedTxIds?: string[]; bypassCloudMerge?: boolean; allowDeferredSync?: boolean }
 ): Promise<void> {
   await initializeWalletsDatabase();
 
@@ -4076,31 +4804,33 @@ async function saveWalletsInternal(
   dbCache.wallets = { data: finalWallets, timestamp: Date.now() };
   safeWriteJsonSync(WALLETS_FILE, finalWallets);
 
-  if (checkCloudStatus()) {
-    try {
-      const batch = writeBatch(db);
-      finalWallets.forEach(w => {
-        const docRef = doc(db, 'wallets', w.id);
-        batch.set(docRef, cleanForFirestore(w));
-      });
-      await runWithTimeout(batch.commit(), 15000);
-
-      // Persist any new transactions individually to Firestore wallet_ledger
-      const ledgerItems: Array<{ username: string; transaction: WalletTransaction }> = [];
-      finalWallets.forEach(w => {
-        (w.transactions || []).forEach(t => {
-          if (!syncedCloudLedgerTxIds.has(t.id)) {
-            ledgerItems.push({ username: w.username, transaction: t });
-          }
+  if (db && (!options?.allowDeferredSync || checkCloudStatus())) {
+    await commitCloudWriteWithRetry(
+      async () => {
+        const batch = writeBatch(db);
+        finalWallets.forEach(w => {
+          const docRef = doc(db, 'wallets', w.id);
+          batch.set(docRef, cleanForFirestore(w));
         });
-      });
-      if (ledgerItems.length > 0) {
-        await persistTransactionsToCloudLedger(ledgerItems);
-      }
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save wallets to cloud:', err);
-      handleCloudError(err);
-    }
+        await batch.commit();
+
+        const ledgerItems: Array<{ username: string; transaction: WalletTransaction }> = [];
+        finalWallets.forEach(w => {
+          (w.transactions || []).forEach(t => {
+            if (!syncedCloudLedgerTxIds.has(t.id)) {
+              ledgerItems.push({ username: w.username, transaction: t });
+            }
+          });
+        });
+        if (ledgerItems.length > 0) {
+          await persistTransactionsToCloudLedger(ledgerItems);
+        }
+      },
+      OperationType.WRITE,
+      'wallets',
+      'saveWalletsInternal',
+      { allowDeferredSync: options?.allowDeferredSync, timeoutMs: 15000 }
+    );
   }
 }
 
@@ -4572,34 +5302,37 @@ async function saveIncentiveRulesInternal(rules: IncentiveRule[]): Promise<void>
   const validRules = (rules || []).filter(r => r && typeof r === 'object' && r.id);
 
   dbCache.incentive_rules = { data: validRules, timestamp: Date.now() };
-
   safeWriteJsonSync(INCENTIVE_RULES_FILE, validRules);
 
-  if (checkCloudStatus()) {
-    try {
-      const batch = writeBatch(db);
-      validRules.forEach(r => {
-        const docRef = doc(db, 'incentive_rules', r.id);
-        batch.set(docRef, cleanForFirestore(r));
-      });
-      await runWithTimeout(batch.commit(), 10000);
-
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'incentive_rules')), 10000);
-      const deleteBatch = writeBatch(db);
-      let hasDeletes = false;
-      snapshot.forEach(docSnap => {
-        if (!validRules.some(r => r.id === docSnap.id)) {
-          deleteBatch.delete(docSnap.ref);
-          hasDeletes = true;
+  if (db) {
+    await commitCloudWriteWithRetry(
+      async () => {
+        if (validRules.length > 0) {
+          const batch = writeBatch(db);
+          validRules.forEach(r => {
+            const docRef = doc(db, 'incentive_rules', r.id);
+            batch.set(docRef, cleanForFirestore(r));
+          });
+          await batch.commit();
         }
-      });
-      if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 10000);
-      }
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to save incentive rules to cloud:', err);
-      handleCloudError(err);
-    }
+
+        const snapshot = await getDocs(collection(db, 'incentive_rules'));
+        const deleteBatch = writeBatch(db);
+        let hasDeletes = false;
+        snapshot.forEach(docSnap => {
+          if (!validRules.some(r => r.id === docSnap.id)) {
+            deleteBatch.delete(docSnap.ref);
+            hasDeletes = true;
+          }
+        });
+        if (hasDeletes) {
+          await deleteBatch.commit();
+        }
+      },
+      OperationType.WRITE,
+      'incentive_rules',
+      'saveIncentiveRulesInternal'
+    );
   }
 }
 
@@ -4670,12 +5403,13 @@ export async function saveMonthlyTargetSettings(settings: Partial<MonthlyTargetS
     dbCache.monthly_target = { data: updated, timestamp: Date.now() };
     safeWriteJsonSync(MONTHLY_TARGET_FILE, updated);
 
-    if (checkCloudStatus()) {
-      try {
-        await runWithTimeout(setDoc(doc(db, 'settings', 'monthly_target'), cleanForFirestore(updated)), 10000);
-      } catch (err: any) {
-        console.warn('[Firestore] Error saving monthly target settings to cloud:', err?.message || err);
-      }
+    if (db) {
+      await commitCloudWriteWithRetry(
+        () => setDoc(doc(db, 'settings', 'monthly_target'), cleanForFirestore(updated)),
+        OperationType.WRITE,
+        'settings/monthly_target',
+        'saveMonthlyTargetSettings'
+      );
     }
 
     return updated;
@@ -5144,10 +5878,118 @@ export async function generateFullXLSXBuffer(): Promise<Buffer> {
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 }
 
+// ==========================================
+// CLOUD-BACKED CHUNKED SNAPSHOT BACKUPS (lead_backups + chunks)
+// Durable across server restarts and App Publishes!
+// ==========================================
+
+export async function persistBackupSnapshotToCloud(
+  backup: FullDatabaseBackup,
+  isMondayRun: boolean = false
+): Promise<CloudBackupSnapshotMeta | null> {
+  if (!db) return null;
+
+  const jsonStr = JSON.stringify(backup);
+  const sizeBytes = Buffer.byteLength(jsonStr, 'utf8');
+  const sizeKb = (sizeBytes / 1024).toFixed(1);
+  const sizeMb = (sizeBytes / (1024 * 1024)).toFixed(2);
+  const sizeFormatted = sizeBytes > 1024 * 1024 ? `${sizeMb} MB` : `${sizeKb} KB`;
+
+  const snapshotId = `snap_${Date.now()}_${isMondayRun ? 'monday' : 'auto'}_${Math.random().toString(36).slice(2, 6)}`;
+  const CHUNK_CHARS = 360 * 1024; // <= ~360KB per chunk doc (safe well below 1MB Firestore limit)
+  const chunks: string[] = [];
+  for (let i = 0; i < jsonStr.length; i += CHUNK_CHARS) {
+    chunks.push(jsonStr.slice(i, i + CHUNK_CHARS));
+  }
+
+  // Write chunks first so incomplete snapshots are never listed
+  for (let i = 0; i < chunks.length; i++) {
+    const chunkId = `chunk_${i}`;
+    await commitCloudWriteWithRetry(
+      () => setDoc(doc(db, 'lead_backups', snapshotId, 'chunks', chunkId), {
+        index: i,
+        data: chunks[i]
+      }),
+      OperationType.CREATE,
+      `lead_backups/${snapshotId}/chunks/${chunkId}`,
+      `persistBackupSnapshotToCloud(${snapshotId}/${chunkId})`,
+      { timeoutMs: 20000 }
+    );
+  }
+
+  const meta: CloudBackupSnapshotMeta = {
+    id: snapshotId,
+    timestamp: backup.timestamp || new Date().toISOString(),
+    source: String(backup.source || 'Automatic Backup').slice(0, 200),
+    isMondayScheduled: Boolean(isMondayRun),
+    totalLeads: Array.isArray(backup.data?.leads) ? backup.data.leads.length : 0,
+    chunkCount: chunks.length,
+    sizeBytes,
+    sizeFormatted
+  };
+
+  await commitCloudWriteWithRetry(
+    () => setDoc(doc(db, 'lead_backups', snapshotId), cleanForFirestore(meta)),
+    OperationType.CREATE,
+    `lead_backups/${snapshotId}`,
+    `persistBackupSnapshotToCloud(${snapshotId})`,
+    { timeoutMs: 15000 }
+  );
+
+  console.log(`[CloudBackup] Persisted durable snapshot "${snapshotId}" (${meta.totalLeads} leads, ${meta.chunkCount} chunks, ${meta.sizeFormatted}) to Firestore lead_backups.`);
+  return meta;
+}
+
+export async function listCloudBackupSnapshots(): Promise<CloudBackupSnapshotMeta[]> {
+  if (!db) return [];
+  try {
+    const q = query(collection(db, 'lead_backups'), orderBy('timestamp', 'desc'), limit(25));
+    const snap = await runWithTimeout(getDocs(q), 12000);
+    const items: CloudBackupSnapshotMeta[] = [];
+    snap.forEach(d => {
+      const data = d.data() as CloudBackupSnapshotMeta;
+      if (data && data.id) {
+        items.push({ ...data, id: d.id });
+      }
+    });
+    return items.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+  } catch (err: any) {
+    logFirestoreDiagnostic(err, OperationType.LIST, 'lead_backups');
+    return [];
+  }
+}
+
+export async function loadCloudBackupSnapshot(snapshotId: string): Promise<FullDatabaseBackup | null> {
+  if (!db) return null;
+  try {
+    const metaSnap = await runWithTimeout(getDoc(doc(db, 'lead_backups', snapshotId)), 10000);
+    if (!metaSnap.exists()) return null;
+
+    const chunksSnap = await runWithTimeout(getDocs(collection(db, 'lead_backups', snapshotId, 'chunks')), 25000);
+    const chunkList: Array<{ index: number; data: string }> = [];
+    chunksSnap.forEach(cSnap => {
+      const cData = cSnap.data();
+      if (cData && typeof cData.data === 'string') {
+        chunkList.push({ index: Number(cData.index) || 0, data: cData.data });
+      }
+    });
+    if (chunkList.length === 0) return null;
+    chunkList.sort((a, b) => a.index - b.index);
+
+    const combined = chunkList.map(c => c.data).join('');
+    return JSON.parse(combined) as FullDatabaseBackup;
+  } catch (err: any) {
+    logFirestoreDiagnostic(err, OperationType.GET, `lead_backups/${snapshotId}`);
+    throw new Error(`Failed to load cloud backup snapshot "${snapshotId}": ${err?.message || err}`);
+  }
+}
+
 /**
- * Executes a full automatic backup of both the Database JSON (restorable) and the Master XLSX workbook to disk.
+ * Executes a full automatic backup of both the Database JSON (restorable) and the Master XLSX workbook to disk + Cloud Firestore.
  */
-export async function executeScheduledFullBackup(isMondayRun: boolean = false): Promise<{ dbPath: string; xlsxPath: string; summary: any }> {
+export async function executeScheduledFullBackup(
+  isMondayRun: boolean = false
+): Promise<{ dbPath: string; xlsxPath: string; summary: any; cloudSnapshot?: CloudBackupSnapshotMeta | null; cloudWarning?: string }> {
   const now = new Date();
   const dateStamp = now.toISOString().split('T')[0];
   const timeStamp = now.toTimeString().split(' ')[0].replace(/:/g, '-');
@@ -5173,12 +6015,24 @@ export async function executeScheduledFullBackup(isMondayRun: boolean = false): 
   const latestXlsxPath = path.join(SCHEDULED_BACKUP_DIR, 'latest_master_backup.xlsx');
   fs.writeFileSync(latestXlsxPath, xlsxBuffer);
 
+  // 3. Persist durable chunked snapshot to Cloud Firestore (`lead_backups`)
+  let cloudSnapshot: CloudBackupSnapshotMeta | null = null;
+  let cloudWarning: string | undefined;
+  try {
+    cloudSnapshot = await persistBackupSnapshotToCloud(fullDbBackup, isMondayRun);
+  } catch (cloudErr: any) {
+    cloudWarning = cloudErr?.message || 'Cloud snapshot backup deferred.';
+    console.warn(`[AutoBackup] Local backup succeeded, but cloud snapshot sync failed:`, cloudWarning);
+  }
+
   console.log(`[AutoBackup] Completed ${prefix}: Created DB backup (${fullDbBackup.summary.totalLeads} leads) and Master XLSX backup.`);
 
   return {
     dbPath: dbFilePath,
     xlsxPath: xlsxFilePath,
-    summary: fullDbBackup.summary
+    summary: fullDbBackup.summary,
+    cloudSnapshot,
+    cloudWarning
   };
 }
 
@@ -5188,6 +6042,16 @@ export async function executeScheduledFullBackup(isMondayRun: boolean = false): 
 export async function restoreDatabaseFromBackup(backupData: FullDatabaseBackup): Promise<{ success: boolean; restoredCounts: any; message: string }> {
   if (!backupData || !backupData.data || !Array.isArray(backupData.data.leads)) {
     throw new Error('Invalid backup file format: Missing candidates dataset.');
+  }
+
+  // Pre-Restore Safety Snapshot (local + cloud) so even an accidental restore is reversible!
+  try {
+    const preRestoreSnapshot = await createFullDatabaseBackup(`Pre-Restore Safety Snapshot (before restoring ${backupData.timestamp || 'backup'})`);
+    const safetyFile = path.join(SCHEDULED_BACKUP_DIR, `PRE_RESTORE_SAFETY_${Date.now()}.json`);
+    safeWriteJsonSync(safetyFile, preRestoreSnapshot);
+    await persistBackupSnapshotToCloud(preRestoreSnapshot, false).catch(() => {});
+  } catch (preErr) {
+    console.warn('[RestoreSystem] Pre-restore safety snapshot notice:', preErr);
   }
 
   const { leads, coordinators, jobs, updates, wallets, incentiveRules, metadata } = backupData.data;
@@ -5354,49 +6218,35 @@ export async function saveWhatsAppTemplate(template: WhatsAppTemplate): Promise<
   // Clear templates cache
   dbCache.templates = null;
 
-  if (checkCloudStatus()) {
-    try {
-      const docRef = doc(db, 'whatsapp_templates', template.id);
-      await runWithTimeout(setDoc(docRef, cleanForFirestore(template)), 8000);
-      console.log(`[Firestore Client] Saved WhatsApp template to cloud: ${template.title}`);
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to sync WhatsApp template to cloud:', err);
-      handleCloudError('Save WhatsApp Template', err);
-    }
+  if (db) {
+    await commitCloudWriteWithRetry(
+      () => setDoc(doc(db, 'whatsapp_templates', template.id), cleanForFirestore(template)),
+      OperationType.WRITE,
+      `whatsapp_templates/${template.id}`,
+      `saveWhatsAppTemplate(${template.id})`
+    );
+    console.log(`[Firestore Client] Saved WhatsApp template to cloud: ${template.title}`);
   }
 }
 
-// Delete a custom WhatsApp template
+// Delete a custom WhatsApp template (strict retryable cloud confirmation)
 export async function deleteWhatsAppTemplate(templateId: string): Promise<void> {
   await initializeDatabase();
 
-  // Read current custom templates
   let customTemplates = safeReadJsonSync<WhatsAppTemplate[]>(TEMPLATES_FILE, []);
-  
-  // Update local copy
   customTemplates = customTemplates.filter(t => t.id !== templateId);
   safeWriteJsonSync(TEMPLATES_FILE, customTemplates);
-
-  // Clear templates cache
   dbCache.templates = null;
 
-  if (checkCloudStatus()) {
-    try {
-      console.log(`[Firestore Client] Attempting to delete template from cloud: ${templateId}`);
-      const docRef = doc(db, 'whatsapp_templates', templateId);
-      await runWithTimeout(deleteDoc(docRef), 8000);
-      console.log(`[Firestore Client] Deleted WhatsApp template from cloud: ${templateId}`);
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to delete WhatsApp template from cloud:', err);
-      // If cloud deletion fails, we should NOT rely on the cloud version anymore for this specific template.
-      // But we can't easily prevent getDocs from returning it.
-      // For now, we will log and continue. The local file is already filtered.
-      handleCloudError('Delete WhatsApp Template', err);
-      // Force a re-fetch to be safe
-      dbCache.templates = null;
-    }
+  if (db) {
+    await commitCloudWriteWithRetry(
+      () => deleteDoc(doc(db, 'whatsapp_templates', templateId)),
+      OperationType.DELETE,
+      `whatsapp_templates/${templateId}`,
+      `deleteWhatsAppTemplate(${templateId})`
+    );
+    console.log(`[Firestore Client] Deleted WhatsApp template from cloud: ${templateId}`);
   }
-  // Force cache clear again after cloud operations
   dbCache.templates = null;
 }
 
@@ -5453,16 +6303,15 @@ export async function saveWhatsAppAutoReplySettings(settings: WhatsAppAutoReplyS
   // 2. Clear cache
   dbCache.auto_reply = null;
 
-  // 3. Persist to Firestore
+  // 3. Persist to Firestore (strict retryable confirmation)
   if (db) {
-    try {
-      const docRef = doc(db, 'settings', 'whatsapp_autoreply');
-      await runWithTimeout(setDoc(docRef, cleanForFirestore(settings)), 8000);
-      console.log(`[Firestore Client] Saved WhatsApp auto-reply settings to cloud.`);
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to sync auto-reply settings to cloud:', err);
-      handleCloudError('Save WhatsApp Auto Reply', err);
-    }
+    await commitCloudWriteWithRetry(
+      () => setDoc(doc(db, 'settings', 'whatsapp_autoreply'), cleanForFirestore(settings)),
+      OperationType.WRITE,
+      'settings/whatsapp_autoreply',
+      'saveWhatsAppAutoReplySettings'
+    );
+    console.log(`[Firestore Client] Saved WhatsApp auto-reply settings to cloud.`);
   }
 }
 
@@ -5744,32 +6593,35 @@ export async function saveMediaItems(items: MediaItem[]): Promise<void> {
   // Save to local file
   safeWriteJsonSync(MEDIA_FILE, items);
 
-  if (checkCloudStatus()) {
-    try {
-      const batch = writeBatch(db);
-      items.forEach(item => {
-        const docRef = doc(db, 'media_library', item.id);
-        batch.set(docRef, cleanForFirestore(item));
-      });
-      await runWithTimeout(batch.commit(), 8000);
-
-      // Delete any removed media documents from cloud
-      const snapshot = await runWithTimeout(getDocs(collection(db, 'media_library')), 8000);
-      const deleteBatch = writeBatch(db);
-      let hasDeletes = false;
-      snapshot.forEach(docSnap => {
-        if (!items.some(item => item.id === docSnap.id)) {
-          deleteBatch.delete(docSnap.ref);
-          hasDeletes = true;
+  if (db) {
+    await commitCloudWriteWithRetry(
+      async () => {
+        if (items.length > 0) {
+          const batch = writeBatch(db);
+          items.forEach(item => {
+            const docRef = doc(db, 'media_library', item.id);
+            batch.set(docRef, cleanForFirestore(item));
+          });
+          await batch.commit();
         }
-      });
-      if (hasDeletes) {
-        await runWithTimeout(deleteBatch.commit(), 8000);
-      }
-    } catch (err: any) {
-      console.error('[Firestore Client] Failed to sync media library to cloud:', err);
-      handleCloudError(err);
-    }
+
+        const snapshot = await getDocs(collection(db, 'media_library'));
+        const deleteBatch = writeBatch(db);
+        let hasDeletes = false;
+        snapshot.forEach(docSnap => {
+          if (!items.some(item => item.id === docSnap.id)) {
+            deleteBatch.delete(docSnap.ref);
+            hasDeletes = true;
+          }
+        });
+        if (hasDeletes) {
+          await deleteBatch.commit();
+        }
+      },
+      OperationType.WRITE,
+      'media_library',
+      'saveMediaItems'
+    );
   }
 }
 

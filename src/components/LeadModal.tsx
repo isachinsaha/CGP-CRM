@@ -1,14 +1,22 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
+import { Lead, LeadStage, FitScore, Coordinator, LeadAuditEntry } from '../types.ts';
 import { 
   X, Info, Sparkles, CheckCircle2, RefreshCw, AlertTriangle, 
   Calendar, Clipboard, Check, Star, ListTodo, History, 
-  Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Plus, PhoneCall, PhoneOff, Search, Copy, FileText, Ban, ShieldAlert
+  Send, Trash2, ArrowRight, CheckSquare, Square, MessageSquare, ExternalLink, Plus, PhoneCall, PhoneOff, Search, Copy, FileText, Ban, ShieldAlert, ShieldCheck, Archive
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getCountryFlagUrl, formatCandidateName, isDefaultExperience, extractExperienceFromRemarks, getEffectiveExperience, getEffectiveIntake } from '../utils';
 import { SearchableSelect } from './SearchableSelect.tsx';
 import LeadWhatsAppChat from './LeadWhatsAppChat.tsx';
+import {
+  LeadDraft,
+  loadLeadDraft,
+  saveLeadDraft,
+  clearLeadDraft,
+  enqueueOutboxSave,
+  isRetryableHttpStatus
+} from '../utils/syncOutbox.ts';
 
 interface LeadModalProps {
   lead: Lead;
@@ -71,17 +79,26 @@ export default function LeadModal({
   // Skeleton loading state for fetching historical remarks & timeline data
   const [isTimelineLoading, setIsTimelineLoading] = useState(false);
   const dirtyFieldsRef = useRef<Set<string>>(new Set());
+  const [pendingDraft, setPendingDraft] = useState<LeadDraft | null>(null);
+  const [draftSavedNotice, setDraftSavedNotice] = useState(false);
+  const [cloudAuditLogs, setCloudAuditLogs] = useState<LeadAuditEntry[]>([]);
+  const [showAuditLedger, setShowAuditLedger] = useState(false);
+  const [leadArchives, setLeadArchives] = useState<any[]>([]);
+  const [showArchivesPanel, setShowArchivesPanel] = useState(false);
 
-  // Fetch fresh activity timeline, historical remarks, and full fields from server
+  // Fetch fresh activity timeline, historical remarks, audit logs, and archives directly from server/cloud
   const fetchTimelineData = async (showSkeleton = true) => {
     const targetId = lead?.id || initialLead.id;
     if (!targetId) return;
     if (showSkeleton) setIsTimelineLoading(true);
     const start = Date.now();
     try {
-      const res = await fetch(`/api/leads/${encodeURIComponent(targetId)}`);
-      if (res.ok) {
-        const freshLead = await res.json();
+      const [leadRes, auditRes] = await Promise.all([
+        fetch(`/api/leads/${encodeURIComponent(targetId)}?fresh=1`, { cache: 'no-store' }),
+        fetch(`/api/leads/${encodeURIComponent(targetId)}/audit-logs`, { cache: 'no-store' }).catch(() => null)
+      ]);
+      if (leadRes.ok) {
+        const freshLead = await leadRes.json();
         if (freshLead) {
           setLead(prev => ({
             ...prev,
@@ -101,6 +118,7 @@ export default function LeadModal({
                 : (String(freshLead.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry' ? '' : (freshLead.adminRemarks || '')),
               notes: dirty.has('notes') ? prev.notes : (freshLead.notes || ''),
               stage: dirty.has('stage') ? prev.stage : (freshLead.stage || prev.stage),
+              assignedTo: dirty.has('assignedTo') ? prev.assignedTo : (freshLead.assignedTo ?? prev.assignedTo),
               callConnected: dirty.has('callConnected')
                 ? prev.callConnected
                 : (freshLead.callConnected || (freshLead.remarks1 ? 'connected' : prev.callConnected)),
@@ -108,6 +126,22 @@ export default function LeadModal({
               deletedDocuments: (freshLead as any).deletedDocuments ?? prev.deletedDocuments
             };
           });
+          if (freshLead.hasArchivedHistory || activeLeftTab === 'timeline') {
+            fetch(`/api/leads/${encodeURIComponent(targetId)}/archives`, { cache: 'no-store' })
+              .then(r => (r.ok ? r.json() : null))
+              .then(arcData => {
+                if (arcData && Array.isArray(arcData.chunks)) {
+                  setLeadArchives(arcData.chunks);
+                }
+              })
+              .catch(() => {});
+          }
+        }
+      }
+      if (auditRes && auditRes.ok) {
+        const auditData = await auditRes.json().catch(() => null);
+        if (auditData && Array.isArray(auditData.logs)) {
+          setCloudAuditLogs(auditData.logs);
         }
       }
     } catch (err) {
@@ -198,10 +232,10 @@ export default function LeadModal({
         }
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(err.error || 'Failed to block candidate');
+        setSaveError(err.error || 'Failed to block candidate.');
       }
     } catch (e: any) {
-      alert(e.message || 'Error blocking candidate');
+      setSaveError(e?.message || 'Error blocking candidate.');
     } finally {
       setIsBlocking(false);
     }
@@ -230,10 +264,10 @@ export default function LeadModal({
         }
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(err.error || 'Failed to unblock candidate');
+        setSaveError(err.error || 'Failed to unblock candidate.');
       }
     } catch (e: any) {
-      alert(e.message || 'Error unblocking candidate');
+      setSaveError(e?.message || 'Error unblocking candidate.');
     } finally {
       setIsBlocking(false);
     }
@@ -299,6 +333,7 @@ export default function LeadModal({
     const existingMatch = allExistingTags.find(t => t.toLowerCase() === lowerVal);
     const finalTag = existingMatch || val; // Reuse existing casing if matched, otherwise keep as typed
 
+    dirtyFieldsRef.current.add('tags');
     setTags([...tags, finalTag]);
     setTagInputVal('');
   };
@@ -375,6 +410,7 @@ export default function LeadModal({
 
   const [savingForm, setSavingForm] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [passportUploading, setPassportUploading] = useState(false);
   const [resumeUploading, setResumeUploading] = useState(false);
   const [passportError, setPassportError] = useState<string | null>(null);
@@ -401,12 +437,19 @@ export default function LeadModal({
   const isSaveButtonDisabled = !remarksChanged && formFields.callConnected === 'not_connected' && activeTasksCount === 0;
   const isFirstMountOrChangeRef = useRef<boolean>(true);
 
-  // Sync state on lead changes
+  // Sync state on lead changes & check for any recoverable unsaved local draft
   useEffect(() => {
     dirtyFieldsRef.current = new Set();
+    setSaveError(null);
+    setSaveSuccess(false);
+    setDraftSavedNotice(false);
+    setCloudAuditLogs([]);
+    setLeadArchives([]);
+    setShowAuditLedger(false);
+    setShowArchivesPanel(false);
     setLead(initialLead);
     setTags(initialLead.tags || []);
-    setFormFields({
+    const baseFields = {
       name: initialLead.name,
       phone: initialLead.phone,
       alternateNo: initialLead.alternateNo || '',
@@ -455,7 +498,27 @@ export default function LeadModal({
       reminderEnabled: !!initialLead.reminderEnabled,
       autoReplySent: initialLead.autoReplySent === true,
       intake: getEffectiveIntake(initialLead)
-    });
+    };
+    setFormFields(baseFields);
+
+    const existingDraft = loadLeadDraft(initialLead.id);
+    if (existingDraft && Array.isArray(existingDraft.dirtyFields) && existingDraft.dirtyFields.length > 0) {
+      const hasDifference = existingDraft.dirtyFields.some((fieldKey) => {
+        if (fieldKey === 'tags') {
+          return JSON.stringify(existingDraft.tags || []) !== JSON.stringify(initialLead.tags || []);
+        }
+        return String(existingDraft.fields?.[fieldKey] ?? '') !== String((baseFields as any)[fieldKey] ?? '');
+      });
+      if (hasDifference) {
+        setPendingDraft(existingDraft);
+      } else {
+        clearLeadDraft(initialLead.id);
+        setPendingDraft(null);
+      }
+    } else {
+      setPendingDraft(null);
+    }
+
     isFirstMountOrChangeRef.current = true;
   }, [initialLead.id]);
 
@@ -491,8 +554,28 @@ export default function LeadModal({
     return list;
   }, [lead.position, lead.experience, lead.qualification, lead.requirements, lead.tags]);
 
-  // Background auto-save has been disabled to prevent continuous re-rendering and the modal re-opening bug.
-  // Changes are now explicitly committed using the Save buttons.
+  // Zero-Data-Loss Local Draft Auto-Save (debounced ~300ms whenever fields are dirty; only saved to cloud on explicit Submit)
+  useEffect(() => {
+    if (isFirstMountOrChangeRef.current) {
+      isFirstMountOrChangeRef.current = false;
+      return;
+    }
+    if (dirtyFieldsRef.current.size === 0) return;
+    const targetLeadId = lead?.id || initialLead.id;
+    if (!targetLeadId) return;
+    const timer = setTimeout(() => {
+      saveLeadDraft({
+        leadId: targetLeadId,
+        leadName: formFields.name || lead?.name || 'Candidate',
+        fields: formFields,
+        tags,
+        dirtyFields: Array.from(dirtyFieldsRef.current),
+        updatedAt: new Date().toISOString()
+      });
+      setDraftSavedNotice(true);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [formFields, tags, lead?.id, initialLead.id]);
 
   const handleFieldChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -565,6 +648,7 @@ export default function LeadModal({
 
           const data = await response.json();
           if (response.ok && data.success) {
+            dirtyFieldsRef.current.add(type === 'passport' ? 'passportCopyUrl' : 'resumeUrl');
             setFormFields(prev => ({
               ...prev,
               [type === 'passport' ? 'passportCopyUrl' : 'resumeUrl']: data.url,
@@ -641,6 +725,7 @@ export default function LeadModal({
       deletedBy: userRole === 'admin' ? 'Administrator' : `Agent (${currentAgentId})`
     };
 
+    dirtyFieldsRef.current.add('deletedDocuments');
     setFormFields(prev => ({
       ...prev,
       [type === 'passport' ? 'passportCopyUrl' : 'resumeUrl']: '',
@@ -655,6 +740,7 @@ export default function LeadModal({
     const backupDoc = backups.find((d: any) => d.id === backupId);
     if (!backupDoc) return;
 
+    dirtyFieldsRef.current.add('deletedDocuments');
     setFormFields(prev => {
       const filteredBackups = ((prev as any).deletedDocuments || []).filter((d: any) => d.id !== backupId);
       return {
@@ -669,6 +755,7 @@ export default function LeadModal({
 
   // Permanently purges a backup from the candidate's custom Recycle Bin
   const purgeBackupSecurely = (backupId: string) => {
+    dirtyFieldsRef.current.add('deletedDocuments');
     setFormFields(prev => ({
       ...prev,
       deletedDocuments: ((prev as any).deletedDocuments || []).filter((d: any) => d.id !== backupId)
@@ -706,13 +793,14 @@ export default function LeadModal({
       const activeTasks = customTasks || lead.tasks || [];
       const remainingTasks = activeTasks.filter(t => !t.completed).length;
       if (remainingTasks === 0) {
-        alert("Action Required: When the call is marked as 'Not Connected', you must schedule a callback task/reminder before saving.");
+        setSaveError("Action Required: When the call is marked as 'Not Connected', you must schedule a callback task/reminder before saving.");
         return;
       }
     }
 
     setSavingForm(true);
     setSaveSuccess(false);
+    setSaveError(null);
 
     try {
       const actorRole = userRole;
@@ -768,49 +856,85 @@ export default function LeadModal({
         payload.timeline = customTimeline;
       }
 
-      const res = await fetch(`/api/leads/${lead.id}`, {
-        method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': actorRole,
-          'x-agent-id': actorId
-        },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        setLead(data);
-        setTags(data.tags || []);
-        dirtyFieldsRef.current.clear();
-        setFormFields(prev => ({
-          ...prev,
-          name: data.name ?? prev.name,
-          phone: data.phone ?? prev.phone,
-          alternateNo: data.alternateNo ?? '',
-          stage: data.stage ?? prev.stage,
-          callConnected: data.callConnected || prev.callConnected,
-          remarks1: data.remarks1 || '',
-          remarks2: data.remarks2 || '',
-          remarks3: data.remarks3 || '',
-          adminRemarks:
-            String(data.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry'
-              ? ''
-              : data.adminRemarks || '',
-          notes: data.notes || '',
-          experience: data.experience ?? prev.experience,
-          assignDate: data.assignDate ?? prev.assignDate,
-          serialNo: data.serialNo ?? prev.serialNo,
-          intake: getEffectiveIntake(data)
-        }));
-        onLeadUpdated(data);
-        setSaveSuccess(true);
-        setTimeout(() => setSaveSuccess(false), 2500);
-      } else {
-        alert(data.error || 'Failed to update lead details. Please try again.');
+      try {
+        const res = await fetch(`/api/leads/${lead.id}`, {
+          method: 'PUT',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-user-role': actorRole,
+            'x-agent-id': actorId,
+            'x-source-view': 'lead_modal'
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          clearLeadDraft(lead.id);
+          setPendingDraft(null);
+          setDraftSavedNotice(false);
+          setLead(data);
+          setTags(data.tags || []);
+          dirtyFieldsRef.current.clear();
+          setFormFields(prev => ({
+            ...prev,
+            name: data.name ?? prev.name,
+            phone: data.phone ?? prev.phone,
+            alternateNo: data.alternateNo ?? '',
+            stage: data.stage ?? prev.stage,
+            callConnected: data.callConnected || prev.callConnected,
+            remarks1: data.remarks1 || '',
+            remarks2: data.remarks2 || '',
+            remarks3: data.remarks3 || '',
+            adminRemarks:
+              String(data.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry'
+                ? ''
+                : data.adminRemarks || '',
+            notes: data.notes || '',
+            experience: data.experience ?? prev.experience,
+            assignDate: data.assignDate ?? prev.assignDate,
+            serialNo: data.serialNo ?? prev.serialNo,
+            intake: getEffectiveIntake(data)
+          }));
+          onLeadUpdated(data);
+          setSaveSuccess(true);
+          setSaveError(null);
+          // Refresh immutable cloud audit ledger
+          fetch(`/api/leads/${encodeURIComponent(lead.id)}/audit-logs`, { cache: 'no-store' })
+            .then(r => (r.ok ? r.json() : null))
+            .then(a => { if (a?.logs) setCloudAuditLogs(a.logs); })
+            .catch(() => {});
+          setTimeout(() => setSaveSuccess(false), 2500);
+        } else {
+          const errMsg = data.error || `Server error (HTTP ${res.status})`;
+          if (isRetryableHttpStatus(res.status)) {
+            enqueueOutboxSave({
+              leadId: lead.id,
+              leadName: formFields.name || lead.name,
+              phone: formFields.phone || lead.phone,
+              payload,
+              headers: { role: actorRole, agentId: actorId, sourceView: 'lead_modal' },
+              lastError: errMsg
+            });
+            setSaveError(`Cloud unavailable (${errMsg}). Your edits are safely queued in Pending Cloud Sync and will auto-retry.`);
+          } else {
+            setSaveError(errMsg);
+          }
+        }
+      } catch (networkErr: any) {
+        const errMsg = networkErr?.message || 'Network offline';
+        enqueueOutboxSave({
+          leadId: lead.id,
+          leadName: formFields.name || lead.name,
+          phone: formFields.phone || lead.phone,
+          payload,
+          headers: { role: actorRole, agentId: actorId, sourceView: 'lead_modal' },
+          lastError: errMsg
+        });
+        setSaveError(`Offline / connection dropped (${errMsg}). Your edits are safely queued in Pending Cloud Sync and will auto-retry.`);
       }
     } catch (err: any) {
       console.error('Failed to update lead fields', err);
-      alert(err?.message || 'Network error while saving lead. Please try again.');
+      setSaveError(err?.message || 'Unexpected error while preparing lead update. Your edits are still in the box.');
     } finally {
       setSavingForm(false);
     }
@@ -863,24 +987,29 @@ export default function LeadModal({
       }
     ];
 
+    setSaveError(null);
     try {
       const res = await fetch(`/api/leads/${lead.id}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
           'x-user-role': userRole,
-          'x-agent-id': currentAgentId
+          'x-agent-id': currentAgentId,
+          'x-source-view': 'lead_modal'
         },
         body: JSON.stringify({ tasks: updatedTasks, timeline: updatedTimeline })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setLead(data);
         setNewTaskTitle('');
         onLeadUpdated(data);
+      } else {
+        setSaveError(data.error || 'Failed to save new task to cloud database.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save new task', err);
+      setSaveError(err?.message || 'Network error while saving new task.');
     }
   };
 
@@ -908,26 +1037,31 @@ export default function LeadModal({
       }
     ];
 
+    setSaveError(null);
     try {
       const res = await fetch(`/api/leads/${lead.id}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
           'x-user-role': userRole,
-          'x-agent-id': currentAgentId
+          'x-agent-id': currentAgentId,
+          'x-source-view': 'lead_modal'
         },
         body: JSON.stringify({ 
           tasks: updatedTasks, 
           timeline: updatedTimeline
         })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setLead(data);
         onLeadUpdated(data);
+      } else {
+        setSaveError(data.error || 'Failed to update task status in cloud database.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to toggle task status', err);
+      setSaveError(err?.message || 'Network error while updating task status.');
     }
   };
 
@@ -948,26 +1082,31 @@ export default function LeadModal({
       }
     ];
 
+    setSaveError(null);
     try {
       const res = await fetch(`/api/leads/${lead.id}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
           'x-user-role': userRole,
-          'x-agent-id': currentAgentId
+          'x-agent-id': currentAgentId,
+          'x-source-view': 'lead_modal'
         },
         body: JSON.stringify({ 
           tasks: updatedTasks, 
           timeline: updatedTimeline
         })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setLead(data);
         onLeadUpdated(data);
+      } else {
+        setSaveError(data.error || 'Failed to delete task from cloud database.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to remove task', err);
+      setSaveError(err?.message || 'Network error while deleting task.');
     }
   };
 
@@ -1101,6 +1240,7 @@ export default function LeadModal({
               <button
                 type="button"
                 onClick={() => {
+                  dirtyFieldsRef.current.add('callConnected');
                   const nextVal = formFields.callConnected === 'connected' ? 'not_connected' : 'connected';
                   setFormFields(prev => ({ ...prev, callConnected: nextVal }));
                 }}
@@ -1224,6 +1364,64 @@ export default function LeadModal({
               className="text-xs font-black uppercase tracking-wider text-red-700 dark:text-red-300 bg-red-100 hover:bg-red-200 dark:bg-red-950/80 dark:hover:bg-red-900 border border-red-300 dark:border-red-800 px-3 py-1 rounded-lg transition shrink-0 cursor-pointer"
             >
               Unblock Candidate
+            </button>
+          </div>
+        )}
+
+        {/* Draft Recovered Banner */}
+        {pendingDraft && (
+          <div className="bg-amber-950/90 border-b border-amber-500/60 px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-amber-100 shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0 text-xs font-bold">
+              <History className="h-4 w-4 text-amber-400 shrink-0" />
+              <span>
+                Unsaved Local Draft Recovered ({pendingDraft.dirtyFields.length} field{pendingDraft.dirtyFields.length === 1 ? '' : 's'} edited{' '}
+                {pendingDraft.updatedAt ? `at ${new Date(pendingDraft.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'earlier'}).
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  pendingDraft.dirtyFields.forEach(f => dirtyFieldsRef.current.add(f));
+                  setFormFields(prev => ({ ...prev, ...pendingDraft.fields }));
+                  if (pendingDraft.dirtyFields.includes('tags') && Array.isArray(pendingDraft.tags)) {
+                    setTags(pendingDraft.tags);
+                  }
+                  setPendingDraft(null);
+                  setDraftSavedNotice(true);
+                }}
+                className="text-[11px] font-black uppercase tracking-wider text-slate-950 bg-amber-400 hover:bg-amber-300 px-3 py-1 rounded-lg transition cursor-pointer"
+              >
+                Apply Draft
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  clearLeadDraft(lead.id);
+                  setPendingDraft(null);
+                  setDraftSavedNotice(false);
+                }}
+                className="text-[11px] font-black uppercase tracking-wider text-amber-200 hover:text-white bg-amber-900/70 px-2.5 py-1 rounded-lg transition cursor-pointer"
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Prominent Save Error Banner (visible across all tabs & never suppressed by iframe) */}
+        {saveError && (
+          <div className="bg-rose-950/90 border-b border-rose-500/60 px-6 py-2.5 flex items-center justify-between gap-3 text-rose-100 shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0 text-xs font-bold">
+              <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
+              <span>{saveError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSaveError(null)}
+              className="text-[11px] font-black uppercase tracking-wider text-rose-200 hover:text-white bg-rose-900/70 px-2.5 py-1 rounded-lg transition shrink-0 cursor-pointer"
+            >
+              Dismiss
             </button>
           </div>
         )}
@@ -1428,6 +1626,13 @@ export default function LeadModal({
                         </div>
                       </div>
 
+                      {saveError && (
+                        <div className="p-3 bg-rose-950/80 border border-rose-500/60 rounded-xl text-xs font-bold text-rose-100 flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
+                          <span>{saveError}</span>
+                        </div>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => {
@@ -1468,6 +1673,7 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => {
+                          dirtyFieldsRef.current.add('docPassportCopy');
                           setFormFields(prev => ({ ...prev, docPassportCopy: !prev.docPassportCopy }));
                         }}
                         className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
@@ -1497,6 +1703,7 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => {
+                          dirtyFieldsRef.current.add('docResume');
                           setFormFields(prev => ({ ...prev, docResume: !prev.docResume }));
                         }}
                         className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
@@ -1526,6 +1733,7 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => {
+                          dirtyFieldsRef.current.add('docOfficeVisited');
                           setFormFields(prev => ({ ...prev, docOfficeVisited: !prev.docOfficeVisited }));
                         }}
                         className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
@@ -1555,6 +1763,7 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => {
+                          dirtyFieldsRef.current.add('docOthers');
                           setFormFields(prev => ({ ...prev, docOthers: !prev.docOthers }));
                         }}
                         className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
@@ -1584,6 +1793,7 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => {
+                          dirtyFieldsRef.current.add('docInterviewAttended');
                           setFormFields(prev => ({ ...prev, docInterviewAttended: !prev.docInterviewAttended }));
                         }}
                         className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
@@ -1613,6 +1823,7 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={() => {
+                          dirtyFieldsRef.current.add('docEcrPassport');
                           setFormFields(prev => ({ ...prev, docEcrPassport: !prev.docEcrPassport }));
                         }}
                         className={`flex items-center gap-2.5 p-2 px-3 rounded-xl transition-all text-left cursor-pointer select-none border ${
@@ -1923,24 +2134,31 @@ export default function LeadModal({
                       <button
                         type="button"
                         onClick={async () => {
+                          setSaveError(null);
+                          const notesCleared = String(lead.notes || '').trim() !== '' && formFields.notes.trim() === '' && dirtyFieldsRef.current.has('notes');
+                          const notesPayload = {
+                            notes: formFields.notes,
+                            ...(notesCleared ? { clearedRemarks: ['notes'], allowClearRemarks: true } : {})
+                          };
                           try {
-                            const notesCleared = String(lead.notes || '').trim() !== '' && formFields.notes.trim() === '' && dirtyFieldsRef.current.has('notes');
                             const res = await fetch(`/api/leads/${lead.id}`, {
                               method: 'PUT',
                               headers: { 
                                 'Content-Type': 'application/json',
                                 'x-user-role': userRole,
-                                'x-agent-id': currentAgentId
+                                'x-agent-id': currentAgentId,
+                                'x-source-view': 'lead_modal_notes'
                               },
-                              body: JSON.stringify({
-                                notes: formFields.notes,
-                                ...(notesCleared ? { clearedRemarks: ['notes'], allowClearRemarks: true } : {})
-                              })
+                              body: JSON.stringify(notesPayload)
                             });
-                            const data = await res.json();
+                            const data = await res.json().catch(() => ({}));
                             if (res.ok) {
                               setLead(data);
                               dirtyFieldsRef.current.delete('notes');
+                              if (dirtyFieldsRef.current.size === 0) {
+                                clearLeadDraft(lead.id);
+                                setDraftSavedNotice(false);
+                              }
                               setFormFields(prev => ({
                                 ...prev,
                                 notes: data.notes || '',
@@ -1959,9 +2177,34 @@ export default function LeadModal({
                                   btn.classList.remove('bg-emerald-600');
                                 }, 1500);
                               }
+                            } else {
+                              const errMsg = data.error || `HTTP ${res.status}`;
+                              if (isRetryableHttpStatus(res.status)) {
+                                enqueueOutboxSave({
+                                  leadId: lead.id,
+                                  leadName: formFields.name || lead.name,
+                                  phone: formFields.phone || lead.phone,
+                                  payload: notesPayload,
+                                  headers: { role: userRole, agentId: currentAgentId, sourceView: 'lead_modal_notes' },
+                                  lastError: errMsg
+                                });
+                                setSaveError(`Cloud busy (${errMsg}). Notes queued in Pending Cloud Sync and will auto-retry.`);
+                              } else {
+                                setSaveError(errMsg);
+                              }
                             }
-                          } catch (err) {
+                          } catch (err: any) {
                             console.error(err);
+                            const errMsg = err?.message || 'Network error while saving notes.';
+                            enqueueOutboxSave({
+                              leadId: lead.id,
+                              leadName: formFields.name || lead.name,
+                              phone: formFields.phone || lead.phone,
+                              payload: notesPayload,
+                              headers: { role: userRole, agentId: currentAgentId, sourceView: 'lead_modal_notes' },
+                              lastError: errMsg
+                            });
+                            setSaveError(`Offline (${errMsg}). Notes queued in Pending Cloud Sync and will auto-retry.`);
                           }
                         }}
                         id="quick-save-notes-btn"
@@ -2068,7 +2311,10 @@ export default function LeadModal({
                       <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Gender</label>
                       <SearchableSelect
                         value={formFields.gender}
-                        onChange={(val) => setFormFields(prev => ({ ...prev, gender: val }))}
+                        onChange={(val) => {
+                          dirtyFieldsRef.current.add('gender');
+                          setFormFields(prev => ({ ...prev, gender: val }));
+                        }}
                         options={[
                           { value: 'MALE', label: '👱‍♂️ MALE' },
                           { value: 'M', label: '👨 M' },
@@ -2110,7 +2356,10 @@ export default function LeadModal({
                       <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Target Country</label>
                       <SearchableSelect
                         value={formFields.country}
-                        onChange={(val) => setFormFields(prev => ({ ...prev, country: val }))}
+                        onChange={(val) => {
+                          dirtyFieldsRef.current.add('country');
+                          setFormFields(prev => ({ ...prev, country: val }));
+                        }}
                         options={[
                           { value: '', label: '✈️ SELECT COUNTRY' },
                           ...(propCountries && propCountries.length > 0 ? propCountries : ['Kuwait', 'Dubai', 'Qatar', 'Germany', 'Japan', 'Albania']).map(c => ({
@@ -2128,6 +2377,8 @@ export default function LeadModal({
                         value={formFields.assignedTo}
                         onChange={(val) => {
                           const hasRealCoordinator = val && val.trim() !== '' && val.toLowerCase() !== 'unassigned';
+                          dirtyFieldsRef.current.add('assignedTo');
+                          if (hasRealCoordinator) dirtyFieldsRef.current.add('intake');
                           setFormFields(prev => ({
                             ...prev,
                             assignedTo: val,
@@ -2171,7 +2422,10 @@ export default function LeadModal({
                       <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Target Position / Line</label>
                       <SearchableSelect
                         value={formFields.position}
-                        onChange={(val) => setFormFields(prev => ({ ...prev, position: val }))}
+                        onChange={(val) => {
+                          dirtyFieldsRef.current.add('position');
+                          setFormFields(prev => ({ ...prev, position: val }));
+                        }}
                         options={[
                           { value: '', label: '💼 SELECT POSITION' },
                           ...(propPositions && propPositions.length > 0 ? propPositions : ['Waiter', 'Waitress', 'Chef', 'Nurse', 'Cleaner', 'Driver', 'Electrician']).map(p => ({
@@ -2213,7 +2467,10 @@ export default function LeadModal({
                       <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Lead Source</label>
                       <SearchableSelect
                         value={formFields.source}
-                        onChange={(val) => setFormFields(prev => ({ ...prev, source: val }))}
+                        onChange={(val) => {
+                          dirtyFieldsRef.current.add('source');
+                          setFormFields(prev => ({ ...prev, source: val }));
+                        }}
                         options={[
                           { value: '', label: '📣 UNKNOWN' },
                           { value: 'Ads', label: '📣 ADS' },
@@ -2256,6 +2513,7 @@ export default function LeadModal({
                                 if (!projects.includes(trimmed)) {
                                   setProjects([...projects, trimmed]);
                                 }
+                                dirtyFieldsRef.current.add('project');
                                 setFormFields(prev => ({ ...prev, project: trimmed }));
                                 setNewProjectName('');
                                 setIsAddingProject(false);
@@ -2269,7 +2527,10 @@ export default function LeadModal({
                       ) : (
                         <SearchableSelect
                           value={formFields.project}
-                          onChange={(val) => setFormFields(prev => ({ ...prev, project: val }))}
+                          onChange={(val) => {
+                            dirtyFieldsRef.current.add('project');
+                            setFormFields(prev => ({ ...prev, project: val }));
+                          }}
                           options={[
                             { value: '', label: '📁 UNKNOWN / GENERAL' },
                             ...projects.map(proj => ({
@@ -2314,7 +2575,10 @@ export default function LeadModal({
                               {tag}
                               <button
                                 type="button"
-                                onClick={() => setTags(tags.filter(t => t !== tag))}
+                                onClick={() => {
+                                  dirtyFieldsRef.current.add('tags');
+                                  setTags(tags.filter(t => t !== tag));
+                                }}
                                 className="text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer text-[12px] font-bold leading-none inline-block ml-1"
                               >
                                 ×
@@ -2622,6 +2886,92 @@ export default function LeadModal({
                         </button>
                       )}
                     </div>
+
+                    {/* Immutable Cloud Audit Trail & Archived History Badges */}
+                    <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setShowAuditLedger(prev => !prev)}
+                        className={`text-[10px] font-black px-2.5 py-1 rounded-lg border flex items-center gap-1.5 transition cursor-pointer ${
+                          showAuditLedger
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-emerald-950/50 text-emerald-300 border-emerald-800/70 hover:bg-emerald-900/50'
+                        }`}
+                      >
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        <span>Cloud Audit Ledger ({cloudAuditLogs.length})</span>
+                      </button>
+
+                      {(leadArchives.length > 0 || lead.hasArchivedHistory) && (
+                        <button
+                          type="button"
+                          onClick={() => setShowArchivesPanel(prev => !prev)}
+                          className={`text-[10px] font-black px-2.5 py-1 rounded-lg border flex items-center gap-1.5 transition cursor-pointer ${
+                            showArchivesPanel
+                              ? 'bg-amber-600 text-white border-amber-600'
+                              : 'bg-amber-950/50 text-amber-300 border-amber-800/70 hover:bg-amber-900/50'
+                          }`}
+                        >
+                          <Archive className="h-3.5 w-3.5" />
+                          <span>Archived History ({leadArchives.length || lead.archivedChunksCount || 1})</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {showAuditLedger && (
+                      <div className="p-3 rounded-xl bg-slate-950/80 border border-emerald-800/50 space-y-2 max-h-56 overflow-y-auto text-left">
+                        <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-emerald-400">
+                          <span>Append-Only Firestore Field Audit Log</span>
+                          <span>{cloudAuditLogs.length} Records</span>
+                        </div>
+                        {cloudAuditLogs.length === 0 ? (
+                          <p className="text-[11px] text-slate-400">No field-level audit mutations logged yet for this lead.</p>
+                        ) : (
+                          cloudAuditLogs.map((entry) => (
+                            <div key={entry.id} className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] space-y-1">
+                              <div className="flex items-center justify-between gap-2 text-[10px] text-slate-400 font-mono">
+                                <span className="font-black text-emerald-300 uppercase">{entry.field}</span>
+                                <span>{entry.actor} • {entry.sourceView}</span>
+                              </div>
+                              <div className="text-slate-300 break-words">
+                                <span className="text-rose-300 line-through mr-1.5">{entry.previousValue || '(empty)'}</span>
+                                <span className="text-slate-500 mr-1.5">→</span>
+                                <span className="text-emerald-300 font-bold">{entry.newValue || '(cleared)'}</span>
+                              </div>
+                              <div className="text-[9px] text-slate-500 font-mono">
+                                {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ''}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+
+                    {showArchivesPanel && (
+                      <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-800/50 space-y-2 max-h-56 overflow-y-auto text-left">
+                        <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-amber-400">
+                          <span>Archived Chat & System Logs (Size-Guard Overflow)</span>
+                          <span>{leadArchives.length} Chunks</span>
+                        </div>
+                        {leadArchives.length === 0 ? (
+                          <p className="text-[11px] text-slate-400">Loading archived history chunks...</p>
+                        ) : (
+                          leadArchives.map((chunk: any) => (
+                            <div key={chunk.id} className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] space-y-1">
+                              <div className="flex items-center justify-between text-[10px] text-amber-300 font-mono">
+                                <span>Archive {chunk.id}</span>
+                                <span>{(chunk.messages?.length || 0)} msgs • {(chunk.timeline?.length || 0)} logs</span>
+                              </div>
+                              {Array.isArray(chunk.messages) && chunk.messages.slice(-5).map((m: any, idx: number) => (
+                                <div key={m.id || idx} className="text-[10px] text-slate-300 truncate">
+                                  <strong className="text-slate-400">{m.sender === 'lead' ? 'Candidate' : 'CGP'}:</strong> {m.text || m.mediaName || '(media)'}
+                                </div>
+                              ))}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Activity Timeline Content or Skeleton Loader */}
@@ -2740,10 +3090,12 @@ export default function LeadModal({
                                                 headers: {
                                                   'Content-Type': 'application/json',
                                                   'x-user-role': userRole,
-                                                  'x-agent-id': currentAgentId
+                                                  'x-agent-id': currentAgentId,
+                                                  'x-source-view': 'lead_modal_restore'
                                                 },
                                                 body: JSON.stringify({ [restoreAction.field]: restoreAction.content })
                                               });
+                                              setSaveError(null);
                                               if (res.ok) {
                                                 const freshLead = await res.json();
                                                 setLead(freshLead);
@@ -2753,13 +3105,37 @@ export default function LeadModal({
                                                   [restoreAction.field]: (freshLead as any)[restoreAction.field] || restoreAction.content
                                                 }));
                                                 onLeadUpdated(freshLead);
-                                                alert('Remark restored successfully!');
+                                                setSaveSuccess(true);
+                                                setTimeout(() => setSaveSuccess(false), 2500);
                                               } else {
-                                                alert('Failed to save restored remark.');
+                                                const errJson = await res.json().catch(() => ({}));
+                                                const errMsg = errJson.error || `HTTP ${res.status}`;
+                                                if (isRetryableHttpStatus(res.status)) {
+                                                  enqueueOutboxSave({
+                                                    leadId: lead.id,
+                                                    leadName: formFields.name || lead.name,
+                                                    phone: formFields.phone || lead.phone,
+                                                    payload: { [restoreAction.field]: restoreAction.content },
+                                                    headers: { role: userRole, agentId: currentAgentId, sourceView: 'lead_modal_restore' },
+                                                    lastError: errMsg
+                                                  });
+                                                  setSaveError(`Cloud busy (${errMsg}). Restored remark queued in Pending Cloud Sync.`);
+                                                } else {
+                                                  setSaveError(errMsg);
+                                                }
                                               }
-                                            } catch (err) {
+                                            } catch (err: any) {
                                               console.error('Error restoring remark:', err);
-                                              alert('Failed to restore remark.');
+                                              const errMsg = err?.message || 'Failed to restore remark.';
+                                              enqueueOutboxSave({
+                                                leadId: lead.id,
+                                                leadName: formFields.name || lead.name,
+                                                phone: formFields.phone || lead.phone,
+                                                payload: { [restoreAction.field]: restoreAction.content },
+                                                headers: { role: userRole, agentId: currentAgentId, sourceView: 'lead_modal_restore' },
+                                                lastError: errMsg
+                                              });
+                                              setSaveError(`Offline (${errMsg}). Restored remark queued in Pending Cloud Sync.`);
                                             }
                                           }}
                                           className="text-[10px] bg-amber-500/10 hover:bg-amber-500/25 text-amber-700 dark:text-amber-400 border border-amber-500/20 px-2.5 py-0.5 rounded-md cursor-pointer transition-colors font-bold flex items-center gap-1 shadow-2xs"
@@ -2819,7 +3195,7 @@ export default function LeadModal({
             {/* Left Column Footer */}
             <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 px-4 py-2 text-[10px] text-slate-500 dark:text-slate-400 font-mono text-center shrink-0 flex items-center justify-between">
               <span>⚡ CGP Candidate Management</span>
-              <span>💾 Auto-synced</span>
+              <span>{draftSavedNotice ? '📝 Local Draft Protected' : '☁️ Cloud Audited'}</span>
             </div>
           </div>
 

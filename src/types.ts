@@ -152,6 +152,32 @@ export interface Lead {
     changedBy: string;
     changedAt: string;
   }[];
+  hasArchivedHistory?: boolean;
+  archivedChunksCount?: number;
+}
+
+export interface LeadAuditEntry {
+  id: string;
+  leadId: string;
+  phone: string;
+  candidateName: string;
+  field: string;
+  previousValue: string;
+  newValue: string;
+  actor: string;
+  sourceView: string;
+  timestamp: string;
+}
+
+export interface CloudBackupSnapshotMeta {
+  id: string;
+  timestamp: string;
+  source: string;
+  isMondayScheduled: boolean;
+  totalLeads: number;
+  chunkCount: number;
+  sizeBytes: number;
+  sizeFormatted: string;
 }
 
 export interface StatSummary {
@@ -177,6 +203,7 @@ export interface Coordinator {
   password?: string; // Optional on client side for security
   role: 'admin' | 'agent';
   createdAt: string;
+  isDeleted?: boolean;
 }
 
 export interface Job {

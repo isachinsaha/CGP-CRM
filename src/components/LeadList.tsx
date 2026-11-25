@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Lead, LeadStage, FitScore, Coordinator } from '../types.ts';
-import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, Check, Plus, Lock, CheckSquare, Download, Sparkles, TrendingUp, X, UploadCloud, MessageSquare, FileText, Ban, LayoutGrid, Table } from 'lucide-react';
+import { Search, Filter, Trash2, ExternalLink, RefreshCw, Star, ShieldAlert, AlertTriangle, Check, Plus, Lock, CheckSquare, Download, Sparkles, TrendingUp, X, UploadCloud, MessageSquare, FileText, Ban, LayoutGrid, Table } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { getCountryFlagUrl, formatCandidateName, getEffectiveIntake, isCoordinatorMatch } from '../utils';
 import { MultiSearchableSelect } from './MultiSearchableSelect';
 import { LeadCard } from './LeadCard.tsx';
+import { enqueueOutboxSave, isRetryableHttpStatus } from '../utils/syncOutbox.ts';
 
 interface LeadListProps {
   leads: Lead[];
@@ -75,6 +76,8 @@ export default function LeadList({
   // Spreadsheet Quick Grid Inline Edit Mode Switch
   const [isInlineEdit, setIsInlineEdit] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [inlineError, setInlineError] = useState<string | null>(null);
+  const [inlineRevMap, setInlineRevMap] = useState<Record<string, number>>({});
 
   // Bulk Actions states
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
@@ -1017,33 +1020,74 @@ export default function LeadList({
       console.log(`[Bulk Delete] Successfully soft-deleted ${count} leads.`);
     } catch (err: any) {
       console.error('[Bulk Delete] Error:', err);
-      alert(err.message || 'Failed to delete selected leads. Please try again.');
+      setInlineError(err.message || 'Failed to delete selected leads. Please try again.');
     } finally {
       setIsBulkDeleting(false);
     }
   };
 
   // Inline updater directly communicates with the Express backend API
-  const handleInlineUpdate = async (id: string, fields: Partial<Lead>) => {
+  const handleInlineUpdate = async (id: string, fields: Partial<Lead>, origLead?: Lead) => {
     setSavingId(id);
+    setInlineError(null);
+    const payload: any = { ...fields };
+    const clearedRemarks: string[] = [];
+    (['remarks1', 'remarks2', 'remarks3'] as const).forEach((key) => {
+      if (fields[key] !== undefined && origLead) {
+        const prevVal = String(origLead[key] || '').trim();
+        const nextVal = String(fields[key] || '').trim();
+        if (prevVal !== '' && nextVal === '') {
+          clearedRemarks.push(key);
+        }
+      }
+    });
+    if (clearedRemarks.length > 0) {
+      payload.clearedRemarks = clearedRemarks;
+      payload.allowClearRemarks = true;
+    }
+
     try {
       const res = await fetch(`/api/leads/${id}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
           'x-user-role': userRole,
-          'x-agent-id': currentAgentId
+          'x-agent-id': currentAgentId,
+          'x-source-view': 'spreadsheet'
         },
-        body: JSON.stringify(fields)
+        body: JSON.stringify(payload)
       });
       if (res.ok) {
-        onRefreshData();
+        if (onRefreshData) onRefreshData();
       } else {
         const errJson = await res.json().catch(() => ({}));
         console.error('Spreadsheet inline update rejected:', errJson);
+        if (isRetryableHttpStatus(res.status)) {
+          enqueueOutboxSave({
+            leadId: id,
+            leadName: origLead?.name,
+            leadPhone: origLead?.phone,
+            payload,
+            sourceView: 'spreadsheet',
+            lastError: errJson.error || `HTTP ${res.status}`
+          });
+          setInlineError('Cloud save temporarily unavailable — cell edit queued in Pending Cloud Sync and will auto-retry.');
+        } else {
+          setInlineError(errJson.error || 'Could not save cell update to cloud database. Value reverted—please retry.');
+          setInlineRevMap(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Spreadsheet inline update failed', err);
+      enqueueOutboxSave({
+        leadId: id,
+        leadName: origLead?.name,
+        leadPhone: origLead?.phone,
+        payload,
+        sourceView: 'spreadsheet',
+        lastError: err?.message || 'Network interruption'
+      });
+      setInlineError('Network hiccup while saving — cell edit queued in Pending Cloud Sync and will auto-retry.');
     } finally {
       setTimeout(() => setSavingId(null), 800);
     }
@@ -1083,6 +1127,21 @@ export default function LeadList({
 
   return (
     <div className="space-y-4" id="cgp-spreadsheet-explorer">
+      {inlineError && (
+        <div className="bg-rose-950/90 border border-rose-500/60 text-rose-100 px-4 py-3 rounded-xl flex items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2 text-xs font-bold">
+            <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
+            <span>{inlineError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setInlineError(null)}
+            className="text-xs font-black uppercase tracking-wider text-rose-200 hover:text-white px-2 py-0.5 rounded bg-rose-900/60 cursor-pointer shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       
       {/* Search, Buckets, and Filters Control Panel */}
       <div className="bg-slate-850 p-5 rounded-2xl border border-slate-750 shadow-lg space-y-4">
@@ -2075,13 +2134,17 @@ export default function LeadList({
                       <td className="px-4 py-3" onClick={(e) => isInlineEdit && e.stopPropagation()}>
                         {isInlineEdit && !isSubAgent ? (
                           <input
+                            key={`pos-${lead.id}-${lead.position || ''}-${inlineRevMap[lead.id] || 0}`}
                             type="text"
                             defaultValue={lead.position || ''}
                             placeholder="Type Position..."
-                            onBlur={(e) => handleInlineUpdate(lead.id, { position: e.target.value })}
+                            onBlur={(e) => {
+                              const nextVal = e.target.value;
+                              if (nextVal.trim() === String(lead.position || '').trim()) return;
+                              handleInlineUpdate(lead.id, { position: nextVal }, lead);
+                            }}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
-                                handleInlineUpdate(lead.id, { position: (e.target as HTMLInputElement).value });
                                 (e.target as HTMLInputElement).blur();
                               }
                             }}
@@ -2105,7 +2168,7 @@ export default function LeadList({
                         {isInlineEdit && !isSubAgent ? (
                           <select
                             value={lead.assignedTo || ''}
-                            onChange={(e) => handleInlineUpdate(lead.id, { assignedTo: e.target.value })}
+                            onChange={(e) => handleInlineUpdate(lead.id, { assignedTo: e.target.value }, lead)}
                             className="text-[10px] font-extrabold rounded px-2 py-1 focus:outline-none border border-slate-700 bg-slate-900 text-slate-300 focus:ring-accent-purple cursor-pointer w-full"
                           >
                             <option value="">Unassigned</option>
@@ -2136,13 +2199,17 @@ export default function LeadList({
                       <td className="px-4 py-3" onClick={(e) => isInlineEdit && e.stopPropagation()}>
                         {isInlineEdit ? (
                           <input
+                            key={`r1-${lead.id}-${lead.remarks1 || ''}-${inlineRevMap[lead.id] || 0}`}
                             type="text"
                             defaultValue={lead.remarks1 || ''}
                             placeholder="Update call remarks 1..."
-                            onBlur={(e) => handleInlineUpdate(lead.id, { remarks1: e.target.value })}
+                            onBlur={(e) => {
+                              const nextVal = e.target.value;
+                              if (nextVal.trim() === String(lead.remarks1 || '').trim()) return;
+                              handleInlineUpdate(lead.id, { remarks1: nextVal }, lead);
+                            }}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
-                                handleInlineUpdate(lead.id, { remarks1: (e.target as HTMLInputElement).value });
                                 (e.target as HTMLInputElement).blur();
                               }
                             }}
@@ -2159,13 +2226,17 @@ export default function LeadList({
                       <td className="px-4 py-3" onClick={(e) => isInlineEdit && e.stopPropagation()}>
                         {isInlineEdit ? (
                           <input
+                            key={`r2-${lead.id}-${lead.remarks2 || ''}-${inlineRevMap[lead.id] || 0}`}
                             type="text"
                             defaultValue={lead.remarks2 || ''}
                             placeholder="Update call remarks 2..."
-                            onBlur={(e) => handleInlineUpdate(lead.id, { remarks2: e.target.value })}
+                            onBlur={(e) => {
+                              const nextVal = e.target.value;
+                              if (nextVal.trim() === String(lead.remarks2 || '').trim()) return;
+                              handleInlineUpdate(lead.id, { remarks2: nextVal }, lead);
+                            }}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
-                                handleInlineUpdate(lead.id, { remarks2: (e.target as HTMLInputElement).value });
                                 (e.target as HTMLInputElement).blur();
                               }
                             }}
@@ -2182,13 +2253,17 @@ export default function LeadList({
                       <td className="px-4 py-3" onClick={(e) => isInlineEdit && e.stopPropagation()}>
                         {isInlineEdit ? (
                           <input
+                            key={`r3-${lead.id}-${lead.remarks3 || ''}-${inlineRevMap[lead.id] || 0}`}
                             type="text"
                             defaultValue={lead.remarks3 || ''}
                             placeholder="Update call remarks 3..."
-                            onBlur={(e) => handleInlineUpdate(lead.id, { remarks3: e.target.value })}
+                            onBlur={(e) => {
+                              const nextVal = e.target.value;
+                              if (nextVal.trim() === String(lead.remarks3 || '').trim()) return;
+                              handleInlineUpdate(lead.id, { remarks3: nextVal }, lead);
+                            }}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
-                                handleInlineUpdate(lead.id, { remarks3: (e.target as HTMLInputElement).value });
                                 (e.target as HTMLInputElement).blur();
                               }
                             }}

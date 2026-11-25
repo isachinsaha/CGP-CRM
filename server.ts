@@ -17,6 +17,7 @@ import {
   addLead, 
   saveLeads, 
   updateSingleLead,
+  updateMultipleLeads,
   getStats, 
   getLeadById, 
   getCoordinators, 
@@ -72,7 +73,11 @@ import {
   saveNotifications,
   mergeTasksList,
   getDatabaseVersion,
-  getLeadChangesSince
+  getLeadChangesSince,
+  getLeadAuditLogs,
+  getLeadArchives,
+  listCloudBackupSnapshots,
+  loadCloudBackupSnapshot
 } from './src/server/db.ts';
 import type { Lead, Message, LeadStage, FitScore, Coordinator, Job, ImportantUpdate, Wallet, WalletTransaction, IncentiveRule, WhatsAppTemplate, WhatsAppAutoReplySettings, MediaItem, AppNotification } from './src/types.ts';
 import type { FullDatabaseBackup } from './src/server/db.ts';
@@ -313,27 +318,27 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 // POST /api/leads/:id/generate-cv - Generates and attaches an official CV for any candidate
 app.post('/api/leads/:id/generate-cv', async (req, res) => {
   try {
-    const leads = await getLeads(true);
-    const idx = leads.findIndex(l => l.id === req.params.id);
-    if (idx === -1) {
+    const existingLead = await getLeadById(req.params.id);
+    if (!existingLead) {
       return res.status(404).json({ error: 'Candidate not found' });
     }
 
-    const lead = leads[idx];
-    const fileName = await autoGenerateAndPersistCandidateCv(lead, UPLOADS_DIR);
+    const fileName = await autoGenerateAndPersistCandidateCv(existingLead, UPLOADS_DIR);
     const resumeUrl = `/uploads/${fileName}`;
 
-    lead.resumeUrl = resumeUrl;
-    lead.resumeName = fileName;
-    lead.docResume = true;
-    lead.updatedAt = new Date().toISOString();
+    const savedLead = await updateSingleLead(req.params.id, (current) => {
+      current.resumeUrl = resumeUrl;
+      current.resumeName = fileName;
+      current.docResume = true;
+      return current;
+    });
 
-    leads[idx] = lead;
-    clearLeadsCache();
-    await saveLeads(leads);
+    if (!savedLead) {
+      return res.status(404).json({ error: 'Candidate not found' });
+    }
 
-    console.log(`[CV Generation] Official CV generated and attached for candidate: ${lead.name} (${resumeUrl})`);
-    res.json({ success: true, resumeUrl, resumeName: fileName, lead });
+    console.log(`[CV Generation] Official CV generated and attached for candidate: ${savedLead.name} (${resumeUrl})`);
+    res.json({ success: true, resumeUrl, resumeName: fileName, lead: savedLead });
   } catch (err: any) {
     console.error('[CV Generation] Error generating candidate CV:', err);
     res.status(500).json({ error: 'Failed to generate candidate CV' });
@@ -411,7 +416,8 @@ app.post('/api/media', async (req, res) => {
     res.json({ success: true, item: newItem });
   } catch (err: any) {
     console.error('Failed to save media item:', err);
-    res.status(500).json({ error: 'Failed to save media item' });
+    const status = err?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: err?.message || 'Failed to save media item' });
   }
 });
 
@@ -449,7 +455,8 @@ app.delete('/api/media/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err: any) {
     console.error('Failed to delete media item:', err);
-    res.status(500).json({ error: 'Failed to delete media item' });
+    const status = err?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: err?.message || 'Failed to delete media item' });
   }
 });
 
@@ -700,7 +707,7 @@ app.get('/api/backup/full-db', async (req, res) => {
   }
 });
 
-// GET /api/backup/list - Get list of all automatic and manual backups on disk
+// GET /api/backup/list - Get list of all automatic and manual backups on disk + durable cloud snapshots
 app.get('/api/backup/list', async (req, res) => {
   try {
     if (!(await verifyAdminAccess(req))) {
@@ -708,9 +715,48 @@ app.get('/api/backup/list', async (req, res) => {
       return;
     }
     const backups = listAvailableBackups();
-    res.json({ backups });
+    const cloudSnapshots = await listCloudBackupSnapshots();
+    res.json({ backups, cloudSnapshots });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /api/backup/cloud-download/:snapshotId - Download durable Firestore snapshot JSON
+app.get('/api/backup/cloud-download/:snapshotId', async (req, res) => {
+  try {
+    if (!(await verifyAdminAccess(req))) {
+      res.status(403).json({ error: 'Access denied: Admin credentials required' });
+      return;
+    }
+    const snapshot = await loadCloudBackupSnapshot(req.params.snapshotId);
+    if (!snapshot) {
+      return res.status(404).json({ error: 'Cloud backup snapshot not found.' });
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${req.params.snapshotId}.json"`);
+    res.send(JSON.stringify(snapshot, null, 2));
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /api/backup/cloud-restore/:snapshotId - Restore DB directly from durable Firestore snapshot
+app.post('/api/backup/cloud-restore/:snapshotId', async (req, res) => {
+  try {
+    if (!(await verifyAdminAccess(req))) {
+      res.status(403).json({ error: 'Access denied: Admin credentials required' });
+      return;
+    }
+    const snapshot = await loadCloudBackupSnapshot(req.params.snapshotId);
+    if (!snapshot || !snapshot.data || !Array.isArray(snapshot.data.leads)) {
+      return res.status(404).json({ error: 'Cloud backup snapshot not found or incomplete.' });
+    }
+    const restoreResult = await restoreDatabaseFromBackup(snapshot);
+    res.json(restoreResult);
+  } catch (err) {
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -725,7 +771,7 @@ app.post('/api/backup/trigger', async (req, res) => {
     const result = await executeScheduledFullBackup(isMonday);
     res.json({
       success: true,
-      message: 'Automatic full backup executed immediately for both Database JSON and Master XLSX.',
+      message: 'Automatic full backup executed immediately for both Database JSON, Cloud Snapshot, and Master XLSX.',
       result
     });
   } catch (err) {
@@ -747,7 +793,8 @@ app.post('/api/backup/restore', async (req, res) => {
     const restoreResult = await restoreDatabaseFromBackup(backupData);
     res.json(restoreResult);
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -1315,15 +1362,21 @@ app.post('/api/leads', async (req, res) => {
     }
 
     // Clean up/archive phone on any previously soft-deleted records with this same number so the new enrollment has a clean slate
-    const ghostLeads = leads.filter(l => l.isDeleted && (arePhonesMatching(l.phone, phone) || (alternateNo && arePhonesMatching(l.phone, alternateNo))));
-    ghostLeads.forEach(g => {
-      if (arePhonesMatching(g.phone, phone)) {
-        g.phone = `${g.phone}_archived_${Date.now()}`;
-      }
-      if (alternateNo && g.alternateNo && arePhonesMatching(g.alternateNo, alternateNo)) {
-        g.alternateNo = `${g.alternateNo}_archived_${Date.now()}`;
-      }
-    });
+    const ghostLeadIds = leads
+      .filter(l => l.isDeleted && (arePhonesMatching(l.phone, phone) || (alternateNo && arePhonesMatching(l.phone, alternateNo))))
+      .map(g => g.id);
+    if (ghostLeadIds.length > 0) {
+      const archiveStamp = Date.now();
+      await updateMultipleLeads(ghostLeadIds, (g) => {
+        if (arePhonesMatching(g.phone, phone)) {
+          g.phone = `${g.phone}_archived_${archiveStamp}`;
+        }
+        if (alternateNo && g.alternateNo && arePhonesMatching(g.alternateNo, alternateNo)) {
+          g.alternateNo = `${g.alternateNo}_archived_${archiveStamp}`;
+        }
+        return g;
+      });
+    }
     
     // Auto increment serial number
     const sequence = leads.length + 1;
@@ -1382,12 +1435,20 @@ app.post('/api/leads', async (req, res) => {
       intake: true
     };
 
-    leads.push(newLead);
-    await saveLeads(leads);
+    const actorRole = req.headers['x-user-role'] || 'user';
+    const rawAgentIdHeader = (req.headers['x-agent-id'] as string) || 'System Administrator';
+    const actorLabel = actorRole === 'admin' ? `Admin (${rawAgentIdHeader})` : `Coordinator ${rawAgentIdHeader}`;
+    await addLead(newLead, {
+      auditMeta: {
+        actor: actorLabel,
+        sourceView: String(req.headers['x-source-view'] || 'create_lead')
+      }
+    });
 
     res.status(201).json(newLead);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+  } catch (err: any) {
+    const status = err?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: err?.message || 'Failed to create lead' });
   }
 });
 
@@ -1542,59 +1603,49 @@ app.post('/api/leads/bulk-assign', async (req, res) => {
       : `Coordinator ${cleanAgent || 'UNASSIGNED'}`;
 
     const targetCoord = String(assignedTo || '').trim();
-    const targetSet = new Set(leadIds.map(String));
-    let updatedCount = 0;
     const nowIso = new Date().toISOString();
     const todayDate = nowIso.split('T')[0];
     const hasRealCoordinator = targetCoord !== '' && targetCoord.toLowerCase() !== 'unassigned' && targetCoord.toLowerCase() !== 'all';
 
     let intakeSequence = leads.filter(l => l.intake && l.serialNo).length;
+    const modifiedLeads = await updateMultipleLeads(leadIds.map(String), (lead) => {
+      const prevCoordinator = lead.assignedTo || 'Unassigned';
+      if (prevCoordinator === targetCoord) return null;
 
-    for (let i = 0; i < leads.length; i++) {
-      const lead = leads[i];
-      if (targetSet.has(lead.id)) {
-        if (!lead.timeline) lead.timeline = [];
-        if (!lead.coordinatorHistory) lead.coordinatorHistory = [];
+      if (!Array.isArray(lead.timeline)) lead.timeline = [];
+      if (!Array.isArray(lead.coordinatorHistory)) lead.coordinatorHistory = [];
 
-        const prevCoordinator = lead.assignedTo || 'Unassigned';
-        if (prevCoordinator !== targetCoord) {
-          lead.timeline.push({
-            id: `tl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}_assign`,
-            type: 'assignment',
-            text: `Assigned coordinator changed from "${prevCoordinator}" to "${targetCoord || 'Unassigned'}" (Bulk Action)`,
-            actor,
-            timestamp: nowIso
-          });
+      lead.timeline.push({
+        id: `tl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}_assign`,
+        type: 'assignment',
+        text: `Assigned coordinator changed from "${prevCoordinator}" to "${targetCoord || 'Unassigned'}" (Bulk Action)`,
+        actor,
+        timestamp: nowIso
+      });
 
-          lead.coordinatorHistory.push({
-            candidateId: lead.id,
-            previousCoordinator: prevCoordinator.toLowerCase(),
-            newCoordinator: (targetCoord || 'unassigned').toLowerCase(),
-            changedBy: actor,
-            changedAt: nowIso
-          });
+      lead.coordinatorHistory.push({
+        candidateId: lead.id,
+        previousCoordinator: prevCoordinator.toLowerCase(),
+        newCoordinator: (targetCoord || 'unassigned').toLowerCase(),
+        changedBy: actor,
+        changedAt: nowIso
+      });
 
-          lead.assignedTo = targetCoord;
-          lead.assignDate = todayDate;
+      lead.assignedTo = targetCoord;
+      lead.assignDate = todayDate;
 
-          if (hasRealCoordinator) {
-            lead.intake = true;
-            if (!lead.serialNo) {
-              intakeSequence++;
-              lead.serialNo = `INQ-${1000 + intakeSequence}`;
-            }
-          }
-
-          lead.updatedAt = nowIso;
-          leads[i] = lead;
-          updatedCount++;
+      if (hasRealCoordinator) {
+        lead.intake = true;
+        if (!lead.serialNo) {
+          intakeSequence++;
+          lead.serialNo = `INQ-${1000 + intakeSequence}`;
         }
       }
-    }
 
-    if (updatedCount > 0) {
-      await saveLeads(leads);
-    }
+      return lead;
+    });
+
+    const updatedCount = modifiedLeads.length;
 
     console.log(`[BulkAssign] Successfully re-assigned ${updatedCount} leads to "${targetCoord || 'Unassigned'}" by ${actor}`);
     res.json({
@@ -1761,7 +1812,8 @@ app.post('/api/metadata', async (req, res) => {
     await saveMetadata(updatedMeta);
     res.json({ success: true, metadata: updatedMeta });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -1814,7 +1866,8 @@ app.post('/api/coordinators', async (req, res) => {
 
     res.status(201).json({ success: true, coordinator: newCoord });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -1833,7 +1886,7 @@ app.put('/api/coordinators/:id', async (req, res) => {
     const matchedIdx = coordinators.findIndex(c => c.id === id);
 
     if (matchedIdx === -1) {
-      res.status(444).json({ error: 'Coordinator account not found.' });
+      res.status(404).json({ error: 'Coordinator account not found.' });
       return;
     }
 
@@ -1864,22 +1917,19 @@ app.put('/api/coordinators/:id', async (req, res) => {
 
     // If username/displayName changed, optionally update the leads that were assigned to the old username/displayName
     if (cleanUsername && cleanUsername.toLowerCase() !== originalUsername.toLowerCase()) {
-      const leads = await getLeads(true);
-      let updatedLeadsCount = 0;
-      leads.forEach(l => {
-        if (l.assignedTo && l.assignedTo.toLowerCase() === originalUsername.toLowerCase()) {
+      await updateMultipleLeads(
+        (l) => !!(l.assignedTo && l.assignedTo.toLowerCase() === originalUsername.toLowerCase()),
+        (l) => {
           l.assignedTo = cleanUsername;
-          updatedLeadsCount++;
+          return l;
         }
-      });
-      if (updatedLeadsCount > 0) {
-        await saveLeads(leads);
-      }
+      );
     }
 
     res.json({ success: true, coordinator: coordinators[matchedIdx] });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -1908,21 +1958,18 @@ app.delete('/api/coordinators/:id', async (req, res) => {
     await saveCoordinators(filtered);
 
     // Unassign leads previously assigned to this coordinator
-    const leads = await getLeads(true);
-    let updatedLeadsCount = 0;
-    leads.forEach(l => {
-      if (l.assignedTo && l.assignedTo.toLowerCase() === targetCoord.username.toLowerCase()) {
+    await updateMultipleLeads(
+      (l) => !!(l.assignedTo && l.assignedTo.toLowerCase() === targetCoord.username.toLowerCase()),
+      (l) => {
         l.assignedTo = ''; // reset to unassigned
-        updatedLeadsCount++;
+        return l;
       }
-    });
-    if (updatedLeadsCount > 0) {
-      await saveLeads(leads);
-    }
+    );
 
     res.json({ success: true, message: `Coordinator ${targetCoord.displayName} successfully deleted.` });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -1990,7 +2037,8 @@ app.post('/api/wallets/snapshots/:snapshotId/restore', async (req, res) => {
     const restored = await restoreWalletSnapshot(snapshotId);
     res.json({ success: true, message: `Successfully restored snapshot ${snapshotId}`, wallets: restored });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -2011,7 +2059,8 @@ app.post('/api/wallets/reconcile', async (req, res) => {
     const reconciled = await reconcileWalletsFromLeads();
     res.json({ success: true, count: reconciled.length, wallets: reconciled });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -2056,7 +2105,8 @@ app.post('/api/wallets/:username/transaction', async (req, res) => {
     const updatedWallet = await addWalletTransaction(username, type, numericAmount, String(reason).trim());
     res.json({ success: true, wallet: updatedWallet });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -2071,7 +2121,8 @@ app.delete('/api/wallets/:username/transaction/:txId', async (req, res) => {
     const updatedWallet = await deleteWalletTransaction(username, txId);
     res.json({ success: true, wallet: updatedWallet });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -2083,35 +2134,31 @@ app.post('/api/tasks/resolve-overdue', async (req, res) => {
     const targetDate = req.body?.beforeDate || new Date().toISOString().split('T')[0];
     const targetCoordinator = req.body?.coordinator; // optional filter
 
-    const leads = await getLeads();
     let resolvedCount = 0;
-
-    leads.forEach(lead => {
-      if (targetCoordinator && targetCoordinator !== 'All') {
-        const matchesCoord = isCoordinatorMatch(lead.assignedTo, targetCoordinator);
-        if (!matchesCoord) return;
-      }
-      if (lead.tasks && Array.isArray(lead.tasks)) {
+    await updateMultipleLeads(
+      (lead) => {
+        if (targetCoordinator && targetCoordinator !== 'All') {
+          if (!isCoordinatorMatch(lead.assignedTo, targetCoordinator)) return false;
+        }
+        return Array.isArray(lead.tasks) && lead.tasks.some(t => !t.completed && t.dueDate <= targetDate);
+      },
+      (lead) => {
         let modified = false;
-        lead.tasks.forEach(task => {
+        lead.tasks = (lead.tasks || []).map(task => {
           if (!task.completed && task.dueDate <= targetDate) {
-            task.completed = true;
             resolvedCount++;
             modified = true;
+            return { ...task, completed: true };
           }
+          return task;
         });
-        if (modified) {
-          const hasPending = lead.tasks.some(t => !t.completed);
-          if (!hasPending) {
-            lead.reminderEnabled = false;
-          }
+        if (!modified) return null;
+        if (!lead.tasks.some(t => !t.completed)) {
+          lead.reminderEnabled = false;
         }
+        return lead;
       }
-    });
-
-    if (resolvedCount > 0) {
-      await saveLeads(leads);
-    }
+    );
 
     res.json({
       success: true,
@@ -2142,12 +2189,18 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
-// GET single lead by ID (with ETag & 304 support for high efficiency)
+// GET single lead by ID (supports ?fresh=1 direct cloud pre-read for conflict-safe modal opening + ETag 304 when cached)
 app.get('/api/leads/:id', async (req, res) => {
   try {
-    const lead = await getLeadById(req.params.id);
+    const fresh = req.query.fresh === '1' || req.query.fresh === 'true';
+    const lead = await getLeadById(req.params.id, { fresh });
     if (!lead) {
       res.status(404).json({ error: 'Lead not found' });
+      return;
+    }
+    if (fresh) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(lead);
       return;
     }
     const msgs = lead.messages || [];
@@ -2162,6 +2215,28 @@ app.get('/api/leads/:id', async (req, res) => {
     }
 
     res.json(lead);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET immutable cloud audit trail for a single lead
+app.get('/api/leads/:id/audit-logs', async (req, res) => {
+  try {
+    const logs = await getLeadAuditLogs(req.params.id);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ leadId: req.params.id, logs });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET archived oversized history chunks for a single lead
+app.get('/api/leads/:id/archives', async (req, res) => {
+  try {
+    const chunks = await getLeadArchives(req.params.id);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ leadId: req.params.id, chunks });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -2561,6 +2636,11 @@ app.put('/api/leads/:id', async (req, res) => {
 
     const actorRole = req.headers['x-user-role'] || 'user';
     const rawAgentIdHeader = (req.headers['x-agent-id'] as string) || '';
+    const cleanAgentOuter = String(rawAgentIdHeader || 'System').trim().toUpperCase();
+    const auditActor = actorRole === 'admin'
+      ? (cleanAgentOuter && cleanAgentOuter !== 'UNASSIGNED' && !cleanAgentOuter.includes('ADMIN') ? `Admin (${cleanAgentOuter})` : 'Administrator')
+      : `Coordinator ${cleanAgentOuter || 'UNASSIGNED'}`;
+    const auditSourceView = String(req.headers['x-source-view'] || assignedFrom || 'crm').trim() || 'crm';
 
     // Perform all field mutations atomically on the freshest `current` record inside dbMutex.run
     const savedLead = await updateSingleLead(req.params.id, (current) => {
@@ -2858,6 +2938,11 @@ app.put('/api/leads/:id', async (req, res) => {
 
       lead.updatedAt = new Date().toISOString();
       return lead;
+    }, {
+      auditMeta: {
+        actor: auditActor,
+        sourceView: auditSourceView
+      }
     });
 
     if (!savedLead) {
@@ -2872,8 +2957,9 @@ app.put('/api/leads/:id', async (req, res) => {
     }
 
     res.json(savedLead);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+  } catch (err: any) {
+    const status = err?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: err?.message || 'Failed to update lead' });
   }
 });
 
@@ -2984,7 +3070,8 @@ app.post('/api/whatsapp/auto-reply', async (req, res) => {
     await saveWhatsAppAutoReplySettings(settings);
     res.json({ success: true, settings });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    const status = err?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: err.message });
   }
 });
 
@@ -2997,44 +3084,43 @@ async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadN
     }
 
     // Check 1 (Before scheduling): Ensure no auto-reply has ever been sent/scheduled for this lead
-    const initialLeads = await getLeads(true);
-    const leadIdx = initialLeads.findIndex(l => l.id === leadId);
-    if (leadIdx === -1) return;
-    const initialLead = initialLeads[leadIdx];
+    // Check 1 (Pre-schedule): Check lead directly
+    const initialLead = await getLeadById(leadId);
+    if (!initialLead) return;
 
     if (initialLead.autoReplySent) {
       console.log(`[AutoReply] Skip scheduling. Lead ${initialLead.name} already received or scheduled an auto-reply.`);
       return;
     }
 
-    const hasPriorAutoReply = (initialLead.messages || []).some(m => 
-      m && (
-        m.sender === 'system' || 
-        m.senderName === 'CGP Auto-Reply' || 
-        String(m.id).includes('auto') ||
-        (m.text && (
-          m.text.includes('Career Growth Placement') || 
-          m.text.includes('Jobseeker') || 
-          m.text.includes('reaching out')
-        ))
-      )
-    );
-    if (hasPriorAutoReply) {
-      initialLead.autoReplySent = true;
-      initialLead.updatedAt = new Date().toISOString();
-      initialLeads[leadIdx] = initialLead;
-      clearLeadsCache();
-      await saveLeads(initialLeads);
+    const hasAutoReplyMsg = (msgs: Message[] = []) =>
+      msgs.some(m =>
+        m && (
+          m.sender === 'system' ||
+          m.senderName === 'CGP Auto-Reply' ||
+          String(m.id).includes('auto') ||
+          (m.text && (
+            m.text.includes('Career Growth Placement') ||
+            m.text.includes('Jobseeker') ||
+            m.text.includes('reaching out')
+          ))
+        )
+      );
+
+    if (hasAutoReplyMsg(initialLead.messages)) {
+      await updateSingleLead(leadId, (l) => {
+        l.autoReplySent = true;
+        return l;
+      }, { allowDeferredSync: true });
       console.log(`[AutoReply] Skip scheduling. Lead ${initialLead.name} already had prior auto-reply message. Synchronized flag.`);
       return;
     }
 
-    // Set persistent lock immediately to avoid concurrent schedule triggers from quick user double-messages!
-    initialLead.autoReplySent = true;
-    initialLead.updatedAt = new Date().toISOString();
-    initialLeads[leadIdx] = initialLead;
-    clearLeadsCache();
-    await saveLeads(initialLeads);
+    // Set persistent lock immediately via atomic single-lead update
+    await updateSingleLead(leadId, (l) => {
+      l.autoReplySent = true;
+      return l;
+    }, { allowDeferredSync: true });
     console.log(`[AutoReply] Lock flag set and saved for ${initialLead.name}. Scheduling delayed execution...`);
 
     const delayMs = Math.max(0, settings.delay) * 1000;
@@ -3042,36 +3128,17 @@ async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadN
     
     setTimeout(async () => {
       try {
-        // Check 2 (Upon execution): Re-fetch freshest state and double-check messages
-        const leads = await getLeads(true);
-        const matchIdx = leads.findIndex(l => l.id === leadId);
-        if (matchIdx === -1) return;
+        const lead = await getLeadById(leadId);
+        if (!lead) return;
 
-        const lead = leads[matchIdx];
-        
-        const doubleCheckPrior = (lead.messages || []).some(m => 
-          m && (
-            m.sender === 'system' || 
-            m.senderName === 'CGP Auto-Reply' || 
-            String(m.id).includes('auto') ||
-            (m.text && (
-              m.text.includes('Career Growth Placement') || 
-              m.text.includes('Jobseeker') || 
-              m.text.includes('reaching out')
-            ))
-          )
-        );
-        if (doubleCheckPrior) {
+        if (hasAutoReplyMsg(lead.messages)) {
           console.log(`[AutoReply] Skip execution. Lead ${lead.name} already received an auto-reply message.`);
           return;
         }
 
-        // Construct reply text using placeholders
         const replyText = replaceTemplatePlaceholders(settings.text, lead, 'CGP Auto-Reply');
-
         console.log(`[AutoReply] Triggering auto-reply to ${lead.name} (${leadPhone})...`);
 
-        // Send the message
         const result = await sendWhatsAppMessage(leadPhone, replyText, leadName);
 
         if (result.success) {
@@ -3085,45 +3152,40 @@ async function handleAutoReplyIfEnabled(leadId: string, leadPhone: string, leadN
             channel: 'whatsapp'
           };
 
-          if (!Array.isArray(lead.messages)) lead.messages = [];
-          lead.messages.push(autoReplyMsg);
-
-          if (!Array.isArray(lead.timeline)) lead.timeline = [];
-          lead.timeline.push({
-            id: `tl_${Date.now()}_autoreply`,
-            type: 'message',
-            text: `Automated WhatsApp Reply Sent: "${replyText.substring(0, 75)}"`,
-            actor: 'System',
-            timestamp: new Date().toISOString()
-          });
-
-          lead.updatedAt = new Date().toISOString();
-          leads[matchIdx] = lead;
-          clearLeadsCache();
-          await saveLeads(leads);
+          await updateSingleLead(leadId, (latest) => {
+            if (!Array.isArray(latest.messages)) latest.messages = [];
+            if (!latest.messages.some(m => m && m.id === autoReplyMsg.id)) {
+              latest.messages.push(autoReplyMsg);
+            }
+            if (!Array.isArray(latest.timeline)) latest.timeline = [];
+            latest.timeline.push({
+              id: `tl_${Date.now()}_autoreply`,
+              type: 'message',
+              text: `Automated WhatsApp Reply Sent: "${replyText.substring(0, 75)}"`,
+              actor: 'System',
+              timestamp: new Date().toISOString()
+            });
+            return latest;
+          }, { allowDeferredSync: true });
           console.log(`[AutoReply] Auto-reply successfully sent and saved.`);
 
-          // Transition auto-reply to 'delivered' in background after 1.5 seconds
+          // Transition auto-reply to 'delivered' in background after 1.5 seconds (sandbox only)
           const autoMsgId = autoReplyMsg.id;
-          const targetLeadId = lead.id;
-          setTimeout(async () => {
-            try {
-              const latestLeads = await getLeads();
-              const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
-              if (lIdx !== -1) {
-                const l = latestLeads[lIdx];
-                const mIdx = (l.messages || []).findIndex(m => m.id === autoMsgId);
-                if (mIdx !== -1 && l.messages[mIdx].status === 'sent') {
-                  l.messages[mIdx].status = 'delivered';
-                  clearLeadsCache();
-                  await saveLeads(latestLeads);
-                  console.log(`[AutoReplyStatus] Transitioned auto-reply message ${autoMsgId} to 'delivered'`);
-                }
+          if (result.channel !== 'meta_cloud_api') {
+            setTimeout(async () => {
+              try {
+                await updateSingleLead(leadId, (latest) => {
+                  const mIdx = (latest.messages || []).findIndex(m => m.id === autoMsgId);
+                  if (mIdx !== -1 && latest.messages[mIdx].status === 'sent') {
+                    latest.messages[mIdx].status = 'delivered';
+                  }
+                  return latest;
+                }, { allowDeferredSync: true });
+              } catch (err) {
+                console.error('Error transitioning auto-reply to delivered:', err);
               }
-            } catch (err) {
-              console.error('Error transitioning auto-reply to delivered:', err);
-            }
-          }, 1500);
+            }, 1500);
+          }
         } else {
           console.error(`[AutoReply] Failed to send auto-reply:`, result.details);
         }
@@ -3321,6 +3383,8 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
 
     // If an initial message is provided, send it immediately
     let deliveryResult = null;
+    let initialNewMessage: Message | null = null;
+    let initialTimelineEntry: any = null;
     if (initialMessage && String(initialMessage).trim()) {
       const msgText = String(initialMessage).trim();
       const templates = await getWhatsAppTemplates().catch(() => DEFAULT_WHATSAPP_TEMPLATES);
@@ -3339,7 +3403,7 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
       );
 
       const senderName = userRole === 'admin' ? 'Administrator' : `Coordinator (${agentId})`;
-      const newMessage: Message = {
+      initialNewMessage = {
         id: deliveryResult?.messageId || `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         sender: 'user',
         senderName,
@@ -3351,50 +3415,58 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
         templateType: matchedTemplate?.type === 'quick_reply' ? 'quick_reply' : (matchedTemplate ? 'template' : undefined)
       };
 
-      if (!Array.isArray(targetLead.messages)) {
-        targetLead.messages = [];
-      }
-      targetLead.messages.push(newMessage);
+      if (!Array.isArray(targetLead.messages)) targetLead.messages = [];
+      targetLead.messages.push(initialNewMessage);
 
-      // Transition to 'delivered' in background after 1.5 seconds
-      const msgId = newMessage.id;
-      const targetLeadId = targetLead.id;
-      setTimeout(async () => {
-        try {
-          const latestLeads = await getLeads(true);
-          const lIdx = latestLeads.findIndex(l => l.id === targetLeadId);
-          if (lIdx !== -1) {
-            const l = latestLeads[lIdx];
-            const mIdx = (l.messages || []).findIndex(m => m.id === msgId);
-            if (mIdx !== -1 && l.messages[mIdx].status === 'sent') {
-              l.messages[mIdx].status = 'delivered';
-              clearLeadsCache();
-              await saveLeads(latestLeads);
-              console.log(`[MessageStatus] Auto-transitioned start-chat message ${msgId} to 'delivered'`);
-            }
-          }
-        } catch (err) {
-          console.error('Error transitioning message to delivered:', err);
-        }
-      }, 1500);
-
-      if (!Array.isArray(targetLead.timeline)) {
-        targetLead.timeline = [];
-      }
-      targetLead.timeline.push({
+      if (!Array.isArray(targetLead.timeline)) targetLead.timeline = [];
+      initialTimelineEntry = {
         id: `tl_${Date.now()}_startmsg`,
         type: 'message',
         text: `Sent initial WhatsApp message: "${msgText.length > 80 ? msgText.substring(0, 77) + '...' : msgText}"`,
         actor: senderName,
         timestamp: nowIso
-      });
+      };
+      targetLead.timeline.push(initialTimelineEntry);
+
+      if (deliveryResult?.channel !== 'meta_cloud_api') {
+        const msgId = initialNewMessage.id;
+        const targetLeadId = targetLead.id;
+        setTimeout(async () => {
+          try {
+            await updateSingleLead(targetLeadId, (l) => {
+              const mIdx = (l.messages || []).findIndex(m => m.id === msgId);
+              if (mIdx !== -1 && l.messages[mIdx].status === 'sent') {
+                l.messages[mIdx].status = 'delivered';
+              }
+              return l;
+            }, { allowDeferredSync: true });
+          } catch (err) {
+            console.error('Error transitioning message to delivered:', err);
+          }
+        }, 1500);
+      }
     }
 
     targetLead.updatedAt = nowIso;
     if (existingIndex !== -1) {
-      leads[existingIndex] = targetLead;
+      const updatedExisting = await updateSingleLead(targetLead.id, (current) => {
+        if (name && name.trim() && (!current.name || current.name === 'Unnamed Candidate' || current.name === 'WhatsApp Contact')) {
+          current.name = formatCandidateNameBackend(name.trim());
+        }
+        if (initialNewMessage) {
+          if (!Array.isArray(current.messages)) current.messages = [];
+          current.messages.push(initialNewMessage);
+        }
+        if (initialTimelineEntry) {
+          if (!Array.isArray(current.timeline)) current.timeline = [];
+          current.timeline.push(initialTimelineEntry);
+        }
+        return current;
+      });
+      if (updatedExisting) targetLead = updatedExisting;
+    } else {
+      await addLead(targetLead);
     }
-    await saveLeads(leads);
 
     res.status(200).json({
       success: true,
@@ -3639,7 +3711,8 @@ app.post('/api/whatsapp/templates', async (req, res) => {
     res.json({ success: true, template: newTemplate });
   } catch (err: any) {
     console.error('Failed to save WhatsApp template:', err);
-    res.status(500).json({ error: 'Failed to save template' });
+    const status = err?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: err?.message || 'Failed to save template' });
   }
 });
 
@@ -3656,7 +3729,8 @@ app.delete('/api/whatsapp/templates/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err: any) {
     console.error('Failed to delete WhatsApp template:', err);
-    res.status(500).json({ error: 'Failed to delete template' });
+    const status = err?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: err?.message || 'Failed to delete template' });
   }
 });
 
@@ -3929,64 +4003,53 @@ app.get('/api/ai/leads/:id/suggestions', async (req, res) => {
 app.post('/api/leads/:id/simulate-reply', async (req, res) => {
   try {
     const { text, customName } = req.body;
-    const leads = await getLeads();
-    const idx = leads.findIndex(l => l.id === req.params.id);
-    if (idx === -1) {
+    let createdMessage: Message | null = null;
+    const savedLead = await updateSingleLead(req.params.id, (lead) => {
+      const candidateName = customName || lead.name || 'Candidate';
+      const replyText = text && text.trim()
+        ? text.trim()
+        : `Hello! I have received your message. I am sending my passport and CV for the ${lead.position || 'job'} opening in ${lead.country || 'abroad'}. Please let me know the interview timing.`;
+
+      const incomingMessage: Message = {
+        id: `m_in_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        sender: 'lead',
+        senderName: candidateName,
+        text: replyText,
+        timestamp: new Date().toISOString(),
+        status: 'delivered',
+        channel: 'whatsapp'
+      };
+      createdMessage = incomingMessage;
+
+      if (!Array.isArray(lead.messages)) lead.messages = [];
+      lead.messages.forEach(m => {
+        if (m && m.sender !== 'lead') m.status = 'read';
+      });
+      lead.messages.push(incomingMessage);
+
+      if (!Array.isArray(lead.timeline)) lead.timeline = [];
+      lead.timeline.push({
+        id: `tl_${Date.now()}_inbound`,
+        type: 'message',
+        text: `Received candidate WhatsApp reply: "${replyText.length > 80 ? replyText.substring(0, 77) + '...' : replyText}"`,
+        actor: candidateName,
+        timestamp: new Date().toISOString()
+      });
+
+      return lead;
+    });
+
+    if (!savedLead) {
       res.status(404).json({ error: 'Lead not found' });
       return;
     }
 
-    const lead = leads[idx];
-    const candidateName = customName || lead.name || 'Candidate';
-    const replyText = text && text.trim() 
-      ? text.trim() 
-      : `Hello! I have received your message. I am sending my passport and CV for the ${lead.position || 'job'} opening in ${lead.country || 'abroad'}. Please let me know the interview timing.`;
-
-    const incomingMessage: Message = {
-      id: `m_in_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      sender: 'lead',
-      senderName: candidateName,
-      text: replyText,
-      timestamp: new Date().toISOString(),
-      status: 'delivered',
-      channel: 'whatsapp'
-    };
-
-    if (!Array.isArray(lead.messages)) {
-      lead.messages = [];
-    }
-    
-    // Mark all previous outbound messages as read!
-    lead.messages.forEach(m => {
-      if (m && m.sender !== 'lead') {
-        m.status = 'read';
-      }
-    });
-
-    lead.messages.push(incomingMessage);
-
-    if (!Array.isArray(lead.timeline)) {
-      lead.timeline = [];
-    }
-    lead.timeline.push({
-      id: `tl_${Date.now()}_inbound`,
-      type: 'message',
-      text: `Received candidate WhatsApp reply: "${replyText.length > 80 ? replyText.substring(0, 77) + '...' : replyText}"`,
-      actor: candidateName,
-      timestamp: new Date().toISOString()
-    });
-
-    lead.updatedAt = new Date().toISOString();
-    leads[idx] = lead;
-    await saveLeads(leads);
-
-    // Trigger auto-reply if enabled
-    handleAutoReplyIfEnabled(lead.id, lead.phone, candidateName);
+    handleAutoReplyIfEnabled(savedLead.id, savedLead.phone, customName || savedLead.name || 'Candidate');
 
     res.json({
       success: true,
-      lead,
-      message: incomingMessage
+      lead: savedLead,
+      message: createdMessage
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -4492,8 +4555,7 @@ export async function processInboundWebhookPayload(payload: any): Promise<{ newC
           ]
         };
 
-        clearLeadsCache();
-        await addLead(newLead);
+        await addLead(newLead, { allowDeferredSync: true });
         newCount++;
         console.log(`[Webhook] Created new requesting lead ID="${newLeadId}" for inbound phone "${newLead.phone}".`);
 
@@ -4903,19 +4965,17 @@ app.get('/api/whatsapp/media/:mediaId', async (req, res) => {
 // DELETE a lead (Soft Delete to prevent any accidental permanent data loss)
 app.delete('/api/leads/:id', async (req, res) => {
   try {
-    const leads = await getLeads(true);
-    const leadIndex = leads.findIndex(l => l.id === req.params.id);
-    if (leadIndex === -1) {
+    const existing = await getLeadById(req.params.id);
+    if (!existing) {
       res.status(404).json({ error: 'Lead not found' });
       return;
     }
     
-    // Automatic Rollback of Won Incentives if candidate was in Won bucket
-    if (leads[leadIndex].stage === 'won') {
+    if (existing.stage === 'won') {
       try {
         await rollbackWonIncentivesForLead(
-          leads[leadIndex].id,
-          leads[leadIndex].name || req.params.id,
+          existing.id,
+          existing.name || req.params.id,
           'lead deleted'
         );
       } catch (rbErr) {
@@ -4923,13 +4983,17 @@ app.delete('/api/leads/:id', async (req, res) => {
       }
     }
 
-    // Mark as soft-deleted so it can be fully recovered anytime by an administrator
-    leads[leadIndex].isDeleted = true;
-    leads[leadIndex].deletedAt = new Date().toISOString();
-    leads[leadIndex].updatedAt = new Date().toISOString();
-    
-    await saveLeads(leads);
-    console.log(`[Backup System] Lead ${leads[leadIndex].name || req.params.id} was soft-deleted instead of being permanently removed.`);
+    const saved = await updateSingleLead(req.params.id, (lead) => {
+      lead.isDeleted = true;
+      lead.deletedAt = new Date().toISOString();
+      return lead;
+    });
+    if (!saved) {
+      res.status(404).json({ error: 'Lead not found' });
+      return;
+    }
+
+    console.log(`[Backup System] Lead ${saved.name || req.params.id} was soft-deleted instead of being permanently removed.`);
     res.json({ success: true, message: 'Candidate soft-deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -4947,28 +5011,23 @@ app.post('/api/leads/bulk-delete', async (req, res) => {
     }
 
     const idSet = new Set(targetIds.map(String));
-    const leads = await getLeads(true);
-    let deletedCount = 0;
-    const nowIso = new Date().toISOString();
-
-    for (const lead of leads) {
-      if (idSet.has(lead.id) && !lead.isDeleted) {
-        // Automatic Rollback of Won Incentives if candidate was in Won bucket
-        if (lead.stage === 'won') {
-          try {
-            await rollbackWonIncentivesForLead(
-              lead.id,
-              lead.name || lead.id,
-              'bulk deleted'
-            );
-          } catch (rbErr) {
-            console.error('Failed to rollback Won incentives on bulk delete for lead:', lead.id, rbErr);
-          }
+    const leadsSnapshot = await getLeads();
+    for (const lead of leadsSnapshot) {
+      if (idSet.has(lead.id) && !lead.isDeleted && lead.stage === 'won') {
+        try {
+          await rollbackWonIncentivesForLead(lead.id, lead.name || lead.id, 'bulk deleted');
+        } catch (rbErr) {
+          console.error('Failed to rollback Won incentives on bulk delete for lead:', lead.id, rbErr);
         }
+      }
+    }
 
+    const nowIso = new Date().toISOString();
+    const modified = await updateMultipleLeads(
+      (lead) => idSet.has(lead.id) && !lead.isDeleted,
+      (lead) => {
         lead.isDeleted = true;
         lead.deletedAt = nowIso;
-        lead.updatedAt = nowIso;
         if (!Array.isArray(lead.timeline)) lead.timeline = [];
         lead.timeline.push({
           id: `tl_${Date.now()}_bulk_del_${Math.random().toString(36).substring(2, 6)}`,
@@ -4977,12 +5036,12 @@ app.post('/api/leads/bulk-delete', async (req, res) => {
           actor: 'Administrator',
           timestamp: nowIso
         });
-        deletedCount++;
+        return lead;
       }
-    }
+    );
 
+    const deletedCount = modified.length;
     if (deletedCount > 0) {
-      await saveLeads(leads);
       console.log(`[Bulk Delete] Successfully soft-deleted ${deletedCount} candidates from active CRM view.`);
     }
 
@@ -4999,15 +5058,13 @@ app.post('/api/leads/bulk-delete', async (req, res) => {
 // POST restore a soft-deleted lead
 app.post('/api/leads/:id/restore', async (req, res) => {
   try {
-    const leads = await getLeads(true);
-    const leadIndex = leads.findIndex(l => l.id === req.params.id);
-    if (leadIndex === -1) {
+    const leads = await getLeads();
+    const targetLead = leads.find(l => l.id === req.params.id);
+    if (!targetLead) {
       res.status(404).json({ error: 'Lead not found' });
       return;
     }
     
-    // Check if an active candidate with this phone number already exists before restoring
-    const targetLead = leads[leadIndex];
     if (targetLead.phone) {
       const activeConflict = leads.find(l => !l.isDeleted && l.id !== targetLead.id && (arePhonesMatching(l.phone, targetLead.phone) || (l.alternateNo && arePhonesMatching(l.alternateNo, targetLead.phone))));
       if (activeConflict) {
@@ -5015,29 +5072,32 @@ app.post('/api/leads/:id/restore', async (req, res) => {
         return;
       }
     }
-    
-    // Restore
-    leads[leadIndex].isDeleted = false;
-    leads[leadIndex].deletedAt = null;
-    leads[leadIndex].updatedAt = new Date().toISOString();
-    
-    // Re-award Won incentives if restoring a won candidate
-    if (leads[leadIndex].stage === 'won' && leads[leadIndex].assignedTo) {
+
+    if (targetLead.stage === 'won' && targetLead.assignedTo) {
       try {
         await awardWonIncentivesForLead(
-          leads[leadIndex].id,
-          leads[leadIndex].assignedTo,
-          leads[leadIndex].name || leads[leadIndex].id,
-          leads[leadIndex].project,
-          leads[leadIndex].country
+          targetLead.id,
+          targetLead.assignedTo,
+          targetLead.name || targetLead.id,
+          targetLead.project,
+          targetLead.country
         );
       } catch (awardErr) {
         console.error('Failed to re-award Won incentives on restore:', awardErr);
       }
     }
 
-    await saveLeads(leads);
-    console.log(`[Backup System] Lead ${leads[leadIndex].name || req.params.id} was successfully restored.`);
+    const restoredLead = await updateSingleLead(req.params.id, (lead) => {
+      lead.isDeleted = false;
+      lead.deletedAt = null;
+      return lead;
+    });
+    if (!restoredLead) {
+      res.status(404).json({ error: 'Lead not found' });
+      return;
+    }
+
+    console.log(`[Backup System] Lead ${restoredLead.name || req.params.id} was successfully restored.`);
     res.json({ success: true, message: 'Candidate successfully restored' });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -5222,7 +5282,8 @@ app.post('/api/jobs', async (req, res) => {
     const savedJob = await upsertSingleJob(newJob, 'create');
     res.status(201).json(savedJob);
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -5293,7 +5354,8 @@ app.put('/api/jobs/:id', async (req, res) => {
     const saved = await upsertSingleJob(updatedJob, 'update');
     res.json(saved);
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -5308,7 +5370,8 @@ app.delete('/api/jobs/:id', async (req, res) => {
     }
     res.json({ success: true, softDeleted: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -5323,7 +5386,8 @@ app.post('/api/jobs/:id/restore', async (req, res) => {
     }
     res.json({ success: true, job: restored });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -5361,7 +5425,8 @@ app.post('/api/updates', async (req, res) => {
 
     res.status(201).json(newUpdate);
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -5391,7 +5456,8 @@ app.put('/api/updates/:id', async (req, res) => {
     await saveUpdates(updates);
     res.json(updates[idx]);
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -5407,7 +5473,8 @@ app.delete('/api/updates/:id', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -6238,7 +6305,8 @@ app.post('/api/incentive-rules', async (req, res) => {
 
     res.status(201).json(newRule);
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -6270,7 +6338,8 @@ app.put('/api/incentive-rules/:id', async (req, res) => {
     await saveIncentiveRules(rules);
     res.json(rules[idx]);
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -6288,7 +6357,8 @@ app.delete('/api/incentive-rules/:id', async (req, res) => {
     await saveIncentiveRules(filtered);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -6316,7 +6386,8 @@ app.post('/api/monthly-target-settings', async (req, res) => {
     });
     res.json({ success: true, settings: updated });
   } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error)?.message?.includes('Cloud save failed') ? 503 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 
@@ -6487,20 +6558,14 @@ async function handleReactivationChatbot(leadId: string, messageBody: string) {
       channel: 'whatsapp'
     };
 
-    const updatedLeads = await getLeads(true);
-    const freshIdx = updatedLeads.findIndex(l => l.id === leadId);
-    if (freshIdx !== -1) {
-      const fl = updatedLeads[freshIdx];
+    await updateSingleLead(leadId, (fl) => {
       if (!Array.isArray(fl.messages)) fl.messages = [];
       fl.messages.push(outboundMsg);
       fl.reactivationStatus = nextStatus;
-      // Preserving fl.stage to ensure automated chatbot never overrides or shifts pipeline stages. Only Admins and Coordinators can modify stages.
-      fl.stage = fl.stage;
       if (addTag) {
         if (!Array.isArray(fl.tags)) fl.tags = [];
         if (!fl.tags.includes(addTag)) fl.tags.push(addTag);
       }
-      
       if (!Array.isArray(fl.timeline)) fl.timeline = [];
       fl.timeline.push({
         id: `tl_${Date.now()}_react_bot`,
@@ -6509,15 +6574,9 @@ async function handleReactivationChatbot(leadId: string, messageBody: string) {
         actor: 'Reactivation Bot',
         timestamp: new Date().toISOString()
       });
-      
-      fl.updatedAt = new Date().toISOString();
-      updatedLeads[freshIdx] = fl;
-      clearLeadsCache();
-      await saveLeads(updatedLeads);
-      console.log(`[Reactivation Chatbot] Successfully updated lead ID="${leadId}" to reactivationStatus="${nextStatus}"`);
-
-
-    }
+      return fl;
+    }, { allowDeferredSync: true });
+    console.log(`[Reactivation Chatbot] Successfully updated lead ID="${leadId}" to reactivationStatus="${nextStatus}"`);
   } catch (err) {
     console.error('Error in handleReactivationChatbot:', err);
   }
@@ -7261,72 +7320,71 @@ async function processBroadcastJob(
       const batchToCommit = pendingUpdates;
       pendingUpdates = [];
 
-      const latestLeads = [...(await getLeads())];
-      const leadIdxMap = new Map<string, number>();
-      latestLeads.forEach((l, i) => {
-        if (l && l.id) leadIdxMap.set(l.id, i);
+      const byId = new Map<string, typeof batchToCommit[number]>();
+      batchToCommit.forEach(item => {
+        if (item.target.leadId) byId.set(item.target.leadId, item);
       });
 
-      const nowIso = new Date().toISOString();
-      for (const item of batchToCommit) {
-        const { leadId, phone, name, gender } = item.target;
-        const existingIdx = leadIdxMap.get(leadId);
-
-        if (existingIdx === undefined) {
-          const newLeadId = `LEAD_REACT_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-          const resolvedGender = normalizeStrictGender(gender) || normalizeStrictGender(params.targetGender) || '';
-          const newLead: Lead = {
-            id: newLeadId,
-            name,
-            phone,
-            gender: resolvedGender,
-            age: '26',
-            origin: 'Darjeeling',
-            country: params.country,
-            position: params.jobTitle,
-            experience: '3 years',
-            salaryRange: params.salary || '180 OMR',
-            adminRemarks: '',
-            assignedTo: 'unassigned',
-            importance: 4,
-            stage: 'new',
-            budget: 500,
-            budgetRaw: '500',
-            summary: 'Matched via AI Reactivation Campaign',
-            requirements: [params.jobTitle],
-            fitScore: 'high',
-            nextAction: 'Qualify on WhatsApp reply',
-            campaign: params.campaignName,
-            reactivationStatus: item.dispatchResult.status === 'failed' ? 'failed' : 'sent',
-            createdAt: nowIso,
-            updatedAt: nowIso,
-            messages: [item.outboundMsg],
-            timeline: [item.tlItem],
-            entryDate: nowIso.split('T')[0],
-            assignDate: '',
-            remarks1: '',
-            remarks2: '',
-            remarks3: '',
-            notes: ''
-          };
-          latestLeads.push(newLead);
-          leadIdxMap.set(newLeadId, latestLeads.length - 1);
-        } else {
-          const lead = { ...latestLeads[existingIdx] };
+      const updatedExisting = await updateMultipleLeads(
+        Array.from(byId.keys()),
+        (lead) => {
+          const item = byId.get(lead.id);
+          if (!item) return null;
           lead.campaign = params.campaignName;
-          // Preserve lead.stage on campaign launch
           lead.salaryRange = params.salary || lead.salaryRange || '180 OMR';
           lead.position = params.jobTitle || lead.position;
           lead.country = params.country || lead.country;
           lead.reactivationStatus = item.dispatchResult.status === 'failed' ? 'failed' : 'sent';
           lead.messages = [...(Array.isArray(lead.messages) ? lead.messages : []), item.outboundMsg];
           lead.timeline = [...(Array.isArray(lead.timeline) ? lead.timeline : []), item.tlItem];
-          lead.updatedAt = nowIso;
-          latestLeads[existingIdx] = lead;
-        }
-      }
+          return lead;
+        },
+        { allowDeferredSync: true }
+      );
 
-      await saveLeads(latestLeads);
+      const updatedIds = new Set(updatedExisting.map(l => l.id));
+      const nowIso = new Date().toISOString();
+      for (const item of batchToCommit) {
+        if (updatedIds.has(item.target.leadId)) continue;
+        const { phone, name, gender } = item.target;
+        const newLeadId = `LEAD_REACT_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const resolvedGender = normalizeStrictGender(gender) || normalizeStrictGender(params.targetGender) || '';
+        const newLead: Lead = {
+          id: newLeadId,
+          name,
+          phone,
+          gender: resolvedGender,
+          age: '26',
+          origin: 'Darjeeling',
+          country: params.country,
+          position: params.jobTitle,
+          experience: '3 years',
+          salaryRange: params.salary || '180 OMR',
+          adminRemarks: '',
+          assignedTo: 'unassigned',
+          importance: 4,
+          stage: 'new',
+          budget: 500,
+          budgetRaw: '500',
+          summary: 'Matched via AI Reactivation Campaign',
+          requirements: [params.jobTitle],
+          fitScore: 'high',
+          nextAction: 'Qualify on WhatsApp reply',
+          campaign: params.campaignName,
+          reactivationStatus: item.dispatchResult.status === 'failed' ? 'failed' : 'sent',
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          messages: [item.outboundMsg],
+          timeline: [item.tlItem],
+          entryDate: nowIso.split('T')[0],
+          assignDate: '',
+          remarks1: '',
+          remarks2: '',
+          remarks3: '',
+          notes: ''
+        };
+        await addLead(newLead, { allowDeferredSync: true });
+      }
     };
 
     // Snapshot existing leads for template placeholder resolution before dispatching
@@ -7484,43 +7542,33 @@ app.post('/api/reactivation/simulate-reply', async (req, res) => {
       return;
     }
 
-    const leads = await getLeads(true);
-    const idx = leads.findIndex(l => l.id === leadId);
-    if (idx === -1) {
+    const updatedLead = await updateSingleLead(leadId, (lead) => {
+      const inboundMsg: Message = {
+        id: `msg_react_in_${Date.now()}`,
+        sender: 'lead',
+        senderName: lead.name,
+        text: replyText,
+        timestamp: new Date().toISOString(),
+        status: 'delivered',
+        channel: 'whatsapp'
+      };
+      if (!Array.isArray(lead.messages)) lead.messages = [];
+      lead.messages.push(inboundMsg);
+      if (!Array.isArray(lead.timeline)) lead.timeline = [];
+      lead.timeline.push({
+        id: `tl_${Date.now()}_sim_reply`,
+        type: 'message',
+        text: `Inbound WhatsApp simulated reply: "${replyText}"`,
+        actor: lead.name,
+        timestamp: new Date().toISOString()
+      });
+      return lead;
+    });
+
+    if (!updatedLead) {
       res.status(404).json({ error: 'Lead not found' });
       return;
     }
-
-    const lead = leads[idx];
-    
-    // Add candidate reply to messages log
-    const inboundMsg: Message = {
-      id: `msg_react_in_${Date.now()}`,
-      sender: 'lead',
-      senderName: lead.name,
-      text: replyText,
-      timestamp: new Date().toISOString(),
-      status: 'delivered',
-      channel: 'whatsapp'
-    };
-
-    if (!Array.isArray(lead.messages)) lead.messages = [];
-    lead.messages.push(inboundMsg);
-    
-    if (!Array.isArray(lead.timeline)) lead.timeline = [];
-    lead.timeline.push({
-      id: `tl_${Date.now()}_sim_reply`,
-      type: 'message',
-      text: `Inbound WhatsApp simulated reply: "${replyText}"`,
-      actor: lead.name,
-      timestamp: new Date().toISOString()
-    });
-
-    lead.updatedAt = new Date().toISOString();
-    leads[idx] = lead;
-    
-    clearLeadsCache();
-    await saveLeads(leads);
 
     // Call the conversational chatbot in the background!
     // Set a very slight timeout to simulate realistic typing latency
@@ -7585,39 +7633,32 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
         }
       }
 
-      // Append message
-      existingLead.messages.push({
-        id: `msg_webhook_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        sender: 'lead',
-        senderName: existingLead.name,
-        text: initialMessage,
-        timestamp: new Date().toISOString(),
-        status: 'delivered',
-        channel: 'whatsapp'
-      });
+      const savedExisting = await updateSingleLead(existingLead.id, (target) => {
+        if (!Array.isArray(target.messages)) target.messages = [];
+        target.messages.push({
+          id: `msg_webhook_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          sender: 'lead',
+          senderName: target.name,
+          text: initialMessage,
+          timestamp: new Date().toISOString(),
+          status: 'delivered',
+          channel: 'whatsapp'
+        });
+        target.campaign = finalCampaignName;
+        if (!Array.isArray(target.timeline)) target.timeline = [];
+        target.timeline.push({
+          id: `tl_webhook_${Date.now()}`,
+          type: 'message',
+          text: `Inbound query on campaign: "${finalCampaignName}". Message: "${initialMessage}"`,
+          actor: target.name,
+          timestamp: new Date().toISOString()
+        });
+        return target;
+      }, { allowDeferredSync: true });
 
-      // Update campaign/source if not already set or override to trace the latest campaign attribution
-      existingLead.campaign = finalCampaignName;
-
-      // Add timeline event
-      if (!Array.isArray(existingLead.timeline)) existingLead.timeline = [];
-      existingLead.timeline.push({
-        id: `tl_webhook_${Date.now()}`,
-        type: 'message',
-        text: `Inbound query on campaign: "${finalCampaignName}". Message: "${initialMessage}"`,
-        actor: existingLead.name,
-        timestamp: new Date().toISOString()
-      });
-
-      existingLead.updatedAt = new Date().toISOString();
-
-      clearLeadsCache();
-      await saveLeads(leads);
-
-      // Trigger auto-reply if enabled
       handleAutoReplyIfEnabled(existingLead.id, phone, existingLead.name);
 
-      res.json({ success: true, lead: existingLead, merged: true });
+      res.json({ success: true, lead: savedExisting || existingLead, merged: true });
       return;
     }
 
@@ -7853,29 +7894,26 @@ Suggest the next message a sales rep should send. Output ONLY the response text 
 // POST AI re-qualify lead parameters based on conversations
 app.post('/api/leads/:id/ai-requalify', async (req, res) => {
   try {
-    const leads = await getLeads(true);
-    const idx = leads.findIndex(l => l.id === req.params.id);
-    if (idx === -1) {
+    const lead = await getLeadById(req.params.id);
+    if (!lead) {
       res.status(404).json({ error: 'Lead not found' });
       return;
     }
 
-    const lead = leads[idx];
     const ai = getGemini();
 
     if (!ai) {
-      // Mock re-qualification: increment budget by 10% and update text in notes
-      lead.notes = `${lead.notes}\n[AI Sim Re-qualify ${new Date().toLocaleDateString()}]: Lead context refreshed. Budget maintained.`;
-      lead.updatedAt = new Date().toISOString();
-      leads[idx] = lead;
-      await saveLeads(leads);
-      res.json(lead);
+      const savedSim = await updateSingleLead(req.params.id, (current) => {
+        current.notes = `${current.notes || ''}\n[AI Sim Re-qualify ${new Date().toLocaleDateString()}]: Lead context refreshed. Budget maintained.`;
+        return current;
+      });
+      res.json(savedSim || lead);
       return;
     }
 
     console.log(`Re-qualifying lead ${lead.name} with live Gemini API...`);
 
-    const formattedTranscript = lead.messages.map(m => `${m.sender === 'lead' ? 'Lead' : 'Sales Rep'}: ${m.text}`).join('\n');
+    const formattedTranscript = (lead.messages || []).map(m => `${m.sender === 'lead' ? 'Lead' : 'Sales Rep'}: ${m.text}`).join('\n');
 
     const promptSystem = `You are a Lead Scoring and Qualification Engine for a WhatsApp Meta CRM.
 Analyze the updated chat conversation log and synthesize/refine the lead's profile, requirements, and budget details.
@@ -7888,7 +7926,7 @@ ${formattedTranscript}
 
 Current lead status:
 - Budget Raw: ${lead.budgetRaw}
-- Requirements list: ${lead.requirements.join(', ')}
+- Requirements list: ${(lead.requirements || []).join(', ')}
 - Summary: ${lead.summary}
 
 Provide updated qualification attributes:
@@ -7914,7 +7952,7 @@ Provide updated qualification attributes:
             requirements: {
               type: Type.ARRAY,
               items: { type: Type.STRING }
-                },
+            },
             fitScore: { type: Type.STRING },
             nextAction: { type: Type.STRING }
           },
@@ -7924,35 +7962,34 @@ Provide updated qualification attributes:
     });
 
     const output = response.text;
+    let finalLead = lead;
     if (output) {
       const parsed = JSON.parse(output.trim());
-      
       let cleanFitScore: FitScore = lead.fitScore;
       if (['high', 'medium', 'low', 'unqualified'].includes(parsed.fitScore)) {
         cleanFitScore = parsed.fitScore as FitScore;
       }
 
-      lead.budget = Number(parsed.budget) || lead.budget || 0;
-      lead.budgetRaw = parsed.budgetRaw || lead.budgetRaw;
-      lead.summary = parsed.summary || lead.summary;
-      lead.requirements = parsed.requirements || lead.requirements;
-      lead.fitScore = cleanFitScore;
-      lead.nextAction = parsed.nextAction || lead.nextAction;
-      lead.updatedAt = new Date().toISOString();
-
-      // Record system log message
-      lead.messages.push({
-        id: `sys_${Date.now()}`,
-        sender: 'system',
-        text: `Lead automatically qualified by Gemini AI. Fit Score: ${cleanFitScore.toUpperCase()}. Next action updated to: "${parsed.nextAction}"`,
-        timestamp: new Date().toISOString()
+      const savedAi = await updateSingleLead(req.params.id, (current) => {
+        current.budget = Number(parsed.budget) || current.budget || 0;
+        current.budgetRaw = parsed.budgetRaw || current.budgetRaw;
+        current.summary = parsed.summary || current.summary;
+        current.requirements = parsed.requirements || current.requirements;
+        current.fitScore = cleanFitScore;
+        current.nextAction = parsed.nextAction || current.nextAction;
+        if (!Array.isArray(current.messages)) current.messages = [];
+        current.messages.push({
+          id: `sys_${Date.now()}`,
+          sender: 'system',
+          text: `Lead automatically qualified by Gemini AI. Fit Score: ${cleanFitScore.toUpperCase()}. Next action updated to: "${parsed.nextAction}"`,
+          timestamp: new Date().toISOString()
+        });
+        return current;
       });
-
-      leads[idx] = lead;
-      await saveLeads(leads);
+      if (savedAi) finalLead = savedAi;
     }
 
-    res.json(lead);
+    res.json(finalLead);
 
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -8182,12 +8219,7 @@ Return the result as JSON adhering to the specified schema. Keep all strings cle
       }
     }
 
-    // Reload the latest leads to make sure we don't overwrite any intermediate changes
-    const latestLeads = await getLeads(true);
-    const latestIdx = latestLeads.findIndex((l: any) => l.id === leadId);
-    if (latestIdx !== -1) {
-      const targetLead = latestLeads[latestIdx];
-
+    await updateSingleLead(leadId, (targetLead) => {
       if (extractedExperience) targetLead.experience = extractedExperience;
       if (extractedQualification) targetLead.qualification = extractedQualification;
       if (extractedSummary) {
@@ -8199,7 +8231,6 @@ Return the result as JSON adhering to the specified schema. Keep all strings cle
         targetLead.cvTextContent = `Extracted CV summary of ${targetLead.name}. Experience: ${extractedExperience}. Skills: ${extractedQualification}. Career: ${extractedSummary}`;
       }
 
-      // Add timeline entry
       if (!targetLead.timeline) targetLead.timeline = [];
       targetLead.timeline.push({
         id: `tl_${Date.now()}_ai_scan`,
@@ -8209,9 +8240,9 @@ Return the result as JSON adhering to the specified schema. Keep all strings cle
         timestamp: new Date().toISOString()
       });
 
-      await saveLeads(latestLeads);
-      console.log(`[Background CV Parser] Successfully auto-filled profile and saved timeline for lead ${leadId}`);
-    }
+      return targetLead;
+    }, { allowDeferredSync: true });
+    console.log(`[Background CV Parser] Successfully auto-filled profile and saved timeline for lead ${leadId}`);
   } catch (err) {
     console.error(`[Background CV Parser] Error scanning CV for lead ${leadId}:`, err);
   }

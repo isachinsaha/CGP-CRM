@@ -9,9 +9,17 @@ import {
   LayoutGrid, Table, BarChart3, Briefcase, ShieldAlert, Sparkles, Bot,
   RefreshCw, MessageSquare, Plus, HelpCircle, Layers, Lock, User, Check, X, Shield,
   LogOut, Users, UserCheck, Sun, Moon, PiggyBank, Menu, ChevronRight, Settings, ChevronDown, Download, Trash2, Image,
-  CheckCheck, AlertCircle, Copy
+  CheckCheck, AlertCircle, Copy, UploadCloud, Clock
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import {
+  OutboxItem,
+  getOutboxItems,
+  subscribeOutbox,
+  flushOutbox,
+  removeOutboxItem,
+  hasUnsavedWork
+} from './utils/syncOutbox.ts';
 
 // Import child components
 import LeadBoard from './components/LeadBoard.tsx';
@@ -210,6 +218,12 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [outboxItems, setOutboxItems] = useState<OutboxItem[]>(() => getOutboxItems());
+  const [isFlushingOutbox, setIsFlushingOutbox] = useState(false);
+  const [isOutboxPopoverOpen, setIsOutboxPopoverOpen] = useState(false);
+  const outboxPopoverRef = useRef<HTMLDivElement>(null);
   const [logoError, setLogoError] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -263,6 +277,9 @@ export default function App() {
     const handleClickOutside = (e: MouseEvent) => {
       if (adminMenuRef.current && !adminMenuRef.current.contains(e.target as Node)) {
         setIsAdminMenuOpen(false);
+      }
+      if (outboxPopoverRef.current && !outboxPopoverRef.current.contains(e.target as Node)) {
+        setIsOutboxPopoverOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown, true);
@@ -320,7 +337,7 @@ export default function App() {
       tagsList: updated.tagsList || tagsList
     };
     try {
-      await fetch('/api/metadata', {
+      const res = await fetch('/api/metadata', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -329,8 +346,13 @@ export default function App() {
         },
         body: JSON.stringify(body)
       });
-    } catch (err) {
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        setActionError(errData.error || 'Failed to persist CRM options/tags to cloud database.');
+      }
+    } catch (err: any) {
       console.error('Error syncing CRM metadata to server:', err);
+      setActionError(err?.message || 'Network error while saving CRM options/tags to cloud.');
     }
   };
 
@@ -862,7 +884,19 @@ export default function App() {
                   });
                   if (selectedLeadRef.current) {
                     const updatedOpen = changedMap.get(selectedLeadRef.current.id);
-                    if (updatedOpen) setSelectedLead(updatedOpen);
+                    if (updatedOpen) {
+                      setSelectedLead(prev => {
+                        if (!prev || prev.id !== updatedOpen.id) return prev;
+                        return {
+                          ...prev,
+                          ...updatedOpen,
+                          timeline: (updatedOpen.timeline && updatedOpen.timeline.length > 0) ? updatedOpen.timeline : prev.timeline,
+                          messages: (updatedOpen.messages && updatedOpen.messages.length >= (prev.messages?.length || 0)) ? updatedOpen.messages : prev.messages,
+                          cvTextContent: updatedOpen.cvTextContent ?? prev.cvTextContent,
+                          deletedDocuments: (updatedOpen as any).deletedDocuments ?? (prev as any).deletedDocuments
+                        };
+                      });
+                    }
                   }
                 }
                 return;
@@ -886,6 +920,56 @@ export default function App() {
     setSelectedLead(prev => (prev && prev.id === updatedLead.id ? { ...prev, ...updatedLead } : prev));
   }, []);
 
+  // Subscribe to durable Retry Outbox + auto-flush every 15s and on browser online event
+  useEffect(() => {
+    const syncItems = () => setOutboxItems(getOutboxItems());
+    const unsub = subscribeOutbox(syncItems);
+
+    const runFlush = async () => {
+      if (getOutboxItems().length === 0) return;
+      setIsFlushingOutbox(true);
+      try {
+        await flushOutbox(handleSingleLeadUpdated);
+      } finally {
+        setIsFlushingOutbox(false);
+        syncItems();
+      }
+    };
+
+    const handleOnline = () => {
+      runFlush();
+    };
+    window.addEventListener('online', handleOnline);
+    const intervalId = setInterval(() => {
+      if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+        runFlush();
+      }
+    }, 15000);
+
+    // Trigger initial flush shortly after login/mount if leftover items exist
+    if (currentUser && getOutboxItems().length > 0) {
+      runFlush();
+    }
+
+    return () => {
+      unsub();
+      window.removeEventListener('online', handleOnline);
+      clearInterval(intervalId);
+    };
+  }, [currentUser?.username, handleSingleLeadUpdated]);
+
+  // Warn before closing tab if there are unsaved local drafts or pending outbox writes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedWork()) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
   // Update lead stage pipeline state with instant optimistic update
   const handleUpdateStage = async (id: string, stage: LeadStage) => {
     // 1. Instantly update UI state optimistically so stage change is instantaneous and never reverts
@@ -902,7 +986,8 @@ export default function App() {
         headers: { 
           'Content-Type': 'application/json',
           'x-user-role': userRole,
-          'x-agent-id': currentAgentId
+          'x-agent-id': currentAgentId,
+          'x-source-view': 'pipeline_board'
         },
         body: JSON.stringify({ stage })
       });
@@ -920,42 +1005,57 @@ export default function App() {
           }
         }
         const errJson = await res.json().catch(() => ({}));
-        alert(errJson.error || 'Failed to update lead stage. Please try again.');
+        setActionError(errJson.error || 'Failed to update lead stage in cloud database. Reverted.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to modify stage metadata', err);
       if (prevStage) {
         setLeads(prev => prev.map(l => l.id === id ? { ...l, stage: prevStage } : l));
+        if (selectedLead && selectedLead.id === id) {
+          setSelectedLead(prev => prev ? { ...prev, stage: prevStage } : null);
+        }
       }
+      setActionError(err?.message || 'Network error while updating lead stage. Reverted.');
     }
   };
 
   // Remove a lead from records
   const handleDeleteLead = async (id: string) => {
     if (userRole !== 'admin') {
-      alert('Security Alert: Sub-agents do not have privileges to remove database records.');
+      setActionError('Security Alert: Sub-agents do not have privileges to remove database records.');
       return;
     }
-    if (!window.confirm('Are you absolutely sure you want to permanently remove this candidate from the placement database? This will clear all call remarks.')) return;
+    if (!window.confirm('Are you absolutely sure you want to remove this candidate from the active placement database? This moves them to the Recycle Bin.')) return;
     try {
-      const res = await fetch(`/api/leads/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/leads/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'x-user-role': userRole,
+          'x-agent-id': currentAgentId
+        }
+      });
       if (res.ok) {
         if (selectedLead && selectedLead.id === id) {
           selectedLeadRef.current = null;
           setSelectedLead(null);
         }
         pullCrmData(true);
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setActionError(errJson.error || 'Failed to move candidate to Recycle Bin.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to remove placement lead', err);
+      setActionError(err?.message || 'Network error while removing placement lead.');
     }
   };
 
   // Submit manual candidate enroll
   const handleCreateLead = async (e: React.FormEvent) => {
     e.preventDefault();
+    setCreateError(null);
     if (!createFields.phone) {
-      alert('Please fill out Mobile number field.');
+      setCreateError('Please fill out Mobile number field.');
       return;
     }
     setCreatingProgress(true);
@@ -968,6 +1068,7 @@ export default function App() {
           'Content-Type': 'application/json',
           'x-user-role': userRole,
           'x-agent-id': currentAgentId,
+          'x-source-view': 'enroll_modal',
           ...(currentUser?.token ? { 'Authorization': `Bearer ${currentUser.token}` } : {})
         },
         body: JSON.stringify({
@@ -981,6 +1082,7 @@ export default function App() {
       });
       if (res.ok) {
         setSuccessMsg('Candidate registered in directory successfully!');
+        setCreateError(null);
         setCreateFields({
           name: '',
           phone: '',
@@ -1005,12 +1107,12 @@ export default function App() {
           setSuccessMsg('');
         }, 1500);
       } else {
-        const errData = await res.json();
-        alert(errData.error || 'Failed to create record.');
+        const errData = await res.json().catch(() => ({}));
+        setCreateError(errData.error || 'Failed to create record in cloud database.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Error connecting with backend server.');
+      setCreateError(err?.message || 'Error connecting with backend server.');
     } finally {
       setCreatingProgress(false);
     }
@@ -1044,6 +1146,21 @@ export default function App() {
             <X className="h-4 w-4" />
           </button>
         </motion.div>
+      )}
+
+      {/* Visible Cloud Persistence Error Banner */}
+      {actionError && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[150] bg-rose-950/95 border border-rose-500/70 text-rose-100 px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 max-w-lg">
+          <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" />
+          <span className="text-xs font-bold">{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="ml-2 p-1 text-rose-300 hover:text-white transition cursor-pointer shrink-0"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       )}
 
       {/* TOP HEADER & NAVIGATION BAR */}
@@ -1269,6 +1386,87 @@ export default function App() {
                 >
                   {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
                 </button>
+
+                {/* Pending Cloud Sync Outbox Indicator */}
+                {outboxItems.length > 0 && (
+                  <div className="relative" ref={outboxPopoverRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsOutboxPopoverOpen(prev => !prev)}
+                      className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-[11px] font-black flex items-center gap-1.5 cursor-pointer transition-all"
+                      title="Edits queued locally waiting to sync with Cloud Firestore"
+                    >
+                      <UploadCloud className={`h-3.5 w-3.5 text-amber-400 ${isFlushingOutbox ? 'animate-bounce' : 'animate-pulse'}`} />
+                      <span className="hidden sm:inline">Pending Cloud Sync</span>
+                      <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 font-mono text-[10px] font-black">
+                        {outboxItems.length}
+                      </span>
+                    </button>
+
+                    {isOutboxPopoverOpen && (
+                      <div className="absolute top-full right-0 mt-2 w-80 bg-slate-900 border border-amber-500/40 rounded-2xl shadow-2xl p-3 z-50 text-left space-y-2.5">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                          <div>
+                            <h4 className="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                              <Clock className="h-3.5 w-3.5" />
+                              Queued Cloud Saves ({outboxItems.length})
+                            </h4>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              Protected locally — auto-retries every 15s and on reconnect.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isFlushingOutbox}
+                            onClick={async () => {
+                              setIsFlushingOutbox(true);
+                              try {
+                                await flushOutbox(handleSingleLeadUpdated);
+                              } finally {
+                                setIsFlushingOutbox(false);
+                                setOutboxItems(getOutboxItems());
+                              }
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black uppercase cursor-pointer disabled:opacity-50 shrink-0"
+                          >
+                            {isFlushingOutbox ? 'Syncing...' : 'Retry All Now'}
+                          </button>
+                        </div>
+
+                        <div className="max-h-56 overflow-y-auto space-y-1.5">
+                          {outboxItems.map((item) => (
+                            <div
+                              key={item.id}
+                              className="p-2 rounded-xl bg-slate-950/90 border border-slate-800 flex items-start justify-between gap-2"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-[11px] font-bold text-slate-100 truncate">
+                                  {item.leadName || item.leadPhone || item.leadId}
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-mono">
+                                  {item.sourceView} • Attempts: {item.attempts}
+                                </p>
+                                {item.lastError && (
+                                  <p className="text-[10px] text-rose-400 truncate mt-0.5" title={item.lastError}>
+                                    {item.lastError}
+                                  </p>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeOutboxItem(item.id)}
+                                className="text-[10px] font-bold text-slate-500 hover:text-rose-400 px-1.5 py-0.5 rounded hover:bg-rose-950/30 cursor-pointer shrink-0"
+                                title="Discard queued change"
+                              >
+                                Discard
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Refresh Cloud Data */}
                 <button
@@ -1978,6 +2176,12 @@ export default function App() {
                   )}
                 </select>
               </div>
+
+              {createError && (
+                <div className="text-[11px] text-center font-bold text-rose-400 bg-rose-950/30 p-2.5 rounded border border-rose-800/60 mt-3">
+                  {createError}
+                </div>
+              )}
 
               {successMsg && (
                 <div className="text-[11px] text-center font-bold text-emerald-400 bg-emerald-950/20 p-2.5 rounded border border-emerald-800/60 animate-pulse mt-3">

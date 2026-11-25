@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import LeadWhatsAppChat from './LeadWhatsAppChat.tsx';
 import { getCountryFlagUrl, formatCandidateName, isCoordinatorMatch } from '../utils.ts';
+import { enqueueOutboxSave, isRetryableHttpStatus } from '../utils/syncOutbox.ts';
 
 interface MessagingCenterProps {
   leads: Lead[];
@@ -611,7 +612,7 @@ export default function MessagingCenter({
     if (!currentChatLead || isRefreshingChat) return;
     setIsRefreshingChat(true);
     try {
-      const res = await fetch(`/api/leads/${currentChatLead.id}`);
+      const res = await fetch(`/api/leads/${currentChatLead.id}?fresh=1`, { cache: 'no-store' });
       if (res.ok) {
         const updatedLead = await res.json();
         if (onLeadUpdated) {
@@ -633,45 +634,64 @@ export default function MessagingCenter({
     setSaveErrorMsg(null);
 
     const coordToAssign = targetCoordinator || leadFormData.assignedTo;
+    const prevAdminRemarks = String(currentChatLead.adminRemarks || '').trim();
+    const prevNormalizedAdminRemarks =
+      prevAdminRemarks.toLowerCase() === 'inbound whatsapp ad enquiry' ? '' : prevAdminRemarks;
+    const nextAdminRemarks = String(leadFormData.adminRemarks || '').trim();
+    const adminRemarksCleared = prevNormalizedAdminRemarks !== '' && nextAdminRemarks === '';
+
+    const updatedPayload = {
+      name: leadFormData.name.trim() || 'Unnamed candidate',
+      phone: leadFormData.phone.trim() || currentChatLead.phone,
+      alternateNo: leadFormData.alternateNo.trim() || currentChatLead.alternateNo || '',
+      gender: leadFormData.gender,
+      age: leadFormData.age !== '' ? (Number(leadFormData.age) || 0) : 0,
+      origin: leadFormData.origin.trim() || currentChatLead.origin || '',
+      country: leadFormData.country,
+      position: leadFormData.position,
+      experience: leadFormData.experience,
+      qualification: leadFormData.qualification,
+      importance: Number(leadFormData.importance || 3),
+      source: leadFormData.source || currentChatLead.source || 'Ads',
+      project: leadFormData.project,
+      stage: leadFormData.stage,
+      assignedTo: coordToAssign,
+      tags: leadFormData.tags || [],
+      adminRemarks: leadFormData.adminRemarks,
+      clearedRemarks: adminRemarksCleared ? ['adminRemarks'] : [],
+      allowClearRemarks: adminRemarksCleared,
+      intake: true,
+      assignedFrom: 'whatsapp_chat_menu'
+    };
 
     try {
-      const updatedPayload = {
-        ...currentChatLead,
-        name: leadFormData.name.trim() || 'Unnamed candidate',
-        phone: leadFormData.phone.trim() || currentChatLead.phone,
-        alternateNo: leadFormData.alternateNo.trim() || currentChatLead.alternateNo || '',
-        gender: leadFormData.gender,
-        age: leadFormData.age,
-        origin: leadFormData.origin.trim() || currentChatLead.origin || '',
-        country: leadFormData.country,
-        position: leadFormData.position,
-        experience: leadFormData.experience,
-        qualification: leadFormData.qualification,
-        importance: Number(leadFormData.importance || 3),
-        source: leadFormData.source || currentChatLead.source || 'Ads',
-        project: leadFormData.project,
-        stage: leadFormData.stage,
-        assignedTo: coordToAssign,
-        tags: leadFormData.tags || [],
-        adminRemarks: leadFormData.adminRemarks,
-        allowClearRemarks: true,
-        intake: true,
-        assignedFrom: 'whatsapp_chat_menu'
-      };
-
       const res = await fetch(`/api/leads/${currentChatLead.id}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
           'x-user-role': userRole,
           'x-agent-id': currentAgentId,
-          'x-assigned-from': 'whatsapp_chat_menu'
+          'x-assigned-from': 'whatsapp_chat_menu',
+          'x-source-view': 'whatsapp_chat_menu'
         },
         body: JSON.stringify(updatedPayload)
       });
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
+        if (isRetryableHttpStatus(res.status)) {
+          enqueueOutboxSave({
+            leadId: currentChatLead.id,
+            leadName: updatedPayload.name,
+            leadPhone: updatedPayload.phone,
+            payload: updatedPayload,
+            sourceView: 'whatsapp_chat_menu',
+            lastError: errJson.error || `HTTP ${res.status}`
+          });
+          setSaveErrorMsg('Cloud sync busy — profile edits & assignment queued in Pending Cloud Sync and will retry automatically.');
+          setTimeout(() => setSaveErrorMsg(null), 6000);
+          return;
+        }
         throw new Error(errJson.error || 'Failed to update lead information. Server returned an error.');
       }
 
@@ -686,7 +706,15 @@ export default function MessagingCenter({
       setTimeout(() => setSaveSuccessMsg(null), 4000);
     } catch (err: any) {
       console.error('Error saving lead from messaging:', err);
-      setSaveErrorMsg(err?.message || 'Error updating lead. Please try again.');
+      enqueueOutboxSave({
+        leadId: currentChatLead.id,
+        leadName: updatedPayload.name,
+        leadPhone: updatedPayload.phone,
+        payload: updatedPayload,
+        sourceView: 'whatsapp_chat_menu',
+        lastError: err?.message || 'Network interruption'
+      });
+      setSaveErrorMsg('Network hiccup — edits & coordinator transfer queued in Pending Cloud Sync and will auto-retry.');
       setTimeout(() => setSaveErrorMsg(null), 6000);
     } finally {
       setIsSavingLead(false);

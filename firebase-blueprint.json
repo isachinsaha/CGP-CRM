@@ -1,6 +1,324 @@
 {
+  "entities": {
+    "Coordinator": {
+      "title": "Coordinator",
+      "description": "CRM administrator or telecaller coordinator account.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 100 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "password": { "type": "string", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["admin", "agent"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "isDeleted": { "type": "boolean" }
+      },
+      "required": ["id", "username", "displayName", "role", "createdAt"]
+    },
+    "Lead": {
+      "title": "Lead",
+      "description": "Candidate placement profile, remarks, verification docs, tasks, timeline, and active WhatsApp chat slice.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "serialNo": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "assignedTo": { "type": "string", "maxLength": 100 },
+        "stage": { "type": "string", "maxLength": 64 },
+        "remarks1": { "type": "string", "maxLength": 20000 },
+        "remarks2": { "type": "string", "maxLength": 20000 },
+        "remarks3": { "type": "string", "maxLength": 20000 },
+        "adminRemarks": { "type": "string", "maxLength": 20000 },
+        "notes": { "type": "string", "maxLength": 40000 },
+        "isDeleted": { "type": "boolean" },
+        "hasArchivedHistory": { "type": "boolean" },
+        "archivedChunksCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "phone", "stage"]
+    },
+    "LeadArchiveChunk": {
+      "title": "LeadArchiveChunk",
+      "description": "Immutable overflow archive chunk for old messages or non-remark system events when a lead document exceeds 750 KB.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "leadId": { "type": "string", "maxLength": 128 },
+        "kind": { "type": "string", "enum": ["messages", "timeline", "messages_and_timeline"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "count": { "type": "number" },
+        "items": { "type": "array" }
+      },
+      "required": ["id", "leadId", "kind", "createdAt", "count", "items"]
+    },
+    "LeadAuditEntry": {
+      "title": "LeadAuditEntry",
+      "description": "Immutable append-only audit log entry recording every remark, note, stage, coordinator, and deletion change.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "leadId": { "type": "string", "maxLength": 128 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "candidateName": { "type": "string", "maxLength": 200 },
+        "field": { "type": "string", "maxLength": 64 },
+        "previousValue": { "type": "string", "maxLength": 8000 },
+        "newValue": { "type": "string", "maxLength": 8000 },
+        "actor": { "type": "string", "maxLength": 120 },
+        "sourceView": { "type": "string", "maxLength": 80 },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "leadId", "field", "previousValue", "newValue", "actor", "sourceView", "timestamp"]
+    },
+    "LeadBackupSnapshot": {
+      "title": "LeadBackupSnapshot",
+      "description": "Immutable durable cloud backup snapshot metadata header.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "source": { "type": "string", "maxLength": 200 },
+        "isMondayScheduled": { "type": "boolean" },
+        "totalLeads": { "type": "number" },
+        "chunkCount": { "type": "number" },
+        "sizeBytes": { "type": "number" },
+        "sizeFormatted": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "timestamp", "source", "isMondayScheduled", "totalLeads", "chunkCount", "sizeBytes", "sizeFormatted"]
+    },
+    "LeadBackupChunk": {
+      "title": "LeadBackupChunk",
+      "description": "Chunk payload storing part of a durable cloud database snapshot JSON.",
+      "type": "object",
+      "properties": {
+        "index": { "type": "number" },
+        "data": { "type": "string", "maxLength": 600000 }
+      },
+      "required": ["index", "data"]
+    },
+    "Job": {
+      "title": "Job",
+      "description": "Active overseas job demand listing.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "country": { "type": "string", "maxLength": 100 },
+        "serviceCharge": { "type": "string", "maxLength": 500 },
+        "imageUrl": { "type": "string", "maxLength": 500 },
+        "isDeleted": { "type": "boolean" }
+      },
+      "required": ["id"]
+    },
+    "JobsBackup": {
+      "title": "JobsBackup",
+      "description": "Point-in-time snapshot of jobs.",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "string" }
+      }
+    },
+    "ImportantUpdate": {
+      "title": "ImportantUpdate",
+      "description": "Live ticker broadcast update.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "text": { "type": "string", "maxLength": 5000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "text"]
+    },
+    "Wallet": {
+      "title": "Wallet",
+      "description": "Coordinator incentive wallet and transaction history.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 100 },
+        "balance": { "type": "number" }
+      },
+      "required": ["id"]
+    },
+    "WalletBackup": {
+      "title": "WalletBackup",
+      "description": "Point-in-time snapshot of coordinator wallets.",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "string" }
+      }
+    },
+    "WalletLedgerEntry": {
+      "title": "WalletLedgerEntry",
+      "description": "Append-only wallet ledger entry.",
+      "type": "object",
+      "properties": {
+        "txId": { "type": "string", "maxLength": 128 }
+      }
+    },
+    "IncentiveRule": {
+      "title": "IncentiveRule",
+      "description": "Incentive payout rule per project.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "projectName": { "type": "string", "maxLength": 200 }
+      },
+      "required": ["id", "projectName"]
+    },
+    "WhatsAppTemplate": {
+      "title": "WhatsAppTemplate",
+      "description": "WhatsApp Cloud message template.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 }
+      },
+      "required": ["id", "title"]
+    },
+    "FileBackup": {
+      "title": "FileBackup",
+      "description": "Stored upload/media file metadata backup.",
+      "type": "object",
+      "properties": {
+        "fileName": { "type": "string", "maxLength": 256 }
+      }
+    },
+    "FileBackupChunk": {
+      "title": "FileBackupChunk",
+      "description": "Base64 chunk of an uploaded file stored durably in Firestore.",
+      "type": "object",
+      "properties": {
+        "data": { "type": "string" }
+      }
+    },
+    "MediaLibraryItem": {
+      "title": "MediaLibraryItem",
+      "description": "Reusable media asset entry in Media Library.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "System notification record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 }
+      }
+    },
+    "MetadataDoc": {
+      "title": "MetadataDoc",
+      "description": "CRM system metadata (options, sync clock, jobs/updates status, tombstones).",
+      "type": "object",
+      "properties": {
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "SettingsDoc": {
+      "title": "SettingsDoc",
+      "description": "System configuration documents (WhatsApp auto-reply, monthly targets).",
+      "type": "object",
+      "properties": {
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "ConnectionProbe": {
+      "title": "ConnectionProbe",
+      "description": "Read-only connection verification probe document.",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" }
+      }
+    }
+  },
   "firestore": {
-    "indexes": [],
-    "fieldOverrides": []
+    "/coordinators/{coordId}": {
+      "schema": { "$ref": "#/entities/Coordinator" },
+      "description": "Staff coordinator and admin accounts (soft-deleted via isDeleted)."
+    },
+    "/leads/{leadId}": {
+      "schema": { "$ref": "#/entities/Lead" },
+      "description": "Candidate CRM records protected with soft-delete and 750 KB size guard."
+    },
+    "/leads/{leadId}/archives/{chunkId}": {
+      "schema": { "$ref": "#/entities/LeadArchiveChunk" },
+      "description": "Immutable overflow archive chunks for older messages and system logs."
+    },
+    "/lead_audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/LeadAuditEntry" },
+      "description": "Immutable append-only audit trail of remark, stage, note, coordinator, and deletion changes."
+    },
+    "/lead_backups/{snapshotId}": {
+      "schema": { "$ref": "#/entities/LeadBackupSnapshot" },
+      "description": "Durable cloud backup snapshot metadata headers."
+    },
+    "/lead_backups/{snapshotId}/chunks/{chunkId}": {
+      "schema": { "$ref": "#/entities/LeadBackupChunk" },
+      "description": "Chunked JSON payloads for durable cloud backup snapshots."
+    },
+    "/jobs/{jobId}": {
+      "schema": { "$ref": "#/entities/Job" },
+      "description": "Active job demand postings."
+    },
+    "/jobs_backups/{backupId}": {
+      "schema": { "$ref": "#/entities/JobsBackup" },
+      "description": "Point-in-time backups of active jobs."
+    },
+    "/updates/{updateId}": {
+      "schema": { "$ref": "#/entities/ImportantUpdate" },
+      "description": "Live operational updates ticker items."
+    },
+    "/wallets/{walletId}": {
+      "schema": { "$ref": "#/entities/Wallet" },
+      "description": "Coordinator incentive wallets."
+    },
+    "/wallet_backups/{snapshotId}": {
+      "schema": { "$ref": "#/entities/WalletBackup" },
+      "description": "Wallet safety backup snapshots."
+    },
+    "/wallet_ledger/{entryId}": {
+      "schema": { "$ref": "#/entities/WalletLedgerEntry" },
+      "description": "Append-only wallet audit transactions."
+    },
+    "/incentive_rules/{ruleId}": {
+      "schema": { "$ref": "#/entities/IncentiveRule" },
+      "description": "Commission and incentive rule definitions."
+    },
+    "/whatsapp_templates/{templateId}": {
+      "schema": { "$ref": "#/entities/WhatsAppTemplate" },
+      "description": "Approved WhatsApp Cloud broadcast templates."
+    },
+    "/file_backups/{fileName}": {
+      "schema": { "$ref": "#/entities/FileBackup" },
+      "description": "Durable metadata for uploaded media/documents."
+    },
+    "/file_backups/{fileName}/file_chunks/{chunkId}": {
+      "schema": { "$ref": "#/entities/FileBackupChunk" },
+      "description": "Chunked file bytes for uploaded media/documents."
+    },
+    "/media_library/{mediaId}": {
+      "schema": { "$ref": "#/entities/MediaLibraryItem" },
+      "description": "Media Library items."
+    },
+    "/notifications/{notifId}": {
+      "schema": { "$ref": "#/entities/NotificationItem" },
+      "description": "System notification records."
+    },
+    "/metadata/{docId}": {
+      "schema": { "$ref": "#/entities/MetadataDoc" },
+      "description": "Global metadata documents (options, sync state, tombstones)."
+    },
+    "/settings/{docId}": {
+      "schema": { "$ref": "#/entities/SettingsDoc" },
+      "description": "Application settings documents (auto-reply, monthly targets)."
+    },
+    "/test/{docId}": {
+      "schema": { "$ref": "#/entities/ConnectionProbe" },
+      "description": "Startup Firestore connection probe path."
+    }
   }
 }
