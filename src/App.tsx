@@ -1441,10 +1441,10 @@ export default function App() {
                             >
                               <div className="min-w-0">
                                 <p className="text-[11px] font-bold text-slate-100 truncate">
-                                  {item.leadName || item.leadPhone || item.leadId}
+                                  {item.leadName || item.phone || item.leadId}
                                 </p>
                                 <p className="text-[10px] text-slate-400 font-mono">
-                                  {item.sourceView} • Attempts: {item.attempts}
+                                  {item.headers?.sourceView || 'crm'} • Attempts: {item.attempts}
                                 </p>
                                 {item.lastError && (
                                   <p className="text-[10px] text-rose-400 truncate mt-0.5" title={item.lastError}>

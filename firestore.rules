@@ -1,141 +1,263 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+
     // Global Safety Net - default deny
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions
+    // Helper functions (Express server connects via Web SDK; enforce structural & immutability invariants)
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidRequestContext() {
+      return request.time != null;
+    }
+
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // Coordinators collection
+    function isValidFileName(id) {
+      return id is string && id.size() > 0 && id.size() <= 256 && id.matches('^[a-zA-Z0-9_.\\-]+$');
+    }
+
+    function isValidCoordinator(data) {
+      return data.username is string
+        && data.username.size() > 0 && data.username.size() <= 100
+        && data.displayName is string
+        && data.displayName.size() > 0 && data.displayName.size() <= 100
+        && (!('isDeleted' in data) || data.isDeleted is bool);
+    }
+
+    function isValidLead(data) {
+      return data.name is string
+        && data.name.size() <= 200
+        && data.phone is string
+        && data.phone.size() <= 50
+        && (!('isDeleted' in data) || data.isDeleted is bool)
+        && (!('hasArchivedHistory' in data) || data.hasArchivedHistory is bool)
+        && (!('archivedChunksCount' in data) || data.archivedChunksCount is number);
+    }
+
+    function isValidLeadArchiveChunk(data, leadId, chunkId) {
+      return data.keys().hasAll(['id', 'leadId', 'kind', 'createdAt', 'count', 'items'])
+        && data.keys().hasOnly(['id', 'leadId', 'kind', 'createdAt', 'count', 'items'])
+        && data.id == chunkId
+        && data.leadId == leadId
+        && data.kind is string && data.kind in ['messages', 'timeline', 'messages_and_timeline']
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.count is number && data.count > 0 && data.count <= 2000
+        && data.items is list && data.items.size() > 0 && data.items.size() <= 2000;
+    }
+
+    function isValidLeadAuditLog(data, logId) {
+      return data.keys().hasAll(['id', 'leadId', 'phone', 'candidateName', 'field', 'previousValue', 'newValue', 'actor', 'sourceView', 'timestamp'])
+        && data.keys().hasOnly(['id', 'leadId', 'phone', 'candidateName', 'field', 'previousValue', 'newValue', 'actor', 'sourceView', 'timestamp'])
+        && data.id == logId
+        && isValidId(data.leadId)
+        && data.phone is string && data.phone.size() <= 50
+        && data.candidateName is string && data.candidateName.size() <= 200
+        && data.field is string && data.field.size() > 0 && data.field.size() <= 64
+        && data.previousValue is string && data.previousValue.size() <= 8000
+        && data.newValue is string && data.newValue.size() <= 8000
+        && data.actor is string && data.actor.size() > 0 && data.actor.size() <= 120
+        && data.sourceView is string && data.sourceView.size() > 0 && data.sourceView.size() <= 80
+        && data.timestamp is string && data.timestamp.size() > 0 && data.timestamp.size() <= 64;
+    }
+
+    function isValidLeadBackupMeta(data, snapshotId) {
+      return data.keys().hasAll(['id', 'timestamp', 'source', 'isMondayScheduled', 'totalLeads', 'chunkCount', 'sizeBytes', 'sizeFormatted'])
+        && data.keys().hasOnly(['id', 'timestamp', 'source', 'isMondayScheduled', 'totalLeads', 'chunkCount', 'sizeBytes', 'sizeFormatted'])
+        && data.id == snapshotId
+        && data.timestamp is string && data.timestamp.size() <= 64
+        && data.source is string && data.source.size() <= 200
+        && data.isMondayScheduled is bool
+        && data.totalLeads is number && data.totalLeads >= 0
+        && data.chunkCount is number && data.chunkCount > 0 && data.chunkCount <= 500
+        && data.sizeBytes is number && data.sizeBytes >= 0
+        && data.sizeFormatted is string && data.sizeFormatted.size() <= 64;
+    }
+
+    function isValidLeadBackupChunk(data) {
+      return data.keys().hasAll(['index', 'data'])
+        && data.keys().hasOnly(['index', 'data'])
+        && data.index is number && data.index >= 0 && data.index < 500
+        && data.data is string && data.data.size() <= 600000;
+    }
+
+    function isValidJob(data) {
+      return (!('title' in data) || (data.title is string && data.title.size() <= 200))
+        && (!('country' in data) || (data.country is string && data.country.size() <= 100))
+        && (!('serviceCharge' in data) || (data.serviceCharge is string && data.serviceCharge.size() <= 500))
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500));
+    }
+
+    // Startup connection probe path (read-only)
+    match /test/{docId} {
+      allow get: if isValidRequestContext() && docId == 'connection';
+      allow list, write: if false;
+    }
+
+    // Coordinators collection (soft-delete via isDeleted; hard delete denied)
     match /coordinators/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id) 
-        && request.resource.data.username is string 
-        && request.resource.data.username.size() <= 100
-        && request.resource.data.displayName is string
-        && request.resource.data.displayName.size() <= 100;
-      allow delete: if false; // Deny coordinator deletion via client direct access
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id) && isValidCoordinator(incoming());
+      allow delete: if false;
     }
 
-    // Leads collection
+    // Leads collection (soft-delete via isDeleted; hard delete denied)
     match /leads/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id)
-        && request.resource.data.name is string
-        && request.resource.data.name.size() <= 200
-        && request.resource.data.phone is string
-        && request.resource.data.phone.size() <= 50;
-      allow delete: if false; // Leads should only be soft-deleted by updating isDeleted field
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id) && isValidLead(incoming());
+      allow delete: if false;
+
+      // Immutable overflow archives for older chat messages and system timeline events
+      match /archives/{chunkId} {
+        allow get: if isValidRequestContext() && isValidId(id) && isValidId(chunkId);
+        allow list: if isValidRequestContext() && isValidId(id);
+        allow create: if isValidRequestContext() && isValidId(id) && isValidId(chunkId) && isValidLeadArchiveChunk(incoming(), id, chunkId);
+        allow update, delete: if false;
+      }
+    }
+
+    // Immutable Cloud Audit Trail for remark, note, stage, coordinator, and deletion changes
+    match /lead_audit_logs/{logId} {
+      allow get: if isValidRequestContext() && isValidId(logId);
+      allow list: if isValidRequestContext();
+      allow create: if isValidRequestContext() && isValidId(logId) && isValidLeadAuditLog(incoming(), logId);
+      allow update, delete: if false;
+    }
+
+    // Immutable Durable Cloud Backup Snapshots & Chunks
+    match /lead_backups/{snapshotId} {
+      allow get: if isValidRequestContext() && isValidId(snapshotId);
+      allow list: if isValidRequestContext();
+      allow create: if isValidRequestContext() && isValidId(snapshotId) && isValidLeadBackupMeta(incoming(), snapshotId);
+      allow update, delete: if false;
+
+      match /chunks/{chunkId} {
+        allow get: if isValidRequestContext() && isValidId(snapshotId) && isValidId(chunkId);
+        allow list: if isValidRequestContext() && isValidId(snapshotId);
+        allow create: if isValidRequestContext() && isValidId(snapshotId) && isValidId(chunkId) && isValidLeadBackupChunk(incoming());
+        allow update, delete: if false;
+      }
     }
 
     // Jobs collection
     match /jobs/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id)
-        && (!('title' in request.resource.data) || (request.resource.data.title is string && request.resource.data.title.size() <= 200))
-        && (!('country' in request.resource.data) || (request.resource.data.country is string && request.resource.data.country.size() <= 100))
-        && (!('serviceCharge' in request.resource.data) || (request.resource.data.serviceCharge is string && request.resource.data.serviceCharge.size() <= 500))
-        && (!('imageUrl' in request.resource.data) || (request.resource.data.imageUrl is string && request.resource.data.imageUrl.size() <= 500));
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id) && isValidJob(incoming());
       allow delete: if false;
     }
 
     // Jobs point-in-time backups collection
     match /jobs_backups/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id);
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id);
       allow delete: if false;
     }
 
     // Updates collection
     match /updates/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id)
-        && request.resource.data.text is string
-        && request.resource.data.text.size() <= 5000;
-      allow delete: if isValidId(id);
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id)
+        && incoming().text is string
+        && incoming().text.size() <= 5000;
+      allow delete: if isValidRequestContext() && isValidId(id);
     }
 
     // Wallets collection
     match /wallets/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id);
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id);
       allow delete: if false;
     }
 
     // Wallet backups & point-in-time snapshots
     match /wallet_backups/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id);
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id);
       allow delete: if false;
     }
 
     // Wallet immutable audit ledger
     match /wallet_ledger/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id);
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id);
       allow delete: if false;
     }
 
     // Incentive rules collection
     match /incentive_rules/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id)
-        && request.resource.data.projectName is string;
-      allow delete: if isValidId(id);
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id)
+        && incoming().projectName is string
+        && incoming().projectName.size() <= 200;
+      allow delete: if isValidRequestContext() && isValidId(id);
     }
 
     // WhatsApp templates collection
     match /whatsapp_templates/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id)
-        && request.resource.data.title is string;
-      allow delete: if true; // Allow deleting templates
-    }
-
-    function isValidFileName(id) {
-      return id is string && id.size() <= 256;
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id)
+        && incoming().title is string
+        && incoming().title.size() <= 200;
+      allow delete: if isValidRequestContext() && isValidId(id);
     }
 
     // File backups & chunks
     match /file_backups/{id} {
-      allow read: if true;
-      allow write: if isValidFileName(id);
-    }
+      allow get: if isValidRequestContext() && isValidFileName(id);
+      allow list: if isValidRequestContext();
+      allow create, update, delete: if isValidRequestContext() && isValidFileName(id);
 
-    match /file_backups/{fileName}/file_chunks/{id} {
-      allow read: if true;
-      allow write: if isValidFileName(fileName) && isValidFileName(id);
+      match /file_chunks/{chunkId} {
+        allow get: if isValidRequestContext() && isValidFileName(id) && isValidFileName(chunkId);
+        allow list: if isValidRequestContext() && isValidFileName(id);
+        allow create, update, delete: if isValidRequestContext() && isValidFileName(id) && isValidFileName(chunkId);
+      }
     }
 
     // Media library collection
     match /media_library/{id} {
-      allow read: if true;
-      allow write: if isValidId(id);
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update, delete: if isValidRequestContext() && isValidId(id);
     }
 
     // Notifications collection
     match /notifications/{id} {
-      allow read: if true;
-      allow write: if isValidId(id);
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update, delete: if isValidRequestContext() && isValidId(id);
     }
 
     // Metadata collection
     match /metadata/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id);
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id);
       allow delete: if false;
     }
 
     // Settings collection (e.g. WhatsApp auto-reply, system configurations)
     match /settings/{id} {
-      allow read: if true;
-      allow create, update: if isValidId(id);
+      allow get: if isValidRequestContext() && isValidId(id);
+      allow list: if isValidRequestContext();
+      allow create, update: if isValidRequestContext() && isValidId(id);
       allow delete: if false;
     }
   }

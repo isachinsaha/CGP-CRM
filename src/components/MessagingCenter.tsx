@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Lead, Coordinator, LeadStage } from '../types.ts';
 import { 
@@ -527,9 +527,46 @@ export default function MessagingCenter({
     return leads.find(l => l.id === selectedLeadId) || null;
   }, [leads, selectedLeadId]);
 
-  // Sync lead form data when active lead changes
+  const dirtyFieldsRef = useRef<Set<string>>(new Set());
+  const lastLoadedLeadIdRef = useRef<string | null>(null);
+
+  const resolveCoordinatorSelectValue = (rawAssigned?: string | null): string => {
+    const clean = String(rawAssigned || '').trim();
+    if (!clean || clean.toLowerCase() === 'unassigned' || clean.toLowerCase() === 'all') {
+      return 'unassigned';
+    }
+    const lower = clean.toLowerCase();
+    const matched = coordinators.find(
+      c =>
+        (c.username && c.username.toLowerCase() === lower) ||
+        (c.displayName && c.displayName.toLowerCase() === lower) ||
+        (c.id && c.id.toLowerCase() === lower)
+    );
+    return matched ? matched.username : clean;
+  };
+
+  const updateFormField = <K extends keyof typeof leadFormData>(field: K, value: (typeof leadFormData)[K]) => {
+    dirtyFieldsRef.current.add(String(field));
+    setLeadFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  // Sync lead form data when active lead changes or receives background updates (preserving dirty fields)
   useEffect(() => {
-    if (currentChatLead) {
+    if (!currentChatLead) return;
+    const switchedLead = lastLoadedLeadIdRef.current !== currentChatLead.id;
+    if (switchedLead) {
+      dirtyFieldsRef.current.clear();
+      lastLoadedLeadIdRef.current = currentChatLead.id;
+    }
+
+    const dirty = dirtyFieldsRef.current;
+    const nextAdminRemarks =
+      String(currentChatLead.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry'
+        ? ''
+        : currentChatLead.adminRemarks || '';
+    const nextAssignedVal = resolveCoordinatorSelectValue(currentChatLead.assignedTo);
+
+    if (switchedLead) {
       setLeadFormData({
         name: currentChatLead.name || '',
         phone: currentChatLead.phone || '',
@@ -545,17 +582,34 @@ export default function MessagingCenter({
         source: currentChatLead.source || 'Ads',
         project: currentChatLead.project || '',
         stage: currentChatLead.stage || 'negotiating',
-        assignedTo: currentChatLead.assignedTo || 'unassigned',
+        assignedTo: nextAssignedVal,
         tags: currentChatLead.tags || [],
-        adminRemarks:
-          String(currentChatLead.adminRemarks || '').trim().toLowerCase() === 'inbound whatsapp ad enquiry'
-            ? ''
-            : currentChatLead.adminRemarks || ''
+        adminRemarks: nextAdminRemarks
       });
       setSaveSuccessMsg(null);
       setTagAddedToast(null);
+    } else {
+      setLeadFormData(prev => ({
+        name: dirty.has('name') ? prev.name : (currentChatLead.name || ''),
+        phone: dirty.has('phone') ? prev.phone : (currentChatLead.phone || ''),
+        alternateNo: dirty.has('alternateNo') ? prev.alternateNo : (currentChatLead.alternateNo || ''),
+        gender: dirty.has('gender') ? prev.gender : (currentChatLead.gender || 'Not defined'),
+        age: dirty.has('age') ? prev.age : (currentChatLead.age !== undefined && currentChatLead.age !== null && currentChatLead.age !== 0 ? String(currentChatLead.age) : ''),
+        origin: dirty.has('origin') ? prev.origin : (currentChatLead.origin || ''),
+        country: dirty.has('country') ? prev.country : (currentChatLead.country || ''),
+        position: dirty.has('position') ? prev.position : (currentChatLead.position || ''),
+        experience: dirty.has('experience') ? prev.experience : (currentChatLead.experience || ''),
+        qualification: dirty.has('qualification') ? prev.qualification : (currentChatLead.qualification || ''),
+        importance: dirty.has('importance') ? prev.importance : String(currentChatLead.importance || '3'),
+        source: dirty.has('source') ? prev.source : (currentChatLead.source || 'Ads'),
+        project: dirty.has('project') ? prev.project : (currentChatLead.project || ''),
+        stage: dirty.has('stage') ? prev.stage : (currentChatLead.stage || 'negotiating'),
+        assignedTo: dirty.has('assignedTo') ? prev.assignedTo : nextAssignedVal,
+        tags: dirty.has('tags') ? prev.tags : (currentChatLead.tags || []),
+        adminRemarks: dirty.has('adminRemarks') ? prev.adminRemarks : nextAdminRemarks
+      }));
     }
-  }, [currentChatLead?.id]);
+  }, [currentChatLead?.id, currentChatLead?.updatedAt, currentChatLead?.assignedTo, coordinators]);
 
 
   // Handle lead item click in list
@@ -586,6 +640,7 @@ export default function MessagingCenter({
     const existingGlobalMatch = activeTagsList.find(t => t.toLowerCase() === lowerVal);
     const finalTag = existingGlobalMatch || trimmed;
 
+    dirtyFieldsRef.current.add('tags');
     const nextTags = [...(leadFormData.tags || []), finalTag];
     setLeadFormData(prev => ({ ...prev, tags: nextTags }));
 
@@ -601,6 +656,7 @@ export default function MessagingCenter({
 
   // Remove tag
   const handleRemoveTag = (tagToRemove: string) => {
+    dirtyFieldsRef.current.add('tags');
     setLeadFormData(prev => ({
       ...prev,
       tags: prev.tags.filter(t => t !== tagToRemove)
@@ -633,7 +689,18 @@ export default function MessagingCenter({
     setSaveSuccessMsg(null);
     setSaveErrorMsg(null);
 
-    const coordToAssign = targetCoordinator || leadFormData.assignedTo;
+    const currentAssignedClean = String(currentChatLead.assignedTo || '').trim();
+    const currentHasRealCoord = currentAssignedClean !== '' && currentAssignedClean.toLowerCase() !== 'unassigned' && currentAssignedClean.toLowerCase() !== 'all';
+    const rawTargetCoord = targetCoordinator || leadFormData.assignedTo;
+    const rawTargetClean = String(rawTargetCoord || '').trim();
+    const wantsUnassign = !rawTargetClean || rawTargetClean.toLowerCase() === 'unassigned' || rawTargetClean.toLowerCase() === 'all';
+    const coordExplicitlyModified = Boolean(targetCoordinator) || dirtyFieldsRef.current.has('assignedTo');
+    // Never overwrite an already-assigned coordinator back to 'unassigned' unless user explicitly selected Unassigned
+    const coordToAssign = (!coordExplicitlyModified && currentHasRealCoord && wantsUnassign)
+      ? currentAssignedClean
+      : rawTargetCoord;
+    const allowExplicitUnassign = Boolean(coordExplicitlyModified && currentHasRealCoord && wantsUnassign);
+
     const prevAdminRemarks = String(currentChatLead.adminRemarks || '').trim();
     const prevNormalizedAdminRemarks =
       prevAdminRemarks.toLowerCase() === 'inbound whatsapp ad enquiry' ? '' : prevAdminRemarks;
@@ -656,6 +723,7 @@ export default function MessagingCenter({
       project: leadFormData.project,
       stage: leadFormData.stage,
       assignedTo: coordToAssign,
+      allowUnassign: allowExplicitUnassign,
       tags: leadFormData.tags || [],
       adminRemarks: leadFormData.adminRemarks,
       clearedRemarks: adminRemarksCleared ? ['adminRemarks'] : [],
@@ -683,9 +751,9 @@ export default function MessagingCenter({
           enqueueOutboxSave({
             leadId: currentChatLead.id,
             leadName: updatedPayload.name,
-            leadPhone: updatedPayload.phone,
+            phone: updatedPayload.phone,
             payload: updatedPayload,
-            sourceView: 'whatsapp_chat_menu',
+            headers: { role: userRole, agentId: currentAgentId, sourceView: 'whatsapp_chat_menu' },
             lastError: errJson.error || `HTTP ${res.status}`
           });
           setSaveErrorMsg('Cloud sync busy — profile edits & assignment queued in Pending Cloud Sync and will retry automatically.');
@@ -696,6 +764,7 @@ export default function MessagingCenter({
       }
 
       const savedLead = await res.json();
+      dirtyFieldsRef.current.clear();
 
       // Trigger instant in-place state update
       if (onLeadUpdated) {
@@ -709,9 +778,9 @@ export default function MessagingCenter({
       enqueueOutboxSave({
         leadId: currentChatLead.id,
         leadName: updatedPayload.name,
-        leadPhone: updatedPayload.phone,
+        phone: updatedPayload.phone,
         payload: updatedPayload,
-        sourceView: 'whatsapp_chat_menu',
+        headers: { role: userRole, agentId: currentAgentId, sourceView: 'whatsapp_chat_menu' },
         lastError: err?.message || 'Network interruption'
       });
       setSaveErrorMsg('Network hiccup — edits & coordinator transfer queued in Pending Cloud Sync and will auto-retry.');
@@ -1495,7 +1564,7 @@ export default function MessagingCenter({
                         <input
                           type="text"
                           value={leadFormData.name}
-                          onChange={(e) => setLeadFormData({ ...leadFormData, name: e.target.value })}
+                          onChange={(e) => updateFormField('name', e.target.value)}
                           className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                           placeholder="e.g. Rahul Sharma"
                         />
@@ -1510,7 +1579,7 @@ export default function MessagingCenter({
                           <input
                             type="text"
                             value={leadFormData.phone}
-                            onChange={(e) => setLeadFormData({ ...leadFormData, phone: e.target.value })}
+                            onChange={(e) => updateFormField('phone', e.target.value)}
                             className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-mono font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                             placeholder="+91..."
                           />
@@ -1523,7 +1592,7 @@ export default function MessagingCenter({
                           <input
                             type="text"
                             value={leadFormData.alternateNo}
-                            onChange={(e) => setLeadFormData({ ...leadFormData, alternateNo: e.target.value })}
+                            onChange={(e) => updateFormField('alternateNo', e.target.value)}
                             className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-mono font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                             placeholder="Optional phone"
                           />
@@ -1538,7 +1607,7 @@ export default function MessagingCenter({
                           </label>
                           <select
                             value={leadFormData.gender}
-                            onChange={(e) => setLeadFormData({ ...leadFormData, gender: e.target.value })}
+                            onChange={(e) => updateFormField('gender', e.target.value)}
                             className="w-full px-2 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                           >
                             <option value="M">Male (M)</option>
@@ -1554,7 +1623,7 @@ export default function MessagingCenter({
                           <input
                             type="text"
                             value={leadFormData.age}
-                            onChange={(e) => setLeadFormData({ ...leadFormData, age: e.target.value })}
+                            onChange={(e) => updateFormField('age', e.target.value)}
                             className="w-full px-2.5 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                             placeholder="e.g. 26"
                           />
@@ -1567,7 +1636,7 @@ export default function MessagingCenter({
                           <input
                             type="text"
                             value={leadFormData.origin}
-                            onChange={(e) => setLeadFormData({ ...leadFormData, origin: e.target.value })}
+                            onChange={(e) => updateFormField('origin', e.target.value)}
                             className="w-full px-2 py-2 bg-white dark:bg-slate-950 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                             placeholder="e.g. Darjeeling"
                           />
@@ -1605,7 +1674,7 @@ export default function MessagingCenter({
                                 onClick={() => {
                                   if (newCountryInput.trim() && onUpdateCountries && countries) {
                                     onUpdateCountries([...countries, newCountryInput.trim()]);
-                                    setLeadFormData({ ...leadFormData, country: newCountryInput.trim() });
+                                    updateFormField('country', newCountryInput.trim());
                                     setNewCountryInput('');
                                     setIsAddingCountry(false);
                                   }
@@ -1618,7 +1687,7 @@ export default function MessagingCenter({
                           ) : (
                             <select
                               value={leadFormData.country}
-                              onChange={(e) => setLeadFormData({ ...leadFormData, country: e.target.value })}
+                              onChange={(e) => updateFormField('country', e.target.value)}
                               className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                             >
                               <option value="">Select Country (Leave Blank)</option>
@@ -1658,7 +1727,7 @@ export default function MessagingCenter({
                                 onClick={() => {
                                   if (newPositionInput.trim() && onUpdatePositions && positions) {
                                     onUpdatePositions([...positions, newPositionInput.trim()]);
-                                    setLeadFormData({ ...leadFormData, position: newPositionInput.trim() });
+                                    updateFormField('position', newPositionInput.trim());
                                     setNewPositionInput('');
                                     setIsAddingPosition(false);
                                   }
@@ -1671,7 +1740,7 @@ export default function MessagingCenter({
                           ) : (
                             <select
                               value={leadFormData.position}
-                              onChange={(e) => setLeadFormData({ ...leadFormData, position: e.target.value })}
+                              onChange={(e) => updateFormField('position', e.target.value)}
                               className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                             >
                               <option value="">Select Position (Leave Blank)</option>
@@ -1692,7 +1761,7 @@ export default function MessagingCenter({
                           <input
                             type="text"
                             value={leadFormData.experience}
-                            onChange={(e) => setLeadFormData({ ...leadFormData, experience: e.target.value })}
+                            onChange={(e) => updateFormField('experience', e.target.value)}
                             className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                             placeholder="e.g. 2 yrs Gulf / Fresher"
                           />
@@ -1705,7 +1774,7 @@ export default function MessagingCenter({
                           <input
                             type="text"
                             value={leadFormData.qualification}
-                            onChange={(e) => setLeadFormData({ ...leadFormData, qualification: e.target.value })}
+                            onChange={(e) => updateFormField('qualification', e.target.value)}
                             className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                             placeholder="e.g. 10th / Graduate / ITI"
                           />
@@ -1720,7 +1789,7 @@ export default function MessagingCenter({
                           </label>
                           <select
                             value={leadFormData.importance}
-                            onChange={(e) => setLeadFormData({ ...leadFormData, importance: e.target.value })}
+                            onChange={(e) => updateFormField('importance', e.target.value)}
                             className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                           >
                             <option value="1">⭐ 1 Star (Low)</option>
@@ -1737,7 +1806,7 @@ export default function MessagingCenter({
                           </label>
                           <select
                             value={leadFormData.source}
-                            onChange={(e) => setLeadFormData({ ...leadFormData, source: e.target.value })}
+                            onChange={(e) => updateFormField('source', e.target.value)}
                             className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500"
                           >
                             <option value="Ads">Ads 📣</option>
@@ -1780,7 +1849,7 @@ export default function MessagingCenter({
                               onClick={() => {
                                 if (newProjectInput.trim() && onUpdateProjects && projects) {
                                   onUpdateProjects([...projects, newProjectInput.trim()]);
-                                  setLeadFormData({ ...leadFormData, project: newProjectInput.trim() });
+                                  updateFormField('project', newProjectInput.trim());
                                   setNewProjectInput('');
                                   setIsAddingProject(false);
                                 }
@@ -1793,7 +1862,7 @@ export default function MessagingCenter({
                         ) : (
                           <select
                             value={leadFormData.project}
-                            onChange={(e) => setLeadFormData({ ...leadFormData, project: e.target.value })}
+                            onChange={(e) => updateFormField('project', e.target.value)}
                             className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-semibold focus:outline-hidden focus:border-emerald-500 shadow-xs"
                           >
                             <option value="">Select Project (Leave Blank)</option>
@@ -1813,16 +1882,26 @@ export default function MessagingCenter({
                           <span>Assign / Transfer to Coordinator</span>
                         </label>
                         <select
-                          value={leadFormData.assignedTo}
-                          onChange={(e) => setLeadFormData({ ...leadFormData, assignedTo: e.target.value })}
+                          value={resolveCoordinatorSelectValue(leadFormData.assignedTo)}
+                          onChange={(e) => updateFormField('assignedTo', e.target.value)}
                           className="w-full px-3 py-2 bg-white dark:bg-slate-900 border-2 border-indigo-300 dark:border-indigo-700 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-black focus:outline-hidden focus:border-indigo-500 shadow-xs cursor-pointer"
                         >
                           <option value="unassigned" className="bg-white dark:bg-slate-900 text-slate-100 dark:text-slate-100 font-sans font-medium text-xs">⚠️ Unassigned (Keep in Requesting)</option>
                           {coordinators.map(c => (
-                            <option key={c.id} value={c.displayName || c.username} className="bg-white dark:bg-slate-900 text-slate-100 dark:text-slate-100 font-sans font-medium text-xs">
+                            <option key={c.id} value={c.username} className="bg-white dark:bg-slate-900 text-slate-100 dark:text-slate-100 font-sans font-medium text-xs">
                               👤 {c.displayName || c.username} ({c.role === 'admin' ? 'Admin' : 'Coordinator'})
                             </option>
                           ))}
+                          {leadFormData.assignedTo &&
+                            leadFormData.assignedTo.toLowerCase() !== 'unassigned' &&
+                            !coordinators.some(c =>
+                              c.username.toLowerCase() === leadFormData.assignedTo.toLowerCase() ||
+                              (c.displayName && c.displayName.toLowerCase() === leadFormData.assignedTo.toLowerCase())
+                            ) && (
+                              <option value={leadFormData.assignedTo} className="bg-white dark:bg-slate-900 text-slate-100 dark:text-slate-100 font-sans font-medium text-xs">
+                                👤 {leadFormData.assignedTo}
+                              </option>
+                            )}
                         </select>
                         <p className="text-[10px] text-indigo-700 dark:text-indigo-400 leading-tight">
                           Transferring moves this candidate record and WhatsApp thread directly to the coordinator's personal workspace.
@@ -1939,7 +2018,7 @@ export default function MessagingCenter({
                         <textarea
                           rows={2}
                           value={leadFormData.adminRemarks}
-                          onChange={(e) => setLeadFormData({ ...leadFormData, adminRemarks: e.target.value })}
+                          onChange={(e) => updateFormField('adminRemarks', e.target.value)}
                           className="w-full px-3 py-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-100 dark:text-slate-100 font-medium focus:outline-hidden focus:border-emerald-500 resize-none shadow-xs"
                           placeholder="Candidate WhatsApp query details & qualifications..."
                         />

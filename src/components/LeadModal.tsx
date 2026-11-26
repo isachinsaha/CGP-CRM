@@ -823,9 +823,19 @@ export default function LeadModal({
         return prevVal !== '' && nextVal === '' && dirtyFieldsRef.current.has(key);
       });
 
+      const prevCoordClean = String(lead.assignedTo || '').trim().toLowerCase();
+      const prevHasRealCoord = prevCoordClean !== '' && prevCoordClean !== 'unassigned' && prevCoordClean !== 'all';
+      const nextCoordClean = String(formFields.assignedTo || '').trim().toLowerCase();
+      const nextHasRealCoord = nextCoordClean !== '' && nextCoordClean !== 'unassigned' && nextCoordClean !== 'all';
+      const explicitAssignedChange = dirtyFieldsRef.current.has('assignedTo');
+
       // Build fields payload with optional overrides
       const payload: any = {
         ...formFields,
+        assignedTo: (!explicitAssignedChange && prevHasRealCoord && !nextHasRealCoord)
+          ? lead.assignedTo
+          : formFields.assignedTo,
+        allowUnassign: Boolean(explicitAssignedChange && prevHasRealCoord && !nextHasRealCoord),
         experience: finalExp,
         age: Number(formFields.age) || 0,
         importance: Number(formFields.importance) || 3,
@@ -2374,7 +2384,17 @@ export default function LeadModal({
                     <div>
                       <label className="block text-xs font-semibold text-slate-500 dark:text-slate-300 mb-1">Coordinator</label>
                       <SearchableSelect
-                        value={formFields.assignedTo}
+                        value={(() => {
+                          const raw = String(formFields.assignedTo || '').trim();
+                          if (!raw || raw.toLowerCase() === 'unassigned') return '';
+                          const lower = raw.toLowerCase();
+                          if (coordinators && coordinators.length > 0) {
+                            const hit = coordinators.find(c => c.username.toLowerCase() === lower || (c.displayName && c.displayName.toLowerCase() === lower));
+                            return hit ? hit.username : raw;
+                          }
+                          const fb = ['Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'].find(c => c.toLowerCase() === lower);
+                          return fb || raw;
+                        })()}
                         onChange={(val) => {
                           const hasRealCoordinator = val && val.trim() !== '' && val.toLowerCase() !== 'unassigned';
                           dirtyFieldsRef.current.add('assignedTo');
@@ -2388,9 +2408,9 @@ export default function LeadModal({
                         options={[
                           { value: '', label: '👤 UNASSIGNED' },
                           ...(coordinators && coordinators.length > 0 ? (
-                            coordinators.filter(c => c.role === 'agent').map(coord => ({
+                            coordinators.map(coord => ({
                               value: coord.username,
-                              label: `👤 ${coord.displayName.toUpperCase()} (TELECALLER)`
+                              label: `👤 ${coord.displayName.toUpperCase()} (${coord.role === 'admin' ? 'ADMIN' : 'TELECALLER'})`
                             }))
                           ) : (
                             ['Joyce', 'Sarina', 'Shreya', 'Edenla', 'Priya', 'Monika', 'Sangita', 'Anjali', 'Dechen', 'Rinzing'].map(coord => ({

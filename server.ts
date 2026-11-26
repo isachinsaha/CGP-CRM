@@ -15,12 +15,18 @@ dotenv.config();
 import { 
   getLeads, 
   addLead, 
+  addOrMergeInboundLead,
   saveLeads, 
   updateSingleLead,
   updateMultipleLeads,
   getStats, 
   getLeadById, 
-  getCoordinators, 
+  getCoordinators,
+  findBestMatchingLeadByPhone,
+  hasAssignedCoordinator,
+  mergeLeadProfiles,
+  mergeMessagesList,
+  mergeTimelineList,
   saveCoordinators, 
   initializeCoordinatorsDatabase, 
   getJobs, 
@@ -40,6 +46,7 @@ import {
   deleteWalletTransaction,
   reconcileWalletsFromLeads,
   ensureWalletIntegrityFromLeads,
+  buildNov04WonBeneficiaries,
   TEAM_ROLES,
   normalizeCoordUsername,
   createWalletSnapshot,
@@ -1584,6 +1591,11 @@ app.post('/api/leads/bulk', async (req, res) => {
 // POST Bulk Re-assignment of candidates (Atomic, high-performance batch operation)
 app.post('/api/leads/bulk-assign', async (req, res) => {
   try {
+    if (!(await checkIsAdmin(req))) {
+      res.status(403).json({ error: 'Forbidden: Only administrators can bulk-assign or unassign leads.' });
+      return;
+    }
+
     const { leadIds, assignedTo } = req.body;
     if (!Array.isArray(leadIds) || leadIds.length === 0) {
       res.status(400).json({ error: 'leadIds must be a non-empty array' });
@@ -1606,44 +1618,53 @@ app.post('/api/leads/bulk-assign', async (req, res) => {
     const nowIso = new Date().toISOString();
     const todayDate = nowIso.split('T')[0];
     const hasRealCoordinator = targetCoord !== '' && targetCoord.toLowerCase() !== 'unassigned' && targetCoord.toLowerCase() !== 'all';
+    const allowUnassign = req.body.allowUnassign === true;
 
     let intakeSequence = leads.filter(l => l.intake && l.serialNo).length;
-    const modifiedLeads = await updateMultipleLeads(leadIds.map(String), (lead) => {
-      const prevCoordinator = lead.assignedTo || 'Unassigned';
-      if (prevCoordinator === targetCoord) return null;
-
-      if (!Array.isArray(lead.timeline)) lead.timeline = [];
-      if (!Array.isArray(lead.coordinatorHistory)) lead.coordinatorHistory = [];
-
-      lead.timeline.push({
-        id: `tl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}_assign`,
-        type: 'assignment',
-        text: `Assigned coordinator changed from "${prevCoordinator}" to "${targetCoord || 'Unassigned'}" (Bulk Action)`,
-        actor,
-        timestamp: nowIso
-      });
-
-      lead.coordinatorHistory.push({
-        candidateId: lead.id,
-        previousCoordinator: prevCoordinator.toLowerCase(),
-        newCoordinator: (targetCoord || 'unassigned').toLowerCase(),
-        changedBy: actor,
-        changedAt: nowIso
-      });
-
-      lead.assignedTo = targetCoord;
-      lead.assignDate = todayDate;
-
-      if (hasRealCoordinator) {
-        lead.intake = true;
-        if (!lead.serialNo) {
-          intakeSequence++;
-          lead.serialNo = `INQ-${1000 + intakeSequence}`;
+    const modifiedLeads = await updateMultipleLeads(
+      leadIds.map(String),
+      (lead) => {
+        if (hasAssignedCoordinator(lead) && !hasRealCoordinator && !allowUnassign) {
+          console.warn(`[BulkAssign] Blocked unassign of "${lead.assignedTo}" on ${lead.id} without allowUnassign=true.`);
+          return null;
         }
-      }
+        const prevCoordinator = lead.assignedTo || 'Unassigned';
+        if (prevCoordinator === targetCoord) return null;
 
-      return lead;
-    });
+        if (!Array.isArray(lead.timeline)) lead.timeline = [];
+        if (!Array.isArray(lead.coordinatorHistory)) lead.coordinatorHistory = [];
+
+        lead.timeline.push({
+          id: `tl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}_assign`,
+          type: 'assignment',
+          text: `Assigned coordinator changed from "${prevCoordinator}" to "${targetCoord || 'Unassigned'}" (Bulk Action)`,
+          actor,
+          timestamp: nowIso
+        });
+
+        lead.coordinatorHistory.push({
+          candidateId: lead.id,
+          previousCoordinator: prevCoordinator.toLowerCase(),
+          newCoordinator: (targetCoord || 'unassigned').toLowerCase(),
+          changedBy: actor,
+          changedAt: nowIso
+        });
+
+        lead.assignedTo = targetCoord;
+        lead.assignDate = todayDate;
+
+        if (hasRealCoordinator) {
+          lead.intake = true;
+          if (!lead.serialNo) {
+            intakeSequence++;
+            lead.serialNo = `INQ-${1000 + intakeSequence}`;
+          }
+        }
+
+        return lead;
+      },
+      { auditMeta: { actor, sourceView: 'bulk_assign' } }
+    );
 
     const updatedCount = modifiedLeads.length;
 
@@ -1660,7 +1681,7 @@ app.post('/api/leads/bulk-assign', async (req, res) => {
 });
 
 
-// POST Merge Duplicate Leads (Admin power)
+// POST Merge Duplicate Leads (Admin power, atomic soft-delete so duplicates never resurrect from Firestore)
 app.post('/api/leads/merge', async (req, res) => {
   try {
     if (!(await checkIsAdmin(req))) {
@@ -1675,57 +1696,78 @@ app.post('/api/leads/merge', async (req, res) => {
     }
 
     const leads = await getLeads(true);
-    const masterIdx = leads.findIndex(l => l.id === masterLeadId);
-    if (masterIdx === -1) {
+    const masterSnapshot = leads.find(l => l.id === masterLeadId && !l.isDeleted);
+    if (!masterSnapshot) {
       res.status(404).json({ error: 'Master lead not found' });
       return;
     }
 
-    const masterLead = leads[masterIdx];
+    const dupIdsClean = duplicateLeadIds.map(String).filter(id => id !== masterLeadId);
+    const dupSnapshots = dupIdsClean
+      .map(id => leads.find(l => l.id === id))
+      .filter((l): l is Lead => Boolean(l));
 
-    for (const dupId of duplicateLeadIds) {
-      const dupIdx = leads.findIndex(l => l.id === dupId);
-      if (dupIdx === -1) continue;
-      const dupLead = leads[dupIdx];
+    const nowIso = new Date().toISOString();
+    const rawAgentId = (req.headers['x-agent-id'] as string) || 'Administrator';
+    const actor = `Admin (${rawAgentId})`;
+    const targetIds = [masterLeadId, ...dupSnapshots.map(d => d.id)];
 
-      if (!masterLead.alternateNo && dupLead.alternateNo) masterLead.alternateNo = dupLead.alternateNo;
-      if (!masterLead.email && dupLead.email) masterLead.email = dupLead.email;
-      if (!masterLead.origin && dupLead.origin) masterLead.origin = dupLead.origin;
-      if (!masterLead.qualification && dupLead.qualification) masterLead.qualification = dupLead.qualification;
-      if (!masterLead.adminRemarks && dupLead.adminRemarks) masterLead.adminRemarks = dupLead.adminRemarks;
-      if (!masterLead.notes && dupLead.notes) masterLead.notes = dupLead.notes;
-      if (!masterLead.assignedTo && dupLead.assignedTo) masterLead.assignedTo = dupLead.assignedTo;
-      if (!masterLead.resumeUrl && dupLead.resumeUrl) masterLead.resumeUrl = dupLead.resumeUrl;
-      if (!masterLead.passportCopyUrl && dupLead.passportCopyUrl) masterLead.passportCopyUrl = dupLead.passportCopyUrl;
+    const updatedLeads = await updateMultipleLeads(
+      targetIds,
+      (current) => {
+        if (current.id === masterLeadId) {
+          let merged = { ...current };
+          for (const dupLead of dupSnapshots) {
+            merged = mergeLeadProfiles(dupLead, merged);
+            merged.messages = mergeMessagesList(merged.messages || [], dupLead.messages || []);
+            merged.tasks = mergeTasksList(merged.tasks || [], dupLead.tasks || []);
+            merged.timeline = mergeTimelineList(merged.timeline || [], [
+              {
+                id: `tl_merge_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                type: 'system',
+                text: `Merged duplicate lead record ${dupLead.serialNo || dupLead.id} (${dupLead.name}) into master record.`,
+                actor: 'System Administrator',
+                timestamp: nowIso
+              },
+              ...(dupLead.timeline || [])
+            ]);
+            const tagMap = new Map<string, string>();
+            [...(merged.tags || []), ...(dupLead.tags || [])].forEach(t => {
+              const clean = String(t || '').trim();
+              if (clean && !tagMap.has(clean.toLowerCase())) tagMap.set(clean.toLowerCase(), clean);
+            });
+            merged.tags = Array.from(tagMap.values());
+            if (dupLead.autoReplySent) merged.autoReplySent = true;
+          }
+          merged.id = masterLeadId;
+          merged.updatedAt = nowIso;
+          return merged;
+        }
 
-      if (Array.isArray(dupLead.messages)) {
-        if (!Array.isArray(masterLead.messages)) masterLead.messages = [];
-        masterLead.messages.push(...dupLead.messages);
-      }
-      if (Array.isArray(dupLead.tasks)) {
-        if (!Array.isArray(masterLead.tasks)) masterLead.tasks = [];
-        masterLead.tasks.push(...dupLead.tasks);
-      }
-      if (Array.isArray(dupLead.timeline)) {
-        if (!Array.isArray(masterLead.timeline)) masterLead.timeline = [];
-        masterLead.timeline.push({
-          id: `tl_merge_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-          type: 'system',
-          text: `Merged duplicate lead record ${dupLead.serialNo} (${dupLead.name}) into master record.`,
-          actor: 'System Administrator',
-          timestamp: new Date().toISOString()
-        }, ...dupLead.timeline);
-      }
-      if (Array.isArray(dupLead.tags)) {
-        masterLead.tags = Array.from(new Set([...(masterLead.tags || []), ...dupLead.tags]));
-      }
+        // Soft-delete duplicate records so Firestore sync never resurrects them
+        return {
+          ...current,
+          isDeleted: true,
+          deletedAt: nowIso,
+          deletedBy: actor,
+          mergedInto: masterLeadId,
+          timeline: [
+            ...(Array.isArray(current.timeline) ? current.timeline : []),
+            {
+              id: `tl_merged_out_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+              type: 'system',
+              text: `Soft-deleted as duplicate merged into master lead ${masterLeadId}.`,
+              actor: 'System Administrator',
+              timestamp: nowIso
+            }
+          ]
+        };
+      },
+      { auditMeta: { actor, sourceView: 'duplicate_merge' } }
+    );
 
-      leads.splice(dupIdx, 1);
-    }
-
-    masterLead.updatedAt = new Date().toISOString();
-    await saveLeads(leads);
-    res.json({ success: true, masterLead });
+    const savedMaster = updatedLeads.find(l => l.id === masterLeadId) || masterSnapshot;
+    res.json({ success: true, masterLead: savedMaster });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -2245,18 +2287,14 @@ app.get('/api/leads/:id/archives', async (req, res) => {
 // --- MANAGEMENT INCENTIVE SYSTEM (Effective Nov 04, 2026 onwards) ---
 
 /**
- * Awards Won bucket incentives based on Management's new policy (Effective Nov 04, 2026 onwards):
- * - Telecaller leads (Joyce, Maryada, Sarina):
- *     - Telecaller gets INR 400 CR
+ * Awards Won bucket incentives based on Management's policy & configured Incentive Rules:
+ * - Assigned coordinator gets the rule-resolved Won amount (e.g., INR 1,000 for Japan/Albania/Europe, INR 400 standard fallback).
+ * - For Telecallers (Joyce, Maryada, Sarina), Priya (Manager), and regular coordinators:
  *     - Shreya (TL) gets INR 200 CR
  *     - Eden (Manager, edenla) gets INR 200 CR
  *     - Sachin (Digital Marketer, sachinsaha) gets INR 200 CR
- * - Management / Senior leads (Shreya, Eden/edenla, Priya, Bishwo):
- *     - Assigned coordinator gets INR 400 CR
+ * - For Shreya, Edenla, or Bishwo closing directly:
  *     - Sachin (sachinsaha) gets INR 200 CR
- * - Any other coordinator:
- *     - Assigned coordinator gets INR 400 CR
- *     - Sachin (sachinsaha) gets INR 200 CR (if assigned != sachinsaha)
  */
 async function awardWonIncentivesForLead(
   leadId: string,
@@ -2271,65 +2309,24 @@ async function awardWonIncentivesForLead(
   const pName = projectName || 'General';
   const cName = countryName || 'Unknown';
 
-  const coords = await getCoordinators();
+  const [coords, rules] = await Promise.all([
+    getCoordinators(),
+    getIncentiveRules()
+  ]);
   const assignedCoordObj = coords.find(c => c.username.toLowerCase() === normCoord);
   const assignedDisplayName = assignedCoordObj ? assignedCoordObj.displayName : assignedCoordRaw;
 
-  const beneficiaries: Array<{ username: string; amount: number; reason: string }> = [];
+  const beneficiaries = buildNov04WonBeneficiaries({
+    leadId,
+    normCoord,
+    coordDisplayName: assignedDisplayName,
+    candidateName,
+    projectName: pName,
+    countryName: cName,
+    rules
+  });
 
-  if (TEAM_ROLES.TELECALLERS.includes(normCoord)) {
-    // Case A: Telecaller lead (Joyce, Maryada, Sarina)
-    beneficiaries.push({
-      username: normCoord,
-      amount: 400,
-      reason: `Closed Won incentive for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
-    });
-    beneficiaries.push({
-      username: 'shreya',
-      amount: 200,
-      reason: `TL Closed Won Share (Telecaller sale by: ${assignedDisplayName}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
-    });
-    beneficiaries.push({
-      username: 'edenla',
-      amount: 200,
-      reason: `Manager Closed Won Share (Telecaller sale by: ${assignedDisplayName}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
-    });
-    beneficiaries.push({
-      username: 'sachinsaha',
-      amount: 200,
-      reason: `Digital Marketer Closed Won Share (Telecaller sale by: ${assignedDisplayName}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
-    });
-  } else if (TEAM_ROLES.MANAGEMENT_SENIORS.includes(normCoord)) {
-    // Case B: Management / Senior (Shreya, Eden, Priya, Bishwo)
-    beneficiaries.push({
-      username: normCoord,
-      amount: 400,
-      reason: `Closed Won incentive for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
-    });
-    if (normCoord !== 'sachinsaha') {
-      beneficiaries.push({
-        username: 'sachinsaha',
-        amount: 200,
-        reason: `Digital Marketer Closed Won Share (Sale by: ${assignedDisplayName}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
-      });
-    }
-  } else {
-    // Case C: Any other coordinator (or Sachin himself)
-    beneficiaries.push({
-      username: normCoord,
-      amount: 400,
-      reason: `Closed Won incentive for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
-    });
-    if (normCoord !== 'sachinsaha') {
-      beneficiaries.push({
-        username: 'sachinsaha',
-        amount: 200,
-        reason: `Digital Marketer Closed Won Share (Sale by: ${assignedDisplayName}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
-      });
-    }
-  }
-
-  // Credit each beneficiary only if they do not already have an unreversed Won credit for this lead
+  // Credit each beneficiary only if their unreversed Won net credit is below their expected amount
   for (const b of beneficiaries) {
     try {
       const wallet = await getWalletByUsername(b.username, true);
@@ -2348,12 +2345,18 @@ async function awardWonIncentivesForLead(
       const netActive = wonCredits - wonDebits;
       if (netActive < b.amount) {
         const creditNeeded = b.amount - Math.max(0, netActive);
+        const isTopUp = netActive > 0;
+        const effectiveTxId = isTopUp ? `${b.txId}_topup_${b.amount}` : b.txId;
+        const effectiveReason = isTopUp
+          ? `Closed Won incentive adjustment (${cName} rule INR ${b.amount}, prior INR ${netActive}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`
+          : b.reason;
         await addWalletTransaction(
           b.username,
           'credit',
           creditNeeded,
-          b.reason,
-          leadId
+          effectiveReason,
+          leadId,
+          { txId: effectiveTxId }
         );
         console.log(`[Incentive Policy] Credited INR ${creditNeeded} to @${b.username} for Won candidate ${candidateName} (${leadId})`);
       }
@@ -2451,8 +2454,13 @@ app.put('/api/leads/:id', async (req, res) => {
     let nextDocInterviewAttendedAt = snapshotLead.docInterviewAttendedAt;
     let shouldUpdateInterviewAttendedAt = false;
 
-    // Check wallet incentive triggers
-    const coordinatorToIncentivize = assignedTo !== undefined ? assignedTo : snapshotLead.assignedTo;
+    // Check wallet incentive triggers & explicit unassign guard
+    const isAdminActorForPut = await checkIsAdmin(req);
+    const allowExplicitUnassign = req.body.allowUnassign === true && isAdminActorForPut;
+    const incomingAssignedClean = assignedTo !== undefined ? String(assignedTo || '').trim() : '';
+    const incomingHasRealCoord = incomingAssignedClean !== '' && incomingAssignedClean.toLowerCase() !== 'unassigned' && incomingAssignedClean.toLowerCase() !== 'all';
+    const isBlockedStaleUnassign = assignedTo !== undefined && hasAssignedCoordinator(snapshotLead) && !incomingHasRealCoord && !allowExplicitUnassign;
+    const coordinatorToIncentivize = (assignedTo !== undefined && !isBlockedStaleUnassign) ? assignedTo : snapshotLead.assignedTo;
     if (coordinatorToIncentivize) {
       const cleanCoord = String(coordinatorToIncentivize).trim().toLowerCase();
       const prevCoord = snapshotLead.assignedTo ? String(snapshotLead.assignedTo).trim().toLowerCase() : cleanCoord;
@@ -2510,6 +2518,28 @@ app.put('/api/leads/:id', async (req, res) => {
           );
         } catch (reassignErr) {
           console.error('Failed to reassign Won lead incentives:', reassignErr);
+        }
+      }
+
+      // 2c. Already-Won project/country rule upgrade check (e.g. changing country to Japan after marking Won)
+      const isWonRuleUpgrade = (
+        !isClosedWonTransition &&
+        !isWonReassignment &&
+        snapshotLead.stage === 'won' &&
+        (stage === undefined || stage === 'won') &&
+        ((country !== undefined && country !== snapshotLead.country) || (project !== undefined && project !== snapshotLead.project))
+      );
+      if (isWonRuleUpgrade) {
+        try {
+          await awardWonIncentivesForLead(
+            snapshotLead.id,
+            coordinatorToIncentivize,
+            name || snapshotLead.name,
+            project !== undefined ? project : snapshotLead.project,
+            country !== undefined ? country : snapshotLead.country
+          );
+        } catch (upgradeErr) {
+          console.error('Failed to re-evaluate Won lead incentives on project/country change:', upgradeErr);
         }
       }
 
@@ -2691,41 +2721,48 @@ app.put('/api/leads/:id', async (req, res) => {
         lead.stage = stage as LeadStage;
       }
 
-      // Log Coordinator assignments
+      // Log Coordinator assignments (with stale/unauthorized unassign guard)
       let isAssignDateSetByServer = false;
-      if (assignedTo !== undefined && lead.assignedTo !== assignedTo) {
-        const isFromWa = assignedFrom === 'whatsapp_chat_menu' || req.headers['x-assigned-from'] === 'whatsapp_chat_menu';
-        const suffix = isFromWa ? ' via WhatsApp Chat Menu' : '';
-        lead.timeline.push({
-          id: `tl_${Date.now()}_assign`,
-          type: 'assignment',
-          text: `Assigned coordinator changed from "${lead.assignedTo || 'Unassigned'}" to "${assignedTo || 'Unassigned'}"${suffix}`,
-          actor,
-          timestamp: new Date().toISOString()
-        });
+      if (assignedTo !== undefined) {
+        const currentHasRealCoord = hasAssignedCoordinator(lead);
+        const nextCoordClean = String(assignedTo || '').trim();
+        const nextHasRealCoord = nextCoordClean !== '' && nextCoordClean.toLowerCase() !== 'unassigned' && nextCoordClean.toLowerCase() !== 'all';
 
-        lead.coordinatorHistory.push({
-          candidateId: lead.id,
-          previousCoordinator: lead.assignedTo || 'unassigned',
-          newCoordinator: assignedTo || 'unassigned',
-          changedBy: actor,
-          changedAt: new Date().toISOString()
-        });
+        if (currentHasRealCoord && !nextHasRealCoord && !allowExplicitUnassign) {
+          console.warn(`[PUT /api/leads/${lead.id}] Blocked stale/unauthorized unassign of "${lead.assignedTo}" -> "${assignedTo}" by ${actor} (allowUnassign=${req.body.allowUnassign}, isAdmin=${isAdminActorForPut})`);
+        } else if (lead.assignedTo !== assignedTo) {
+          const isFromWa = assignedFrom === 'whatsapp_chat_menu' || req.headers['x-assigned-from'] === 'whatsapp_chat_menu';
+          const suffix = isFromWa ? ' via WhatsApp Chat Menu' : '';
+          lead.timeline.push({
+            id: `tl_${Date.now()}_assign`,
+            type: 'assignment',
+            text: `Assigned coordinator changed from "${lead.assignedTo || 'Unassigned'}" to "${assignedTo || 'Unassigned'}"${suffix}`,
+            actor,
+            timestamp: new Date().toISOString()
+          });
 
-        lead.assignedTo = assignedTo;
-        lead.assignDate = new Date().toISOString().split('T')[0];
-        isAssignDateSetByServer = true;
-        if (isFromWa) {
-          lead.assignedFrom = 'whatsapp_chat_menu';
-        }
+          lead.coordinatorHistory.push({
+            candidateId: lead.id,
+            previousCoordinator: lead.assignedTo || 'unassigned',
+            newCoordinator: assignedTo || 'unassigned',
+            changedBy: actor,
+            changedAt: new Date().toISOString()
+          });
 
-        // Automatically set intake to true and generate serialNo when assigned to a real coordinator
-        const hasRealCoordinator = assignedTo && assignedTo.trim() !== '' && assignedTo.toLowerCase() !== 'unassigned' && assignedTo.toLowerCase() !== 'all';
-        if (hasRealCoordinator) {
-          lead.intake = true;
-          if (!lead.serialNo) {
-            const sequence = leads.filter(l => l.intake && l.serialNo).length + 1;
-            lead.serialNo = `INQ-${1000 + sequence}`;
+          lead.assignedTo = assignedTo;
+          lead.assignDate = new Date().toISOString().split('T')[0];
+          isAssignDateSetByServer = true;
+          if (isFromWa) {
+            lead.assignedFrom = 'whatsapp_chat_menu';
+          }
+
+          // Automatically set intake to true and generate serialNo when assigned to a real coordinator
+          if (nextHasRealCoord) {
+            lead.intake = true;
+            if (!lead.serialNo) {
+              const sequence = leads.filter(l => l.intake && l.serialNo).length + 1;
+              lead.serialNo = `INQ-${1000 + sequence}`;
+            }
           }
         }
       }
@@ -3298,25 +3335,17 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
 
     const leads = await getLeads(true);
 
-    // Check if a lead with this phone already exists (normalizing digits)
-    const rawTargetDigits = cleanPhone.replace(/[^0-9]/g, '').slice(-10);
-    let existingIndex = -1;
-    if (rawTargetDigits.length >= 7) {
-      existingIndex = leads.findIndex(l => {
-        if (l.isDeleted) return false;
-        const leadDigits = (l.phone || '').replace(/[^0-9]/g, '').slice(-10);
-        return leadDigits === rawTargetDigits;
-      });
-    }
+    // Check if an active lead with this phone or alternateNo already exists (prioritizing assigned leads)
+    const existingMatch = findBestMatchingLeadByPhone(leads, cleanPhone);
 
-    let targetLead: Lead;
+    let targetLead!: Lead;
     const nowIso = new Date().toISOString();
-    const isNewLead = existingIndex === -1;
+    let isNewLead = !existingMatch;
 
-    if (existingIndex !== -1) {
-      targetLead = leads[existingIndex];
+    if (existingMatch) {
+      targetLead = { ...existingMatch };
       // Update name if provided and existing is generic
-      if (name && name.trim() && (!targetLead.name || targetLead.name === 'Unnamed Candidate' || targetLead.name === 'WhatsApp Contact')) {
+      if (name && name.trim() && (!targetLead.name || targetLead.name === 'Unnamed Candidate' || targetLead.name === 'WhatsApp Contact' || targetLead.name.startsWith('WhatsApp Lead'))) {
         targetLead.name = formatCandidateNameBackend(name.trim());
       }
     } else {
@@ -3448,9 +3477,9 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
     }
 
     targetLead.updatedAt = nowIso;
-    if (existingIndex !== -1) {
+    if (existingMatch) {
       const updatedExisting = await updateSingleLead(targetLead.id, (current) => {
-        if (name && name.trim() && (!current.name || current.name === 'Unnamed Candidate' || current.name === 'WhatsApp Contact')) {
+        if (name && name.trim() && (!current.name || current.name === 'Unnamed Candidate' || current.name === 'WhatsApp Contact' || current.name.startsWith('WhatsApp Lead'))) {
           current.name = formatCandidateNameBackend(name.trim());
         }
         if (initialNewMessage) {
@@ -3465,7 +3494,9 @@ app.post('/api/whatsapp/start-chat', async (req, res) => {
       });
       if (updatedExisting) targetLead = updatedExisting;
     } else {
-      await addLead(targetLead);
+      const savedOrMerged = await addOrMergeInboundLead(targetLead);
+      targetLead = savedOrMerged.lead;
+      if (savedOrMerged.merged) isNewLead = false;
     }
 
     res.status(200).json({
@@ -4349,26 +4380,17 @@ export async function processInboundWebhookPayload(payload: any): Promise<{ newC
       }
 
       if (!matched && recipientId) {
-        const cleanRecipient = String(recipientId).replace(/\D/g, '');
-        if (cleanRecipient) {
-          for (let i = 0; i < leads.length; i++) {
-            const lead = leads[i];
-            const leadDigits = String(lead.phone || '').replace(/\D/g, '');
-            if (leadDigits && (leadDigits.includes(cleanRecipient) || cleanRecipient.includes(leadDigits) || (leadDigits.length >= 10 && cleanRecipient.endsWith(leadDigits.slice(-10))))) {
-              if (Array.isArray(lead.messages) && lead.messages.length > 0) {
-                for (let mIdx = lead.messages.length - 1; mIdx >= 0; mIdx--) {
-                  const m = lead.messages[mIdx];
-                  if (m && m.sender !== 'lead') {
-                    ensureMutation(lead.id).statusUpdates.push({
-                      wamid: m.id,
-                      status: newStatus,
-                      errorDetails: s.errorDetails,
-                      fallbackLatestOutbound: true
-                    });
-                    break;
-                  }
-                }
-              }
+        const matchedRecipientLead = findBestMatchingLeadByPhone(leads, String(recipientId));
+        if (matchedRecipientLead && Array.isArray(matchedRecipientLead.messages) && matchedRecipientLead.messages.length > 0) {
+          for (let mIdx = matchedRecipientLead.messages.length - 1; mIdx >= 0; mIdx--) {
+            const m = matchedRecipientLead.messages[mIdx];
+            if (m && m.sender !== 'lead') {
+              ensureMutation(matchedRecipientLead.id).statusUpdates.push({
+                wamid: m.id,
+                status: newStatus,
+                errorDetails: s.errorDetails,
+                fallbackLatestOutbound: true
+              });
               break;
             }
           }
@@ -4376,7 +4398,7 @@ export async function processInboundWebhookPayload(payload: any): Promise<{ newC
       }
     }
 
-    // 4. Process Inbound Messages
+    // 4. Process Inbound Messages (always prioritize assigned leads across both phone & alternateNo)
     for (const inMsg of messagesToProcess) {
       const cleanPhone = String(inMsg.fromNumber).replace(/\D/g, '');
       if (!cleanPhone || cleanPhone.length < 7) continue;
@@ -4389,17 +4411,10 @@ export async function processInboundWebhookPayload(payload: any): Promise<{ newC
         parsedMediaUrl = `/api/whatsapp/media/${inMsg.mediaUrl}`;
       }
 
-      const matchIdx = leads.findIndex(l => {
-        if (l.isDeleted) return false;
-        const leadDigits = String(l.phone || '').replace(/\D/g, '');
-        if (!leadDigits) return false;
-        return leadDigits.includes(cleanPhone) || cleanPhone.includes(leadDigits) ||
-          (leadDigits.length >= 10 && cleanPhone.endsWith(leadDigits.slice(-10))) ||
-          (cleanPhone.length >= 10 && leadDigits.endsWith(cleanPhone.slice(-10)));
-      });
+      const matchedLead = findBestMatchingLeadByPhone(leads, String(inMsg.fromNumber));
 
-      if (matchIdx !== -1) {
-        const lead = leads[matchIdx];
+      if (matchedLead) {
+        const lead = matchedLead;
 
         if (lead.isBlocked) {
           console.log(`[Webhook] Inbound message dropped: Candidate "${lead.name}" (${lead.phone}) is BLOCKED.`);
@@ -4555,11 +4570,20 @@ export async function processInboundWebhookPayload(payload: any): Promise<{ newC
           ]
         };
 
-        await addLead(newLead, { allowDeferredSync: true });
-        newCount++;
-        console.log(`[Webhook] Created new requesting lead ID="${newLeadId}" for inbound phone "${newLead.phone}".`);
+        const result = await addOrMergeInboundLead(newLead, { allowDeferredSync: true });
+        const existingLocalIdx = leads.findIndex(l => l.id === result.lead.id);
+        if (existingLocalIdx !== -1) leads[existingLocalIdx] = result.lead;
+        else leads.unshift(result.lead);
 
-        handleAutoReplyIfEnabled(newLead.id, newLead.phone, newLead.name);
+        if (result.merged) {
+          updatedCount++;
+          console.log(`[Webhook] Atomic mutex phone match merged message "${inMsg.id}" into existing candidate "${result.lead.id}" (Assigned: ${result.lead.assignedTo || 'unassigned'}).`);
+        } else {
+          newCount++;
+          console.log(`[Webhook] Created new requesting lead ID="${result.lead.id}" for inbound phone "${result.lead.phone}".`);
+        }
+
+        handleAutoReplyIfEnabled(result.lead.id, result.lead.phone, result.lead.name);
       }
     }
 
@@ -4682,10 +4706,9 @@ app.post('/api/whatsapp/sync-catchup', async (req, res) => {
 app.post('/api/whatsapp/bulk-sync', async (req, res) => {
   try {
     const { rawText, rows } = req.body;
-    const leads = await getLeads();
+    const leads = await getLeads(true);
     let addedCount = 0;
     let skippedCount = 0;
-    const addedLeads: Lead[] = [];
 
     // Helper to process a single candidate record
     const processCandidateRecord = async (name: string, phoneStr: string, campaignStr?: string, messageStr?: string, dateStr?: string) => {
@@ -4697,14 +4720,9 @@ app.post('/api/whatsapp/bulk-sync', async (req, res) => {
       const last10 = cleanDigits.slice(-10);
       const formattedPhone = `+91${last10}`;
 
-      // Check if lead already exists
-      const exists = leads.some(l => {
-        if (l.isDeleted) return false;
-        const lDigits = String(l.phone || '').replace(/\D/g, '');
-        return lDigits.endsWith(last10);
-      });
-
-      if (exists) {
+      // Check if lead already exists across phone & alternateNo
+      const existingLead = findBestMatchingLeadByPhone(leads, formattedPhone);
+      if (existingLead) {
         skippedCount++;
         return;
       }
@@ -4806,9 +4824,12 @@ app.post('/api/whatsapp/bulk-sync', async (req, res) => {
         ]
       };
 
-      leads.unshift(newLead);
-      addedLeads.push(newLead);
-      addedCount++;
+      const savedResult = await addOrMergeInboundLead(newLead, { allowDeferredSync: true });
+      const idx = leads.findIndex(l => l.id === savedResult.lead.id);
+      if (idx !== -1) leads[idx] = savedResult.lead;
+      else leads.unshift(savedResult.lead);
+      if (savedResult.merged) skippedCount++;
+      else addedCount++;
     };
 
     // If structured rows provided
@@ -4852,11 +4873,6 @@ app.post('/api/whatsapp/bulk-sync', async (req, res) => {
           await processCandidateRecord(nameCandidate, phoneCandidate, campaignCandidate, msgCandidate);
         }
       }
-    }
-
-    if (addedCount > 0) {
-      clearLeadsCache();
-      await saveLeads(leads);
     }
 
     res.json({
@@ -7383,7 +7399,7 @@ async function processBroadcastJob(
           remarks3: '',
           notes: ''
         };
-        await addLead(newLead, { allowDeferredSync: true });
+        await addOrMergeInboundLead(newLead, { allowDeferredSync: true });
       }
     };
 
@@ -7607,9 +7623,9 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
 
     console.log(`Processing inbound WhatsApp webhook lead from ${profileName} (${phone})...`);
 
-    // Fetch leads to check if this candidate already exists in active CRM
+    // Fetch leads to check if this candidate already exists in active CRM (prioritizing assigned leads)
     const leads = await getLeads();
-    const existingLead = leads.find(l => !l.isDeleted && (arePhonesMatching(l.phone, phone) || (l.alternateNo && arePhonesMatching(l.alternateNo, phone))));
+    const existingLead = findBestMatchingLeadByPhone(leads, phone);
 
     if (existingLead) {
       if (existingLead.isBlocked) {
@@ -7810,12 +7826,12 @@ Extract:
       ]
     };
 
-    await addLead(newLead);
-    
-    // Trigger auto-reply if enabled
-    handleAutoReplyIfEnabled(newLead.id, phone, newLead.name);
+    const savedInbound = await addOrMergeInboundLead(newLead);
 
-    res.json({ success: true, lead: newLead, simulated: !ai });
+    // Trigger auto-reply if enabled
+    handleAutoReplyIfEnabled(savedInbound.lead.id, phone, savedInbound.lead.name);
+
+    res.json({ success: true, lead: savedInbound.lead, merged: savedInbound.merged, simulated: !ai });
 
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });

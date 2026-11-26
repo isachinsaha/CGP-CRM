@@ -112,6 +112,8 @@ export interface Lead {
   intake?: boolean;
   isDeleted?: boolean;
   deletedAt?: string | null;
+  deletedBy?: string;
+  mergedInto?: string;
   isBlocked?: boolean;
   blockedAt?: string;
   blockedReason?: string;

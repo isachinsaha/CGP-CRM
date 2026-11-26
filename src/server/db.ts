@@ -512,14 +512,15 @@ function initFirestore() {
 }
 
 // Structured Firestore Error & Connection Validation (Zero-Data-Loss Diagnostics)
-export enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
+export const OperationType = {
+  CREATE: 'create',
+  UPDATE: 'update',
+  DELETE: 'delete',
+  LIST: 'list',
+  GET: 'get',
+  WRITE: 'write',
+} as const;
+export type OperationType = typeof OperationType[keyof typeof OperationType];
 
 export interface FirestoreErrorInfo {
   error: string;
@@ -1532,7 +1533,7 @@ async function initializeDatabase() {
   }
 }
 
-function mergeMessagesList(listA: Message[], listB: Message[]): Message[] {
+export function mergeMessagesList(listA: Message[], listB: Message[]): Message[] {
   const map = new Map<string, Message>();
   if (Array.isArray(listA)) listA.forEach(m => { if (m && m.id) map.set(m.id, m); });
   if (Array.isArray(listB)) listB.forEach(m => {
@@ -1553,7 +1554,7 @@ function mergeMessagesList(listA: Message[], listB: Message[]): Message[] {
   return Array.from(map.values()).sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
 }
 
-function mergeTimelineList(listA: any[], listB: any[]): any[] {
+export function mergeTimelineList(listA: any[], listB: any[]): any[] {
   const map = new Map<string, any>();
   if (Array.isArray(listA)) listA.forEach(t => { if (t && t.id) map.set(t.id, t); });
   if (Array.isArray(listB)) listB.forEach(t => { if (t && t.id) map.set(t.id, t); });
@@ -1597,8 +1598,75 @@ export function mergeTasksList(listA: any[], listB: any[]): any[] {
   });
 }
 
+export function extractNormalizedPhoneKeys(raw?: string | null): string[] {
+  if (!raw) return [];
+  const parts = String(raw).split(/[,;/|\n]+/);
+  const keys = new Set<string>();
+  for (const part of parts) {
+    const digits = part.replace(/\D/g, '');
+    if (digits.length >= 10) {
+      keys.add(digits.slice(-10));
+    } else if (digits.length >= 7) {
+      keys.add(digits);
+    }
+  }
+  return Array.from(keys);
+}
+
+export function arePhonesEquivalent(rawA?: string | null, rawB?: string | null): boolean {
+  const keysA = extractNormalizedPhoneKeys(rawA);
+  if (keysA.length === 0) return false;
+  const keysB = new Set(extractNormalizedPhoneKeys(rawB));
+  return keysA.some(k => keysB.has(k));
+}
+
+export function hasAssignedCoordinator(lead?: Partial<Lead> | null): boolean {
+  const assigned = String(lead?.assignedTo || '').trim().toLowerCase();
+  return assigned !== '' && assigned !== 'unassigned' && assigned !== 'all';
+}
+
+export function scoreLeadAsMaster(lead: Lead): number {
+  let score = 0;
+  if (hasAssignedCoordinator(lead)) score += 100000;
+  if (lead.stage && lead.stage !== 'new') score += 10000;
+  if (String(lead.remarks1 || lead.remarks2 || lead.remarks3 || '').trim()) score += 5000;
+  if (lead.intake || (lead.serialNo && String(lead.serialNo).trim() !== '')) score += 2000;
+  if (lead.docPassportCopy || lead.docResume || lead.passportCopyUrl || lead.resumeUrl) score += 1000;
+  score += Math.min((lead.messages || []).length, 50) * 15;
+  const updatedMs = new Date(lead.updatedAt || lead.createdAt || 0).getTime() || 0;
+  score += updatedMs / 1e13;
+  return score;
+}
+
+export function findBestMatchingLeadByPhone(leads: Lead[], phoneStr: string, excludeId?: string): Lead | null {
+  const targetKeys = new Set(extractNormalizedPhoneKeys(phoneStr));
+  if (targetKeys.size === 0) return null;
+
+  let bestLead: Lead | null = null;
+  let bestScore = -1;
+
+  for (const lead of leads) {
+    if (!lead || lead.isDeleted) continue;
+    if (excludeId && lead.id === excludeId) continue;
+
+    const leadKeys = [
+      ...extractNormalizedPhoneKeys(lead.phone),
+      ...extractNormalizedPhoneKeys(lead.alternateNo)
+    ];
+    if (!leadKeys.some(k => targetKeys.has(k))) continue;
+
+    const candidateScore = scoreLeadAsMaster(lead);
+    if (!bestLead || candidateScore > bestScore) {
+      bestLead = lead;
+      bestScore = candidateScore;
+    }
+  }
+
+  return bestLead;
+}
+
 // Helper function to perform field-level merging, preserving populated values from the older version if empty in the newer version
-function mergeLeadProfiles(olderLead: Lead, newerLead: Lead): Lead {
+export function mergeLeadProfiles(olderLead: Lead, newerLead: Lead): Lead {
   const merged = { ...newerLead };
   
   const fieldsToValidate: (keyof Lead)[] = [
@@ -1679,48 +1747,64 @@ function syncAndMergeLeadsList(
 
     if (local && cloud) {
       // Exist in both local and cloud
-      if (JSON.stringify(local) === JSON.stringify(cloud)) {
-        mergedLeads.push(local);
+      const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
+      const cloudTime = new Date(cloud.updatedAt || cloud.createdAt || 0).getTime();
+      const isDirtyLocally = dirtyLeadIds.has(id);
+
+      let chosen: Lead;
+      if (localTime >= cloudTime) {
+        chosen = mergeLeadProfiles(cloud, local);
+        chosen.messages = mergeMessagesList(cloud.messages || [], local.messages || []);
+        chosen.timeline = mergeTimelineList(cloud.timeline || [], local.timeline || []);
+        chosen.tasks = mergeTasksList(cloud.tasks || [], local.tasks || []);
       } else {
-        // Different. Determine who has newer edits based on updatedAt or default to local
-        const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
-        const cloudTime = new Date(cloud.updatedAt || cloud.createdAt || 0).getTime();
-
-        let chosen: Lead;
-        // LOCAL PREVAILS when timestamps are equal or local is newer!
-        if (localTime >= cloudTime) {
-          chosen = mergeLeadProfiles(cloud, local);
-          chosen.messages = mergeMessagesList(cloud.messages || [], local.messages || []);
-          chosen.timeline = mergeTimelineList(cloud.timeline || [], local.timeline || []);
-          chosen.tasks = mergeTasksList(cloud.tasks || [], local.tasks || []);
-          pendingUpload.push(chosen);
-        } else {
-          chosen = mergeLeadProfiles(local, cloud);
-          chosen.messages = mergeMessagesList(local.messages || [], cloud.messages || []);
-          chosen.timeline = mergeTimelineList(local.timeline || [], cloud.timeline || []);
-          chosen.tasks = mergeTasksList(local.tasks || [], cloud.tasks || []);
-          // Safeguard: Never let stale cloud revert local coordinator assignment or advanced stage
-          if (local.assignedTo && local.assignedTo.toLowerCase() !== 'unassigned' && (!cloud.assignedTo || cloud.assignedTo.toLowerCase() === 'unassigned')) {
-            chosen.assignedTo = local.assignedTo;
-            chosen.assignDate = local.assignDate || chosen.assignDate;
-          }
-          if (local.stage && local.stage !== 'new' && (!cloud.stage || cloud.stage === 'new')) {
-            chosen.stage = local.stage;
-          }
+        chosen = mergeLeadProfiles(local, cloud);
+        chosen.messages = mergeMessagesList(local.messages || [], cloud.messages || []);
+        chosen.timeline = mergeTimelineList(local.timeline || [], cloud.timeline || []);
+        chosen.tasks = mergeTasksList(local.tasks || [], cloud.tasks || []);
+        // Safeguard: Never let stale cloud revert local coordinator assignment or advanced stage
+        if (local.assignedTo && local.assignedTo.toLowerCase() !== 'unassigned' && (!cloud.assignedTo || cloud.assignedTo.toLowerCase() === 'unassigned')) {
+          chosen.assignedTo = local.assignedTo;
+          chosen.assignDate = local.assignDate || chosen.assignDate;
         }
-
-        // Keep autoReplySent true if either version had it set
-        if (local.autoReplySent || cloud.autoReplySent) {
-          chosen.autoReplySent = true;
+        if (local.stage && local.stage !== 'new' && (!cloud.stage || cloud.stage === 'new')) {
+          chosen.stage = local.stage;
         }
-
-        // Keep isDeleted true if either version had it set
-        if (local.isDeleted || cloud.isDeleted) {
-          chosen.isDeleted = true;
-        }
-
-        mergedLeads.push(chosen);
       }
+
+      // Keep autoReplySent true if either version had it set
+      if (local.autoReplySent || cloud.autoReplySent) {
+        chosen.autoReplySent = true;
+      }
+
+      // Keep isDeleted true if either version had it set
+      if (local.isDeleted || cloud.isDeleted) {
+        chosen.isDeleted = true;
+      }
+
+      // Only upload back to Firestore if strictly newer locally, explicitly dirty, or meaningful fields differ from cloud
+      const meaningfulDiffFromCloud =
+        isDirtyLocally ||
+        localTime > cloudTime ||
+        String(chosen.remarks1 || '') !== String(cloud.remarks1 || '') ||
+        String(chosen.remarks2 || '') !== String(cloud.remarks2 || '') ||
+        String(chosen.remarks3 || '') !== String(cloud.remarks3 || '') ||
+        String(chosen.adminRemarks || '') !== String(cloud.adminRemarks || '') ||
+        String(chosen.notes || '') !== String(cloud.notes || '') ||
+        String(chosen.assignedTo || '') !== String(cloud.assignedTo || '') ||
+        String(chosen.stage || '') !== String(cloud.stage || '') ||
+        String(chosen.name || '') !== String(cloud.name || '') ||
+        Boolean(chosen.isDeleted) !== Boolean(cloud.isDeleted) ||
+        Boolean(chosen.autoReplySent) !== Boolean(cloud.autoReplySent) ||
+        (chosen.messages?.length || 0) !== (cloud.messages?.length || 0) ||
+        (chosen.timeline?.length || 0) !== (cloud.timeline?.length || 0) ||
+        (chosen.tasks?.length || 0) !== (cloud.tasks?.length || 0);
+
+      if (meaningfulDiffFromCloud) {
+        pendingUpload.push(chosen);
+      }
+
+      mergedLeads.push(chosen);
     } else if (local && !cloud) {
       // Exist locally but missing from Cloud. We NEVER delete it! We instead preserve it and upload to Cloud.
       console.log(`[Sync Safeguard] Lead ${local.name || id} exists locally but is missing from Cloud. Preserving and uploading to Cloud.`);
@@ -2421,7 +2505,7 @@ export async function updateSingleLead(
 export async function updateMultipleLeads(
   matcher: string[] | ((lead: Lead) => boolean),
   mutator: (current: Lead) => Lead | null | undefined,
-  options: { allowDeferredSync?: boolean } = {}
+  options: { allowDeferredSync?: boolean; auditMeta?: { actor?: string; sourceView?: string } } = {}
 ): Promise<Lead[]> {
   return dbMutex.run(async () => {
     await initializeDatabase();
@@ -2436,19 +2520,23 @@ export async function updateMultipleLeads(
     const idSet = Array.isArray(matcher) ? new Set(matcher.map(String)) : null;
     const isMatch = idSet ? (l: Lead) => idSet.has(l.id) : (matcher as (lead: Lead) => boolean);
 
+    const modifiedPairs: Array<{ prev: Lead; next: Lead }> = [];
     const modifiedLeads: Lead[] = [];
     const nowBase = Date.now();
 
     for (let i = 0; i < leads.length; i++) {
       const current = leads[i];
       if (!current || !isMatch(current)) continue;
+      const prevSnapshot = { ...current };
       const mutated = mutator({ ...current });
       if (!mutated) continue;
       const prevMs = new Date(current.updatedAt || current.createdAt || 0).getTime() || 0;
       mutated.updatedAt = new Date(Math.max(nowBase, prevMs + 1)).toISOString();
-      const normalized = normalizeSingleLeadMediaUrls(mutated) as Lead;
+      const normalizedPreBudget = normalizeSingleLeadMediaUrls(mutated) as Lead;
+      const normalized = await enforceLeadDocSizeBudget(normalizedPreBudget);
       leads[i] = normalized;
       modifiedLeads.push(normalized);
+      modifiedPairs.push({ prev: prevSnapshot, next: normalized });
       markLeadDirty(normalized.id);
     }
 
@@ -2494,6 +2582,14 @@ export async function updateMultipleLeads(
         if (!options.allowDeferredSync) {
           throw new Error(`Cloud batch save failed (${err?.message || 'connection busy'}). Please retry.`);
         }
+      }
+    }
+
+    if (options.auditMeta) {
+      for (const pair of modifiedPairs) {
+        const actor = options.auditMeta.actor || pair.next.assignedTo || 'System';
+        const sourceView = options.auditMeta.sourceView || 'batch_update';
+        await writeLeadAuditEntries(pair.prev, pair.next, actor, sourceView).catch(() => {});
       }
     }
 
@@ -2591,6 +2687,155 @@ export async function addLead(
       options.auditMeta?.actor || normalized.assignedTo || 'System',
       options.auditMeta?.sourceView || 'lead_create'
     ).catch(() => {});
+  });
+}
+
+// Atomically add a new inbound lead OR merge into an existing active lead matching the same phone (inside dbMutex)
+export async function addOrMergeInboundLead(
+  lead: Lead,
+  options: { allowDeferredSync?: boolean; auditMeta?: { actor?: string; sourceView?: string } } = {}
+): Promise<{ lead: Lead; merged: boolean }> {
+  return dbMutex.run(async () => {
+    await initializeDatabase();
+
+    let leads: Lead[] = [];
+    if (dbCache.leads && Array.isArray(dbCache.leads.data) && dbCache.leads.data.length > 0) {
+      leads = [...dbCache.leads.data];
+    } else {
+      leads = safeReadJsonSync<Lead[]>(DATA_FILE, []);
+    }
+
+    const phoneLookup = [lead.phone, lead.alternateNo].filter(Boolean).join(',');
+    const existingByPhone = !lead.isDeleted && phoneLookup
+      ? findBestMatchingLeadByPhone(leads, phoneLookup)
+      : null;
+
+    let finalLead: Lead;
+    let wasMerged = false;
+    let prevForAudit: Lead | null = null;
+
+    if (existingByPhone) {
+      wasMerged = true;
+      prevForAudit = { ...existingByPhone };
+      const merged = mergeLeadProfiles(lead, existingByPhone);
+      merged.messages = mergeMessagesList(existingByPhone.messages || [], lead.messages || []);
+      merged.timeline = mergeTimelineList(existingByPhone.timeline || [], lead.timeline || []);
+      merged.tasks = mergeTasksList(existingByPhone.tasks || [], lead.tasks || []);
+
+      // If existing master had a generic WhatsApp placeholder name and inbound has a real name, upgrade it
+      const existingNameLower = String(existingByPhone.name || '').trim().toLowerCase();
+      const incomingName = String(lead.name || '').trim();
+      const isExistingGeneric =
+        !existingNameLower ||
+        existingNameLower.startsWith('whatsapp lead') ||
+        existingNameLower === 'whatsapp contact' ||
+        existingNameLower === 'unnamed candidate';
+      const isIncomingGeneric =
+        !incomingName ||
+        incomingName.toLowerCase().startsWith('whatsapp lead') ||
+        incomingName.toLowerCase() === 'whatsapp contact' ||
+        incomingName.toLowerCase() === 'unnamed candidate';
+      if (isExistingGeneric && !isIncomingGeneric) {
+        merged.name = incomingName;
+      }
+
+      // Deduplicate tags case-insensitively while preserving master tags
+      const tagMap = new Map<string, string>();
+      [...(existingByPhone.tags || []), ...(lead.tags || [])].forEach(t => {
+        const clean = String(t || '').trim();
+        if (clean && !tagMap.has(clean.toLowerCase())) {
+          tagMap.set(clean.toLowerCase(), clean);
+        }
+      });
+      merged.tags = Array.from(tagMap.values());
+
+      // Preserve original id, serialNo, intake, stage, and assignedTo of master lead
+      merged.id = existingByPhone.id;
+      if (existingByPhone.serialNo) merged.serialNo = existingByPhone.serialNo;
+      if (existingByPhone.intake) merged.intake = existingByPhone.intake;
+
+      // Mark previous outbound messages read if new inbound message arrived from lead
+      const hasNewLeadMsg = (lead.messages || []).some(m => m && m.sender === 'lead');
+      if (hasNewLeadMsg && Array.isArray(merged.messages)) {
+        merged.messages = merged.messages.map(m =>
+          m && m.sender !== 'lead' ? { ...m, status: 'read' as const } : m
+        );
+      }
+
+      const prevMs = new Date(existingByPhone.updatedAt || existingByPhone.createdAt || 0).getTime() || 0;
+      merged.updatedAt = new Date(Math.max(Date.now(), prevMs + 1)).toISOString();
+
+      const normalizedPreBudget = normalizeSingleLeadMediaUrls(merged) as Lead;
+      finalLead = await enforceLeadDocSizeBudget(normalizedPreBudget);
+
+      const mIdx = leads.findIndex(l => l.id === finalLead.id);
+      if (mIdx !== -1) leads[mIdx] = finalLead;
+      else leads.unshift(finalLead);
+    } else {
+      const normalizedPreBudget = normalizeSingleLeadMediaUrls(lead) as Lead;
+      finalLead = await enforceLeadDocSizeBudget(normalizedPreBudget);
+      const existingIdx = leads.findIndex(l => l.id === finalLead.id);
+      if (existingIdx !== -1) {
+        prevForAudit = { ...leads[existingIdx] };
+        leads[existingIdx] = finalLead;
+      } else {
+        leads.unshift(finalLead);
+      }
+    }
+
+    dbCache.leads = { data: leads, timestamp: Date.now() };
+    incrementDatabaseVersion(finalLead.id);
+    safeWriteJsonSync(DATA_FILE, leads);
+    markLeadDirty(finalLead.id);
+
+    if (db && (!options.allowDeferredSync || checkCloudStatus())) {
+      const maxAttempts = options.allowDeferredSync ? 1 : 2;
+      let lastErr: any = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const docRef = doc(db, 'leads', finalLead.id);
+          await runWithTimeout(setDoc(docRef, sanitizeLeadForFirestore(finalLead), { merge: true }), 15000);
+          clearLeadDirty(finalLead.id);
+          lastErr = null;
+          cloudSyncEnabled = true;
+          cloudErrorCount = 0;
+          quotaLimitExceeded = false;
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          if (attempt < maxAttempts) {
+            await new Promise(r => setTimeout(r, 450));
+          }
+        }
+      }
+
+      if (lastErr) {
+        logFirestoreDiagnostic(lastErr, wasMerged ? OperationType.WRITE : OperationType.CREATE, `leads/${finalLead.id}`);
+        handleCloudError(`addOrMergeInboundLead(${finalLead.id})`, lastErr);
+        if (!options.allowDeferredSync) {
+          throw new Error(`Cloud save failed (${lastErr?.message || 'connection busy'}). Please retry.`);
+        }
+      } else {
+        const syncedList = safeReadJsonSync<Lead[]>(DATA_FILE_SYNCED, []);
+        const sIdx = syncedList.findIndex(l => l.id === finalLead.id);
+        if (sIdx !== -1) syncedList[sIdx] = finalLead;
+        else syncedList.unshift(finalLead);
+        safeWriteJsonSync(DATA_FILE_SYNCED, syncedList);
+
+        markDatabaseUpdated('leads')
+          .then(ts => { if (ts) lastReadLeadsTimestamp = ts; })
+          .catch(() => {});
+      }
+    }
+
+    await writeLeadAuditEntries(
+      prevForAudit,
+      finalLead,
+      options.auditMeta?.actor || finalLead.assignedTo || 'System',
+      options.auditMeta?.sourceView || (wasMerged ? 'inbound_merge' : 'lead_create')
+    ).catch(() => {});
+
+    return { lead: finalLead, merged: wasMerged };
   });
 }
 
@@ -3536,6 +3781,7 @@ export async function saveMetadata(metadata: CgpMetadata): Promise<void> {
 export const TEAM_ROLES = {
   TELECALLERS: ['joyce', 'maryada', 'sarina'],
   MANAGEMENT_SENIORS: ['shreya', 'edenla', 'priya', 'bishwo'],
+  NO_TL_MANAGER_SHARE_SELLERS: ['shreya', 'edenla', 'bishwo', 'sachinsaha', 'admin', 'test'],
   TL: 'shreya',
   MANAGER_EDEN: 'edenla',
   MANAGER_PRIYA: 'priya',
@@ -3549,6 +3795,121 @@ export function normalizeCoordUsername(name: string): string {
   if (clean === 'sachin' || clean === 'sachinsaha') return 'sachinsaha';
   if (clean === 'bishwo' || clean.includes('bishwo')) return 'bishwo';
   return clean;
+}
+
+export interface WonBeneficiary {
+  username: string;
+  amount: number;
+  reason: string;
+  txId: string;
+}
+
+export function resolveWonIncentiveAmount(
+  projectName: string | undefined,
+  countryName: string | undefined,
+  rules: IncentiveRule[] = []
+): number {
+  const cName = String(countryName || '').trim().toLowerCase();
+  const pName = String(projectName || '').trim().toLowerCase();
+  const pMatchTarget = pName === 'general' ? '' : pName;
+
+  const isHighValueCountry = ['japan', 'albania', 'europe', 'malta', 'greece'].includes(cName);
+  let incentiveAmount = isHighValueCountry ? 1000 : 400;
+
+  const matchedRules = (rules || []).filter(r => {
+    const rProject = (r.projectName || '').trim().toLowerCase();
+    const rCountry = (r.country || '').trim().toLowerCase();
+    const projectMatches =
+      rProject === 'all' ||
+      rProject === 'any' ||
+      rProject === '' ||
+      rProject === pName ||
+      (pMatchTarget !== '' && rProject === pMatchTarget);
+    const countryMatches =
+      rCountry === 'all' ||
+      rCountry === 'any' ||
+      rCountry === '' ||
+      rCountry === 'all countries' ||
+      rCountry === cName;
+    return projectMatches && countryMatches;
+  });
+
+  if (matchedRules.length > 0) {
+    matchedRules.sort((a, b) => {
+      const aProj = !['all', 'any', ''].includes((a.projectName || '').trim().toLowerCase());
+      const aCtry = !['all', 'any', '', 'all countries'].includes((a.country || '').trim().toLowerCase());
+      const bProj = !['all', 'any', ''].includes((b.projectName || '').trim().toLowerCase());
+      const bCtry = !['all', 'any', '', 'all countries'].includes((b.country || '').trim().toLowerCase());
+      return (bProj ? 1 : 0) + (bCtry ? 2 : 0) - ((aProj ? 1 : 0) + (aCtry ? 2 : 0));
+    });
+    const best = matchedRules[0];
+    const bestAmount = Number(best.amount);
+    if (Number.isFinite(bestAmount) && bestAmount > 0) {
+      const isSpecificRule =
+        !['all', 'any', ''].includes((best.projectName || '').trim().toLowerCase()) ||
+        !['all', 'any', '', 'all countries'].includes((best.country || '').trim().toLowerCase());
+      if (isSpecificRule || !isHighValueCountry) {
+        incentiveAmount = bestAmount;
+      }
+    }
+  }
+
+  return incentiveAmount;
+}
+
+export function buildNov04WonBeneficiaries(params: {
+  leadId: string;
+  normCoord: string;
+  coordDisplayName: string;
+  candidateName: string;
+  projectName?: string;
+  countryName?: string;
+  rules: IncentiveRule[];
+}): WonBeneficiary[] {
+  const { leadId, normCoord, coordDisplayName, candidateName, projectName, countryName, rules } = params;
+  const pName = projectName || 'General';
+  const cName = countryName || 'Unknown';
+  const baseAmount = resolveWonIncentiveAmount(projectName, countryName, rules);
+  const isTelecaller = TEAM_ROLES.TELECALLERS.includes(normCoord);
+  const receivesTlManagerShare = !TEAM_ROLES.NO_TL_MANAGER_SHARE_SELLERS.includes(normCoord);
+  const saleByTag = isTelecaller ? `Telecaller sale by: ${coordDisplayName}` : `Sale by: ${coordDisplayName}`;
+
+  const beneficiaries: WonBeneficiary[] = [
+    {
+      username: normCoord,
+      amount: baseAmount,
+      reason: `Closed Won incentive for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`,
+      txId: toSafeFirestoreDocId(`tx_won_${leadId}_${normCoord}`)
+    }
+  ];
+
+  if (receivesTlManagerShare) {
+    beneficiaries.push(
+      {
+        username: 'shreya',
+        amount: 200,
+        reason: `TL Closed Won Share (${saleByTag}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`,
+        txId: toSafeFirestoreDocId(`tx_share_${leadId}_shreya`)
+      },
+      {
+        username: 'edenla',
+        amount: 200,
+        reason: `Manager Closed Won Share (${saleByTag}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`,
+        txId: toSafeFirestoreDocId(`tx_share_${leadId}_edenla`)
+      }
+    );
+  }
+
+  if (normCoord !== 'sachinsaha') {
+    beneficiaries.push({
+      username: 'sachinsaha',
+      amount: 200,
+      reason: `Digital Marketer Closed Won Share (${saleByTag}) for candidate: ${candidateName} (Project: ${pName}, Country: ${cName})`,
+      txId: toSafeFirestoreDocId(`tx_share_${leadId}_sachinsaha`)
+    });
+  }
+
+  return beneficiaries;
 }
 
 export async function reconcileWalletsFromLeads(): Promise<Wallet[]> {
@@ -3587,7 +3948,7 @@ export async function reconcileWalletsFromLeads(): Promise<Wallet[]> {
     if (lead.isDeleted) return;
     const rawCoord = (lead.assignedTo || '').trim();
     if (!rawCoord || rawCoord.toLowerCase() === 'unassigned' || rawCoord.toLowerCase() === 'all') return;
-    const coordKey = rawCoord.toLowerCase();
+    const coordKey = normalizeCoordUsername(rawCoord);
 
     if (!walletsMap.has(coordKey)) {
       const foundC = coordinators.find(c => c.username.toLowerCase() === coordKey || c.displayName.toLowerCase() === coordKey);
@@ -3611,137 +3972,31 @@ export async function reconcileWalletsFromLeads(): Promise<Wallet[]> {
       const isNewPolicy = new Date(wonDate).getTime() >= new Date('2026-11-04T00:00:00.000Z').getTime();
 
       if (isNewPolicy) {
-        const normalizedCoord = normalizeCoordUsername(coordKey);
-        // Case A: Telecaller lead (Joyce, Maryada, Sarina)
-        if (TEAM_ROLES.TELECALLERS.includes(normalizedCoord)) {
-          // Assigned Telecaller gets INR 400 CR
-          wallet.transactions.push({
-            id: `tx_${Date.now()}_won_${lead.id}`,
-            type: 'credit',
-            amount: 400,
-            reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
-            timestamp: wonDate,
-            leadId: lead.id
-          });
-          // Shreya (TL) gets INR 200 CR
-          const shreyaW = walletsMap.get('shreya');
-          if (shreyaW) {
-            shreyaW.transactions.push({
-              id: `tx_${Date.now()}_shreya_share_${lead.id}`,
+        const beneficiaries = buildNov04WonBeneficiaries({
+          leadId: lead.id,
+          normCoord: coordKey,
+          coordDisplayName: wallet.displayName,
+          candidateName: lead.name,
+          projectName: lead.project,
+          countryName: lead.country,
+          rules
+        });
+        for (const b of beneficiaries) {
+          const targetWallet = walletsMap.get(b.username);
+          if (targetWallet) {
+            targetWallet.transactions.push({
+              id: b.txId,
               type: 'credit',
-              amount: 200,
-              reason: `TL Closed Won Share (Telecaller sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
+              amount: b.amount,
+              reason: b.reason,
               timestamp: wonDate,
               leadId: lead.id
             });
-          }
-          // Eden (Manager) gets INR 200 CR
-          const edenW = walletsMap.get('edenla');
-          if (edenW) {
-            edenW.transactions.push({
-              id: `tx_${Date.now()}_eden_share_${lead.id}`,
-              type: 'credit',
-              amount: 200,
-              reason: `Manager Closed Won Share (Telecaller sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
-              timestamp: wonDate,
-              leadId: lead.id
-            });
-          }
-          // Sachin (Digital Marketer) gets INR 200 CR
-          const sachinW = walletsMap.get('sachinsaha');
-          if (sachinW) {
-            sachinW.transactions.push({
-              id: `tx_${Date.now()}_sachin_share_${lead.id}`,
-              type: 'credit',
-              amount: 200,
-              reason: `Digital Marketer Closed Won Share (Telecaller sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
-              timestamp: wonDate,
-              leadId: lead.id
-            });
-          }
-        } 
-        // Case B: Management / Senior (Shreya, Eden, Priya, Bishwo)
-        else if (TEAM_ROLES.MANAGEMENT_SENIORS.includes(normalizedCoord)) {
-          // Assigned coordinator gets INR 400 CR
-          wallet.transactions.push({
-            id: `tx_${Date.now()}_won_${lead.id}`,
-            type: 'credit',
-            amount: 400,
-            reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
-            timestamp: wonDate,
-            leadId: lead.id
-          });
-          // Sachin (Digital Marketer) still gets INR 200 CR
-          if (normalizedCoord !== 'sachinsaha') {
-            const sachinW = walletsMap.get('sachinsaha');
-            if (sachinW) {
-              sachinW.transactions.push({
-                id: `tx_${Date.now()}_sachin_share_${lead.id}`,
-                type: 'credit',
-                amount: 200,
-                reason: `Digital Marketer Closed Won Share (Sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
-                timestamp: wonDate,
-                leadId: lead.id
-              });
-            }
-          }
-        }
-        // Case C: Any other coordinator
-        else {
-          wallet.transactions.push({
-            id: `tx_${Date.now()}_won_${lead.id}`,
-            type: 'credit',
-            amount: 400,
-            reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
-            timestamp: wonDate,
-            leadId: lead.id
-          });
-          if (normalizedCoord !== 'sachinsaha') {
-            const sachinW = walletsMap.get('sachinsaha');
-            if (sachinW) {
-              sachinW.transactions.push({
-                id: `tx_${Date.now()}_sachin_share_${lead.id}`,
-                type: 'credit',
-                amount: 200,
-                reason: `Digital Marketer Closed Won Share (Sale by: ${wallet.displayName}) for candidate: ${lead.name} (Project: ${lead.project || 'General'}, Country: ${lead.country || 'Unknown'})`,
-                timestamp: wonDate,
-                leadId: lead.id
-              });
-            }
           }
         }
       } else {
         // Historical baseline rules preserved for leads won before 04 Nov 2026
-        let incentiveAmount = 400;
-        const cName = String(lead.country || '').trim().toLowerCase();
-        const pName = String(lead.project || '').trim().toLowerCase();
-
-        if (['japan', 'albania', 'europe', 'malta', 'greece'].includes(cName)) {
-          incentiveAmount = 1000;
-        } else if (['kuwait', 'dubai', 'qatar', 'u.a.e', 'oman'].includes(cName)) {
-          incentiveAmount = 400;
-        }
-
-        const matchedRules = rules.filter(r => {
-          const rProject = (r.projectName || '').trim().toLowerCase();
-          const rCountry = (r.country || '').trim().toLowerCase();
-          const projectMatches = rProject === 'all' || rProject === 'any' || rProject === '' || rProject === pName;
-          const countryMatches = rCountry === 'all' || rCountry === 'any' || rCountry === '' || rCountry === 'all countries' || rCountry === cName;
-          return projectMatches && countryMatches;
-        });
-
-        if (matchedRules.length > 0) {
-          matchedRules.sort((a, b) => {
-            const aProj = !['all', 'any', ''].includes((a.projectName || '').trim().toLowerCase());
-            const aCtry = !['all', 'any', '', 'all countries'].includes((a.country || '').trim().toLowerCase());
-            const bProj = !['all', 'any', ''].includes((b.projectName || '').trim().toLowerCase());
-            const bCtry = !['all', 'any', '', 'all countries'].includes((b.country || '').trim().toLowerCase());
-            return (bProj ? 1 : 0) + (bCtry ? 2 : 0) - ((aProj ? 1 : 0) + (aCtry ? 2 : 0));
-          });
-          const best = matchedRules[0];
-          const isSpecific = !['all', 'any', '', 'all countries'].includes((best.country || '').trim().toLowerCase());
-          if (isSpecific) incentiveAmount = best.amount;
-        }
+        const incentiveAmount = resolveWonIncentiveAmount(lead.project, lead.country, rules);
 
         wallet.transactions.push({
           id: `tx_${Date.now()}_won_${lead.id}`,
@@ -3753,7 +4008,7 @@ export async function reconcileWalletsFromLeads(): Promise<Wallet[]> {
         });
 
         // Sachin Saha Override Bonus
-        if (incentiveAmount === 400 || incentiveAmount === 1000) {
+        if (coordKey !== 'sachinsaha' && (incentiveAmount === 400 || incentiveAmount === 1000)) {
           const sachinBonus = incentiveAmount === 400 ? 100 : 200;
           const sachinWallet = walletsMap.get('sachinsaha')!;
           sachinWallet.transactions.push({
@@ -4971,6 +5226,7 @@ export async function ensureWalletIntegrityFromLeads(): Promise<{ healedCount: n
     const leads = await getLeads();
     const wallets = await getWallets(true, true);
     const coordinators = await getCoordinators();
+    const rules = await getIncentiveRulesInternal();
     const tombstones = await getWalletTombstones(true);
     const deletedTxIds = new Set(tombstones.map(t => t.txId));
 
@@ -5009,7 +5265,7 @@ export async function ensureWalletIntegrityFromLeads(): Promise<{ healedCount: n
       if (!rawCoord || rawCoord.toLowerCase() === 'unassigned' || rawCoord.toLowerCase() === 'all') continue;
       const normCoord = normalizeCoordUsername(rawCoord);
 
-      // 1. Check active WON leads: if ZERO Won transactions exist across all wallets and NOT intentionally deleted, heal!
+      // 1. Check active WON leads: restore missing team shares & rule-based shortfalls unless intentionally deleted
       if (lead.stage === 'won') {
         const hasAnyWonTxAcrossWallets = wallets.some(w =>
           (w.transactions || []).some(t =>
@@ -5018,10 +5274,10 @@ export async function ensureWalletIntegrityFromLeads(): Promise<{ healedCount: n
           )
         );
         const wasWonManuallyDeleted = tombstones.some(t =>
-          t.leadId === lead.id && (t.reason?.includes('Closed Won') || t.reason?.includes('Won Share'))
+          t.leadId === lead.id && (t.reason?.includes('Closed Won') || t.reason?.includes('Won Share') || t.reason?.includes('Override Bonus'))
         );
 
-        if (!hasAnyWonTxAcrossWallets && !wasWonManuallyDeleted) {
+        if (hasAnyWonTxAcrossWallets || !wasWonManuallyDeleted) {
           const stageHist = [...(lead.stageHistory || [])].reverse().find(s => s.newStage === 'won');
           const timelineHist = [...(lead.timeline || [])].reverse().find(t => t.text && t.text.includes('Closed Won'));
           const wonDate = stageHist?.changedAt || timelineHist?.timestamp || lead.updatedAt || lead.createdAt || new Date().toISOString();
@@ -5030,55 +5286,20 @@ export async function ensureWalletIntegrityFromLeads(): Promise<{ healedCount: n
           const pName = lead.project || 'General';
           const cName = lead.country || 'Unknown';
           const coordDisplay = getCoordDisplay(normCoord);
-          const toCredit: Array<{ username: string; amount: number; reason: string; txId: string }> = [];
+          let toCredit: WonBeneficiary[] = [];
 
           if (isNewPolicy) {
-            if (TEAM_ROLES.TELECALLERS.includes(normCoord)) {
-              toCredit.push(
-                {
-                  username: normCoord,
-                  amount: 400,
-                  reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
-                  txId: toSafeFirestoreDocId(`tx_won_${lead.id}_${normCoord}`)
-                },
-                {
-                  username: 'shreya',
-                  amount: 200,
-                  reason: `TL Closed Won Share (Telecaller sale by: ${coordDisplay}) for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
-                  txId: toSafeFirestoreDocId(`tx_share_${lead.id}_shreya`)
-                },
-                {
-                  username: 'edenla',
-                  amount: 200,
-                  reason: `Manager Closed Won Share (Telecaller sale by: ${coordDisplay}) for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
-                  txId: toSafeFirestoreDocId(`tx_share_${lead.id}_edenla`)
-                },
-                {
-                  username: 'sachinsaha',
-                  amount: 200,
-                  reason: `Digital Marketer Closed Won Share (Telecaller sale by: ${coordDisplay}) for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
-                  txId: toSafeFirestoreDocId(`tx_share_${lead.id}_sachinsaha`)
-                }
-              );
-            } else {
-              toCredit.push({
-                username: normCoord,
-                amount: 400,
-                reason: `Closed Won incentive for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
-                txId: toSafeFirestoreDocId(`tx_won_${lead.id}_${normCoord}`)
-              });
-              if (normCoord !== 'sachinsaha') {
-                toCredit.push({
-                  username: 'sachinsaha',
-                  amount: 200,
-                  reason: `Digital Marketer Closed Won Share (Sale by: ${coordDisplay}) for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`,
-                  txId: toSafeFirestoreDocId(`tx_share_${lead.id}_sachinsaha`)
-                });
-              }
-            }
+            toCredit = buildNov04WonBeneficiaries({
+              leadId: lead.id,
+              normCoord,
+              coordDisplayName: coordDisplay,
+              candidateName: lead.name,
+              projectName: lead.project,
+              countryName: lead.country,
+              rules
+            });
           } else {
-            const cLower = String(lead.country || '').trim().toLowerCase();
-            const baseAmt = ['japan', 'albania', 'europe', 'malta', 'greece'].includes(cLower) ? 1000 : 400;
+            const baseAmt = resolveWonIncentiveAmount(lead.project, lead.country, rules);
             toCredit.push({
               username: normCoord,
               amount: baseAmt,
@@ -5097,21 +5318,51 @@ export async function ensureWalletIntegrityFromLeads(): Promise<{ healedCount: n
 
           for (const item of toCredit) {
             if (deletedTxIds.has(item.txId)) continue;
+            const wasBeneficiaryDeleted = tombstones.some(t =>
+              t.leadId === lead.id &&
+              String(t.username || '').toLowerCase() === item.username &&
+              (t.reason?.includes('Closed Won') || t.reason?.includes('Won Share') || t.reason?.includes('Override Bonus'))
+            );
+            if (wasBeneficiaryDeleted) continue;
+
             const w = ensureWalletObj(item.username);
-            if (!w.transactions.some(t => t.id === item.txId)) {
-              const tx: WalletTransaction = {
-                id: item.txId,
-                type: 'credit',
-                amount: item.amount,
-                reason: item.reason,
-                timestamp: wonDate,
-                leadId: lead.id
-              };
-              w.transactions.unshift(tx);
-              healedCount++;
-              healedDetails.push(`Won +${item.amount} -> @${item.username} (${lead.name})`);
-              newlyCreatedLedgerItems.push({ username: item.username, transaction: tx, reasonDetails: 'Auto-healed Won incentive from lead state' });
-              appendWalletLedgerAudit(tx, item.username, 'Auto-healed Won incentive from lead state');
+            const wonCredits = (w.transactions || []).filter(
+              t => t.leadId === lead.id && t.type === 'credit' && (
+                t.reason?.includes('Closed Won') || t.reason?.includes('Won Share') || t.reason?.includes('Override Bonus')
+              )
+            ).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+            const wonDebits = (w.transactions || []).filter(
+              t => t.leadId === lead.id && t.type === 'debit' && (
+                t.reason?.includes('Reversal: Closed Won') || t.reason?.includes('Won Share') || t.reason?.includes('rollback')
+              )
+            ).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+            const netActive = wonCredits - wonDebits;
+
+            if (netActive < item.amount) {
+              const creditNeeded = item.amount - Math.max(0, netActive);
+              const isTopUp = netActive > 0;
+              const effectiveTxId = isTopUp
+                ? toSafeFirestoreDocId(`${item.txId}_topup_${item.amount}`)
+                : item.txId;
+              if (deletedTxIds.has(effectiveTxId)) continue;
+              if (!w.transactions.some(t => t.id === effectiveTxId)) {
+                const effectiveReason = isTopUp
+                  ? `Closed Won incentive adjustment (${cName} rule INR ${item.amount}, prior INR ${netActive}) for candidate: ${lead.name} (Project: ${pName}, Country: ${cName})`
+                  : item.reason;
+                const tx: WalletTransaction = {
+                  id: effectiveTxId,
+                  type: 'credit',
+                  amount: creditNeeded,
+                  reason: effectiveReason,
+                  timestamp: wonDate,
+                  leadId: lead.id
+                };
+                w.transactions.unshift(tx);
+                healedCount++;
+                healedDetails.push(`Won +${creditNeeded} -> @${item.username} (${lead.name})`);
+                newlyCreatedLedgerItems.push({ username: item.username, transaction: tx, reasonDetails: isTopUp ? 'Auto-healed Won rule shortfall' : 'Auto-healed Won incentive from lead state' });
+                appendWalletLedgerAudit(tx, item.username, isTopUp ? 'Auto-healed Won rule shortfall' : 'Auto-healed Won incentive from lead state');
+              }
             }
           }
         }

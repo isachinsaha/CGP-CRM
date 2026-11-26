@@ -1045,6 +1045,15 @@ export default function LeadList({
       payload.clearedRemarks = clearedRemarks;
       payload.allowClearRemarks = true;
     }
+    if (fields.assignedTo !== undefined && origLead) {
+      const prevCoord = String(origLead.assignedTo || '').trim().toLowerCase();
+      const nextCoord = String(fields.assignedTo || '').trim().toLowerCase();
+      const hadRealCoord = prevCoord !== '' && prevCoord !== 'unassigned' && prevCoord !== 'all';
+      const wantsUnassign = nextCoord === '' || nextCoord === 'unassigned' || nextCoord === 'all';
+      if (hadRealCoord && wantsUnassign) {
+        payload.allowUnassign = true;
+      }
+    }
 
     try {
       const res = await fetch(`/api/leads/${id}`, {
@@ -1065,10 +1074,10 @@ export default function LeadList({
         if (isRetryableHttpStatus(res.status)) {
           enqueueOutboxSave({
             leadId: id,
-            leadName: origLead?.name,
-            leadPhone: origLead?.phone,
+            leadName: origLead?.name || 'Candidate',
+            phone: origLead?.phone,
             payload,
-            sourceView: 'spreadsheet',
+            headers: { role: userRole, agentId: currentAgentId, sourceView: 'spreadsheet' },
             lastError: errJson.error || `HTTP ${res.status}`
           });
           setInlineError('Cloud save temporarily unavailable — cell edit queued in Pending Cloud Sync and will auto-retry.');
@@ -1081,10 +1090,10 @@ export default function LeadList({
       console.error('Spreadsheet inline update failed', err);
       enqueueOutboxSave({
         leadId: id,
-        leadName: origLead?.name,
-        leadPhone: origLead?.phone,
+        leadName: origLead?.name || 'Candidate',
+        phone: origLead?.phone,
         payload,
-        sourceView: 'spreadsheet',
+        headers: { role: userRole, agentId: currentAgentId, sourceView: 'spreadsheet' },
         lastError: err?.message || 'Network interruption'
       });
       setInlineError('Network hiccup while saving — cell edit queued in Pending Cloud Sync and will auto-retry.');
@@ -2167,7 +2176,17 @@ export default function LeadList({
                       <td className="px-4 py-3" onClick={(e) => isInlineEdit && e.stopPropagation()}>
                         {isInlineEdit && !isSubAgent ? (
                           <select
-                            value={lead.assignedTo || ''}
+                            value={(() => {
+                              const raw = String(lead.assignedTo || '').trim();
+                              if (!raw || raw.toLowerCase() === 'unassigned') return '';
+                              const lower = raw.toLowerCase();
+                              if (coordinators && coordinators.length > 0) {
+                                const hit = coordinators.find(c => c.username.toLowerCase() === lower || (c.displayName && c.displayName.toLowerCase() === lower));
+                                return hit ? hit.username : raw;
+                              }
+                              const hitFallback = COORDINATORS.find(c => c.toLowerCase() === lower);
+                              return hitFallback || raw;
+                            })()}
                             onChange={(e) => handleInlineUpdate(lead.id, { assignedTo: e.target.value }, lead)}
                             className="text-[10px] font-extrabold rounded px-2 py-1 focus:outline-none border border-slate-700 bg-slate-900 text-slate-300 focus:ring-accent-purple cursor-pointer w-full"
                           >
