@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Sparkles,
   AlertTriangle,
@@ -21,7 +21,13 @@ import {
   Square,
   Snowflake,
   UserPlus,
-  CheckCheck
+  CheckCheck,
+  TrendingUp,
+  Copy,
+  Check,
+  RotateCcw,
+  Star,
+  ListChecks
 } from 'lucide-react';
 
 interface AssistantAlert {
@@ -33,7 +39,14 @@ interface AssistantAlert {
   leadIds?: string[];
   suggestedAction: string;
   actionType?: 'view_leads' | 'reassign' | 'send_template' | 'fix_stale_unread' | 'archive_stagnant';
-  bucketKey?: 'unread' | 'staleUnread' | 'unassigned' | 'stagnant' | 'interviewReady';
+  bucketKey?:
+    | 'unread'
+    | 'staleUnread'
+    | 'unassigned'
+    | 'stagnant'
+    | 'interviewReady'
+    | 'highPotential'
+    | 'waitingFollowUp';
 }
 
 interface CoordinatorWorkload {
@@ -64,6 +77,24 @@ interface AssistantLeadItem {
   unreadCount: number;
   latestMessageText?: string;
   hasDocs: boolean;
+  potentialScore?: number;
+  reason?: string;
+}
+
+interface AssistantActionStep {
+  id: string;
+  priority: 'now' | 'next' | 'opportunity';
+  title: string;
+  detail: string;
+  actionLabel: string;
+  bucketKey?: BucketKey;
+  fixAction?: 'mark_stale_unread_read' | 'archive_stagnant_to_cold' | 'auto_assign_unassigned';
+}
+
+interface AssistantBriefing {
+  greeting: string;
+  headline: string;
+  whatToDoNext: AssistantActionStep[];
 }
 
 interface HealthBreakdown {
@@ -104,12 +135,17 @@ interface AssistantOverview {
   unreadMessagesCount: number;
   staleUnreadCount: number;
   interviewReadyCount: number;
+  highPotentialCount?: number;
+  waitingFollowUpCount?: number;
+  assistantBriefing?: AssistantBriefing;
   drilldowns: {
     unread: AssistantLeadItem[];
     staleUnread: AssistantLeadItem[];
     unassigned: AssistantLeadItem[];
     stagnant: AssistantLeadItem[];
     interviewReady: AssistantLeadItem[];
+    highPotential?: AssistantLeadItem[];
+    waitingFollowUp?: AssistantLeadItem[];
   };
   aiInsights: string[];
   lastScannedAt: string;
@@ -121,9 +157,17 @@ interface MessageItem {
   text: string;
   timestamp: string;
   suggestions?: string[];
+  referencedLeads?: AssistantLeadItem[];
 }
 
-type BucketKey = 'unread' | 'staleUnread' | 'unassigned' | 'stagnant' | 'interviewReady';
+type BucketKey =
+  | 'unread'
+  | 'staleUnread'
+  | 'unassigned'
+  | 'stagnant'
+  | 'interviewReady'
+  | 'highPotential'
+  | 'waitingFollowUp';
 
 interface AiSentinelModalProps {
   isOpen: boolean;
@@ -136,6 +180,81 @@ interface AiSentinelModalProps {
   onDataUpdated?: () => void;
   leadsVersion?: number;
 }
+
+function renderInlineMarkdown(text: string): React.ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return (
+        <strong key={i} className="font-bold text-white">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+      return (
+        <code key={i} className="px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono text-[11px]">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return <React.Fragment key={i}>{part}</React.Fragment>;
+  });
+}
+
+const FormattedAssistantText: React.FC<{ text: string }> = ({ text }) => {
+  const lines = String(text || '').split('\n');
+  return (
+    <div className="space-y-1.5 text-[13px] leading-relaxed text-slate-200">
+      {lines.map((rawLine, idx) => {
+        const line = rawLine.trim();
+        if (!line) return <div key={idx} className="h-1" />;
+
+        if (line.startsWith('### ') || line.startsWith('## ')) {
+          const clean = line.replace(/^#{2,3}\s+/, '');
+          return (
+            <div key={idx} className="text-xs font-bold uppercase tracking-wider text-cyan-300 pt-1.5">
+              {renderInlineMarkdown(clean)}
+            </div>
+          );
+        }
+
+        if (line.startsWith('> ')) {
+          return (
+            <div
+              key={idx}
+              className="pl-3 py-1.5 border-l-2 border-cyan-400/70 bg-slate-950/60 rounded-r-lg text-slate-200 italic"
+            >
+              {renderInlineMarkdown(line.slice(2))}
+            </div>
+          );
+        }
+
+        if (/^(\*|-|•)\s+/.test(line)) {
+          const clean = line.replace(/^(\*|-|•)\s+/, '');
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-1">
+              <span className="text-cyan-400 font-bold mt-0.5">•</span>
+              <span className="flex-1">{renderInlineMarkdown(clean)}</span>
+            </div>
+          );
+        }
+
+        const numMatch = line.match(/^(\d+\.)\s+(.*)$/);
+        if (numMatch) {
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-1">
+              <span className="text-indigo-400 font-bold min-w-[16px]">{numMatch[1]}</span>
+              <span className="flex-1">{renderInlineMarkdown(numMatch[2])}</span>
+            </div>
+          );
+        }
+
+        return <p key={idx}>{renderInlineMarkdown(line)}</p>;
+      })}
+    </div>
+  );
+};
 
 export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
   isOpen,
@@ -160,30 +279,40 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
   const [stagnantAgeFilter, setStagnantAgeFilter] = useState<'all' | '3_7' | '7_30' | 'over_30'>('all');
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [assignTargetCoord, setAssignTargetCoord] = useState<string>('');
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
 
-  const [chatMessages, setChatMessages] = useState<MessageItem[]>([
-    {
-      id: 'm_welcome',
-      sender: 'assistant',
-      text: `Hello ${isAdmin ? 'Master Admin' : currentAgentId}!\n\nI am your **CGP AI Assistant**. I track real-time pipeline health, WhatsApp replies, and follow-up priorities${isAdmin ? ' across your entire agency.' : ' for your assigned candidates.'}\n\nHow can I assist you right now?`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      suggestions: isAdmin
-        ? [
-            'How can we boost CRM Health above 80% today?',
-            'Which stagnant leads should move to Cold?',
-            'Coordinator workload balance check',
-            'Who should we prioritize on WhatsApp right now?'
-          ]
-        : [
-            'How can I improve my CRM health score today?',
-            'Show my stagnant In Discussion leads',
-            'Which of my candidates need an urgent WhatsApp reply?',
-            'Who are my document-ready candidates?'
-          ]
-    }
-  ]);
+  const buildWelcomeMessage = (): MessageItem => ({
+    id: 'm_welcome',
+    sender: 'assistant',
+    text: `Hi ${isAdmin ? 'Master Admin' : currentAgentId}! 👋\n\nI am your **CGP AI Assistant** powered by Gemini. Ask me anything naturally — I can tell you **what to prioritize right now**, **who is waiting for your reply**, **which candidates have the highest potential**, or **draft WhatsApp messages** for any candidate${isAdmin ? ' across the agency.' : ' assigned to you.'}`,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    suggestions: isAdmin
+      ? [
+          'What should I prioritize first today?',
+          'Who is waiting for a reply right now?',
+          'Show our highest-potential candidates',
+          'Who needs follow-up urgently?',
+          'Draft a polite WhatsApp check-in message'
+        ]
+      : [
+          'What should I do first right now?',
+          'Who of my candidates are waiting for a reply?',
+          'Which of my candidates have the highest potential?',
+          'Who is waiting on me for follow-up?',
+          'Draft a warm WhatsApp follow-up message'
+        ]
+  });
+
+  const [chatMessages, setChatMessages] = useState<MessageItem[]>([buildWelcomeMessage()]);
   const [inputText, setInputText] = useState('');
   const [isSendingQuery, setIsSendingQuery] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (activeTab === 'chat') {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, isSendingQuery, activeTab]);
 
   const fetchOverview = async (forceRefresh = false) => {
     setLoading(true);
@@ -317,7 +446,8 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
           i.phone.toLowerCase().includes(q) ||
           i.country.toLowerCase().includes(q) ||
           i.position.toLowerCase().includes(q) ||
-          i.assignedTo.toLowerCase().includes(q)
+          i.assignedTo.toLowerCase().includes(q) ||
+          (i.reason && i.reason.toLowerCase().includes(q))
       );
     }
     return items;
@@ -347,7 +477,8 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    const historyPayload = chatMessages.slice(-8).map((m) => ({
+    const historyPayload = chatMessages.slice(-10).map((m) => ({
+      id: m.id,
       role: m.sender,
       text: m.text
     }));
@@ -355,6 +486,7 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
     setChatMessages((prev) => [...prev, userMsg]);
     setInputText('');
     setIsSendingQuery(true);
+    setActiveTab('chat');
 
     try {
       const res = await fetch('/api/ai/assistant/chat', {
@@ -374,7 +506,8 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
           sender: 'assistant',
           text: data.reply,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          suggestions: data.suggestions
+          suggestions: data.suggestions,
+          referencedLeads: data.referencedLeads
         };
         setChatMessages((prev) => [...prev, aiMsg]);
       } else {
@@ -392,6 +525,12 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
     } finally {
       setIsSendingQuery(false);
     }
+  };
+
+  const handleCopyText = (id: string, text: string) => {
+    navigator.clipboard?.writeText(text).catch(() => {});
+    setCopiedMsgId(id);
+    setTimeout(() => setCopiedMsgId((cur) => (cur === id ? null : cur)), 1800);
   };
 
   if (!isOpen) return null;
@@ -417,7 +556,7 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
 
   const bucketMeta: Record<BucketKey, { title: string; subtitle: string }> = {
     unread: {
-      title: 'Candidates Awaiting WhatsApp Reply',
+      title: 'Candidates Waiting for WhatsApp Reply',
       subtitle: 'Real-time pending inbound candidate messages'
     },
     staleUnread: {
@@ -437,8 +576,20 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
     interviewReady: {
       title: 'Verified Candidates Ready for Strong Opportunity',
       subtitle: 'Leads in In Discussion with Passport or CV already uploaded'
+    },
+    highPotential: {
+      title: 'High-Potential Candidates',
+      subtitle: 'Strongest active prospects based on stage, uploaded documents, fit score & engagement'
+    },
+    waitingFollowUp: {
+      title: 'Candidates Waiting for Follow-Up',
+      subtitle: 'Pending replies, New Inbounds awaiting first call, and warm quiet leads (2–14 days)'
     }
   };
+
+  const topWaitingReply = overview?.drilldowns?.unread?.slice(0, 3) || [];
+  const topHighPotential = overview?.drilldowns?.highPotential?.slice(0, 3) || [];
+  const topWaitingFollowUp = overview?.drilldowns?.waitingFollowUp?.slice(0, 3) || [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -463,13 +614,11 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
               <div className="flex items-center gap-2.5">
                 <h2 className="text-lg font-bold tracking-tight text-white">CGP AI Assistant</h2>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
-                  {isCoordinatorScope ? `My Scope: ${currentAgentId}` : 'Agency Live Sync'}
+                  {isCoordinatorScope ? `Personal Scope: ${currentAgentId}` : 'Agency Live Sync'}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                {isCoordinatorScope
-                  ? 'Real-time personal pipeline health, WhatsApp replies & one-click CRM cleanup'
-                  : 'Real-time agency pipeline health, team workload & one-click CRM optimization'}
+                Your personal recruitment assistant — daily priorities, high-potential leads, follow-ups & Gemini chat
               </p>
             </div>
           </div>
@@ -485,7 +634,7 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                 }`}
               >
                 <Activity className="w-3.5 h-3.5" />
-                Live Overview & Fixes
+                Assistant Briefing
                 {overview && overview.alerts.length > 0 && (
                   <span className="ml-1 px-1.5 py-0.2 rounded-md bg-amber-500 text-slate-950 font-black text-[10px]">
                     {overview.alerts.length}
@@ -497,12 +646,12 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                 onClick={() => setActiveTab('chat')}
                 className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                   activeTab === 'chat'
-                    ? 'bg-indigo-600 text-white shadow-md'
+                    ? 'bg-gradient-to-r from-indigo-600 to-cyan-600 text-white shadow-md'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <MessageSquare className="w-3.5 h-3.5" />
-                Ask AI Assistant
+                <Sparkles className="w-3.5 h-3.5" />
+                Chat (Gemini)
               </button>
             </div>
 
@@ -528,6 +677,266 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
         <div className="flex-1 overflow-y-auto p-6 bg-slate-950/40">
           {activeTab === 'overview' ? (
             <div className="space-y-5">
+              {/* Executive Personal Assistant Daily Briefing */}
+              {overview?.assistantBriefing && (
+                <div className="bg-gradient-to-r from-indigo-950/60 via-slate-900 to-cyan-950/40 border border-indigo-500/35 rounded-2xl p-5 space-y-4 shadow-md">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-1 max-w-3xl">
+                      <div className="flex items-center gap-2 text-cyan-300 text-xs font-bold uppercase tracking-wider">
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Daily Assistant Game Plan</span>
+                      </div>
+                      <h3 className="text-base sm:text-lg font-bold text-white">
+                        {overview.assistantBriefing.greeting}
+                      </h3>
+                      <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                        {overview.assistantBriefing.headline}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleSendMessage('What should I prioritize first today and who should I contact next?')}
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white text-xs font-semibold flex items-center gap-2 shadow-md transition shrink-0"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Ask Gemini Chat</span>
+                    </button>
+                  </div>
+
+                  {/* Ordered What To Do Next */}
+                  {overview.assistantBriefing.whatToDoNext.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                      {overview.assistantBriefing.whatToDoNext.map((step, index) => (
+                        <div
+                          key={step.id}
+                          className="bg-slate-950/60 border border-slate-800/90 rounded-xl p-3 flex items-center justify-between gap-3"
+                        >
+                          <div className="flex items-start gap-2.5 min-w-0">
+                            <span
+                              className={`w-5 h-5 rounded-md flex items-center justify-center text-[11px] font-black shrink-0 mt-0.5 ${
+                                step.priority === 'now'
+                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                  : step.priority === 'opportunity'
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                  : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                              }`}
+                            >
+                              {index + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-white truncate">{step.title}</div>
+                              <div className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">{step.detail}</div>
+                            </div>
+                          </div>
+
+                          {step.fixAction ? (
+                            <button
+                              disabled={!!fixingAction}
+                              onClick={() =>
+                                runHealthFix(step.fixAction!, step.fixAction === 'archive_stagnant_to_cold' ? { minInactiveDays: 30 } : undefined)
+                              }
+                              className="px-2.5 py-1.5 rounded-lg bg-sky-600/25 hover:bg-sky-600/40 border border-sky-500/40 text-sky-200 text-[11px] font-semibold shrink-0 transition"
+                            >
+                              {step.actionLabel}
+                            </button>
+                          ) : step.bucketKey ? (
+                            <button
+                              onClick={() => openBucket(step.bucketKey!)}
+                              className="px-2.5 py-1.5 rounded-lg bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-500/40 text-indigo-200 text-[11px] font-semibold shrink-0 transition"
+                            >
+                              {step.actionLabel}
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Three Assistant Spotlights: Waiting for Reply | High Potential | Waiting Follow-Up */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 pt-1">
+                    {/* Spotlight 1: Waiting for Reply */}
+                    <div className="bg-slate-950/75 border border-emerald-500/25 rounded-xl p-3.5 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-2.5">
+                          <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            Waiting for Reply ({overview.unreadRepliesCount})
+                          </span>
+                          <button
+                            onClick={() => openBucket('unread')}
+                            className="text-[11px] text-emerald-400 hover:underline font-medium"
+                          >
+                            View all
+                          </button>
+                        </div>
+                        {topWaitingReply.length === 0 ? (
+                          <p className="text-[11px] text-slate-400 py-3">
+                            All caught up! Nobody is waiting on an unread message.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            {topWaitingReply.map((item) => (
+                              <div
+                                key={item.id}
+                                className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-white truncate">{item.name}</div>
+                                  <div className="text-[10px] text-slate-400 truncate">
+                                    {item.latestMessageText
+                                      ? `"${item.latestMessageText}"`
+                                      : `${item.country} • ${item.unreadCount} unread`}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {onNavigateToWhatsApp && (
+                                    <button
+                                      onClick={() => onNavigateToWhatsApp(item.id)}
+                                      className="px-2 py-1 rounded bg-emerald-600/25 hover:bg-emerald-600/40 text-emerald-300 text-[10px] font-semibold"
+                                    >
+                                      Reply
+                                    </button>
+                                  )}
+                                  {onSelectLead && (
+                                    <button
+                                      onClick={() => onSelectLead(item.id)}
+                                      className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                                      title="Open Candidate"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Spotlight 2: High Potential */}
+                    <div className="bg-slate-950/75 border border-indigo-500/25 rounded-xl p-3.5 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-2.5">
+                          <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                            <Star className="w-3.5 h-3.5 text-amber-400" />
+                            Who Has Potential ({overview.highPotentialCount ?? topHighPotential.length})
+                          </span>
+                          <button
+                            onClick={() => openBucket('highPotential')}
+                            className="text-[11px] text-indigo-400 hover:underline font-medium"
+                          >
+                            View all
+                          </button>
+                        </div>
+                        {topHighPotential.length === 0 ? (
+                          <p className="text-[11px] text-slate-400 py-3">
+                            Upload Passports/CVs or move warm leads to Strong Opportunity to spotlight top prospects.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            {topHighPotential.map((item) => (
+                              <div
+                                key={item.id}
+                                className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-white truncate">
+                                    {item.name} <span className="text-[10px] text-slate-400">({item.country})</span>
+                                  </div>
+                                  <div className="text-[10px] text-indigo-300 truncate">
+                                    {item.reason || item.position}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    onClick={() =>
+                                      handleSendMessage(
+                                        `What is the best next step and WhatsApp message to send to ${item.name} (${item.country}, ${item.position})?`
+                                      )
+                                    }
+                                    className="px-2 py-1 rounded bg-indigo-600/25 hover:bg-indigo-600/40 text-indigo-200 text-[10px] font-semibold"
+                                    title="Ask AI Assistant what to send"
+                                  >
+                                    Draft
+                                  </button>
+                                  {onSelectLead && (
+                                    <button
+                                      onClick={() => onSelectLead(item.id)}
+                                      className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                                      title="Open Candidate"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Spotlight 3: Who Is Waiting */}
+                    <div className="bg-slate-950/75 border border-amber-500/25 rounded-xl p-3.5 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-2.5">
+                          <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                            <ListChecks className="w-3.5 h-3.5" />
+                            Who Is Waiting ({overview.waitingFollowUpCount ?? topWaitingFollowUp.length})
+                          </span>
+                          <button
+                            onClick={() => openBucket('waitingFollowUp')}
+                            className="text-[11px] text-amber-400 hover:underline font-medium"
+                          >
+                            View all
+                          </button>
+                        </div>
+                        {topWaitingFollowUp.length === 0 ? (
+                          <p className="text-[11px] text-slate-400 py-3">
+                            No candidates are currently waiting for follow-up.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            {topWaitingFollowUp.map((item) => (
+                              <div
+                                key={item.id}
+                                className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-white truncate">{item.name}</div>
+                                  <div className="text-[10px] text-amber-300/90 truncate">
+                                    {item.reason || `${item.stage} • ${item.inactiveDays}d ago`}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {onNavigateToWhatsApp && (
+                                    <button
+                                      onClick={() => onNavigateToWhatsApp(item.id)}
+                                      className="px-2 py-1 rounded bg-amber-600/20 hover:bg-amber-600/35 text-amber-200 text-[10px] font-semibold"
+                                    >
+                                      Chat
+                                    </button>
+                                  )}
+                                  {onSelectLead && (
+                                    <button
+                                      onClick={() => onSelectLead(item.id)}
+                                      className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                                      title="Open Candidate"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Top 4 KPI Cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* CRM Health Index */}
@@ -856,7 +1265,7 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                         </button>
                       )}
 
-                      {activeBucket === 'stagnant' && (
+                      {(activeBucket === 'stagnant' || activeBucket === 'waitingFollowUp') && (
                         <>
                           <button
                             disabled={!!fixingAction || selectedLeadIds.length === 0}
@@ -865,26 +1274,28 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                           >
                             Log Follow-Up ({selectedLeadIds.length})
                           </button>
-                          <button
-                            disabled={!!fixingAction || (selectedLeadIds.length === 0 && bucketItems.length === 0)}
-                            onClick={() =>
-                              runHealthFix(
-                                'archive_stagnant_to_cold',
-                                selectedLeadIds.length > 0
-                                  ? { leadIds: selectedLeadIds }
-                                  : { minInactiveDays: stagnantAgeFilter === 'over_30' ? 30 : 30 }
-                              )
-                            }
-                            className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold disabled:opacity-50"
-                          >
-                            {selectedLeadIds.length > 0
-                              ? `Move ${selectedLeadIds.length} to Cold`
-                              : 'Archive >30d to Cold'}
-                          </button>
+                          {activeBucket === 'stagnant' && (
+                            <button
+                              disabled={!!fixingAction || (selectedLeadIds.length === 0 && bucketItems.length === 0)}
+                              onClick={() =>
+                                runHealthFix(
+                                  'archive_stagnant_to_cold',
+                                  selectedLeadIds.length > 0
+                                    ? { leadIds: selectedLeadIds }
+                                    : { minInactiveDays: 30 }
+                                )
+                              }
+                              className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold disabled:opacity-50"
+                            >
+                              {selectedLeadIds.length > 0
+                                ? `Move ${selectedLeadIds.length} to Cold`
+                                : 'Archive >30d to Cold'}
+                            </button>
+                          )}
                         </>
                       )}
 
-                      {activeBucket === 'interviewReady' && (
+                      {(activeBucket === 'interviewReady' || activeBucket === 'highPotential') && (
                         <button
                           disabled={!!fixingAction || selectedLeadIds.length === 0}
                           onClick={() => runHealthFix('advance_to_strong_opp', { leadIds: selectedLeadIds })}
@@ -954,7 +1365,7 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                                 )}
                               </button>
                               <div className="min-w-0">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-semibold text-white truncate">{item.name}</span>
                                   <span className="text-slate-400 font-mono text-[11px]">{item.phone}</span>
                                   {item.unreadCount > 0 && (
@@ -967,11 +1378,17 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                                       Docs OK
                                     </span>
                                   )}
+                                  {item.potentialScore !== undefined && (
+                                    <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[10px] font-semibold">
+                                      Potential {item.potentialScore}%
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="text-[11px] text-slate-400 truncate mt-0.5">
                                   {item.country} • {item.position} • Stage: {item.stage}
                                   {!isCoordinatorScope && ` • Coord: ${item.assignedTo}`}
-                                  {item.latestMessageText && ` • "${item.latestMessageText}"`}
+                                  {item.reason && ` • ${item.reason}`}
+                                  {!item.reason && item.latestMessageText && ` • "${item.latestMessageText}"`}
                                 </div>
                               </div>
                             </div>
@@ -988,6 +1405,16 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                               >
                                 {item.inactiveDays}d ago
                               </span>
+                              <button
+                                onClick={() =>
+                                  handleSendMessage(
+                                    `Give me a quick strategy and draft a polite WhatsApp message for ${item.name} (${item.country}, ${item.position}, stage: ${item.stage}).`
+                                  )
+                                }
+                                className="px-2 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/35 text-indigo-300 border border-indigo-500/30 text-[11px]"
+                              >
+                                Ask AI
+                              </button>
                               {onSelectLead && (
                                 <button
                                   onClick={() => onSelectLead(item.id)}
@@ -1116,7 +1543,7 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                     <Users className="w-4 h-4 text-indigo-400" />
                     {isCoordinatorScope
                       ? 'My Pipeline Health & Workload'
-                      : 'Coordinator Radar & Workload Distribution'}
+                      : 'Team Workload & Capacity Overview'}
                   </h3>
                   <span className="text-xs text-slate-400">
                     {isCoordinatorScope
@@ -1187,26 +1614,28 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                   </div>
                 </div>
               </div>
-
-              {/* AI Strategic Insights */}
-              <div className="p-4 bg-gradient-to-r from-indigo-950/30 via-slate-900 to-slate-900 border border-indigo-500/25 rounded-2xl space-y-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-indigo-400" />
-                  Live Operational Summary
-                </span>
-                <div className="space-y-1.5 text-xs text-slate-300">
-                  {overview?.aiInsights?.map((insight, idx) => (
-                    <div key={idx} className="flex items-start gap-2">
-                      <span className="text-indigo-400 font-bold">•</span>
-                      <span>{insight}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           ) : (
-            /* Interactive Chat with AI Assistant */
-            <div className="flex flex-col h-full space-y-4">
+            /* Gemini-Style Conversational AI Assistant Chat */
+            <div className="flex flex-col h-full">
+              {/* Sub-bar with New Chat & Live Sync badge */}
+              <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800/80">
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>
+                    Grounded in your live {isCoordinatorScope ? 'personal' : 'agency'} CRM data (
+                    {overview?.totalActiveCandidates ?? '--'} leads)
+                  </span>
+                </div>
+                <button
+                  onClick={() => setChatMessages([buildWelcomeMessage()])}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-semibold text-slate-300 flex items-center gap-1.5 transition"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>New Chat</span>
+                </button>
+              </div>
+
               <div className="flex-1 overflow-y-auto space-y-4 pr-2">
                 {chatMessages.map((msg) => (
                   <div
@@ -1214,7 +1643,7 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                     className={`flex gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
                     {msg.sender === 'assistant' && (
-                      <div className="w-8 h-8 rounded-full bg-white border border-cyan-400/50 overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
+                      <div className="w-8 h-8 rounded-full bg-white border border-cyan-400/50 overflow-hidden flex items-center justify-center shrink-0 shadow-sm mt-0.5">
                         <img
                           src="/assets/aistudio/image_484c5e18.png"
                           alt="AI Assistant"
@@ -1223,21 +1652,62 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                       </div>
                     )}
                     <div
-                      className={`max-w-2xl p-4 rounded-2xl text-xs leading-relaxed space-y-2 ${
+                      className={`max-w-3xl p-4 rounded-2xl space-y-2.5 ${
                         msg.sender === 'user'
-                          ? 'bg-indigo-600 text-white rounded-tr-none'
+                          ? 'bg-indigo-600 text-white rounded-tr-none text-[13px]'
                           : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-tl-none shadow-sm'
                       }`}
                     >
-                      <div className="whitespace-pre-wrap">{msg.text}</div>
+                      {msg.sender === 'assistant' ? (
+                        <FormattedAssistantText text={msg.text} />
+                      ) : (
+                        <div className="whitespace-pre-wrap">{msg.text}</div>
+                      )}
 
+                      {/* Referenced Candidates Quick Actions */}
+                      {msg.referencedLeads && msg.referencedLeads.length > 0 && (
+                        <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Quick Open Mentioned Candidates
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {msg.referencedLeads.map((leadItem) => (
+                              <div
+                                key={leadItem.id}
+                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/80 border border-slate-700/80 text-[11px]"
+                              >
+                                <span className="font-semibold text-white">{leadItem.name}</span>
+                                <span className="text-slate-400">({leadItem.country})</span>
+                                {onSelectLead && (
+                                  <button
+                                    onClick={() => onSelectLead(leadItem.id)}
+                                    className="ml-1 px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 text-[10px] font-semibold"
+                                  >
+                                    Open
+                                  </button>
+                                )}
+                                {onNavigateToWhatsApp && (
+                                  <button
+                                    onClick={() => onNavigateToWhatsApp(leadItem.id)}
+                                    className="px-1.5 py-0.5 rounded bg-emerald-600/25 hover:bg-emerald-600/40 text-emerald-300 text-[10px] font-semibold"
+                                  >
+                                    WhatsApp
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Follow-up Suggestion Chips */}
                       {msg.suggestions && msg.suggestions.length > 0 && (
-                        <div className="pt-2 border-t border-slate-800/80 flex flex-wrap gap-1.5 mt-2">
+                        <div className="pt-2 border-t border-slate-800/80 flex flex-wrap gap-1.5">
                           {msg.suggestions.map((sug, i) => (
                             <button
                               key={i}
                               onClick={() => handleSendMessage(sug)}
-                              className="text-[11px] px-2.5 py-1 bg-slate-800 hover:bg-slate-750 text-indigo-300 hover:text-white rounded-lg border border-slate-700 transition flex items-center gap-1"
+                              className="text-[11px] px-2.5 py-1 bg-slate-800 hover:bg-slate-750 text-cyan-200 hover:text-white rounded-lg border border-slate-700 transition flex items-center gap-1"
                             >
                               <span>{sug}</span>
                               <ChevronRight className="w-3 h-3 text-slate-500" />
@@ -1246,7 +1716,29 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                         </div>
                       )}
 
-                      <div className="text-[10px] text-slate-400 text-right mt-1">{msg.timestamp}</div>
+                      <div className="flex items-center justify-between pt-1">
+                        {msg.sender === 'assistant' ? (
+                          <button
+                            onClick={() => handleCopyText(msg.id, msg.text)}
+                            className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1 transition"
+                          >
+                            {copiedMsgId === msg.id ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-400" />
+                                <span className="text-emerald-400">Copied</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3" />
+                                <span>Copy reply</span>
+                              </>
+                            )}
+                          </button>
+                        ) : (
+                          <span />
+                        )}
+                        <span className="text-[10px] text-slate-400">{msg.timestamp}</span>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1260,15 +1752,16 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                         className="w-full h-full rounded-full object-cover scale-110"
                       />
                     </div>
-                    <div className="p-3 bg-slate-900 border border-slate-800 rounded-2xl rounded-tl-none text-xs text-indigo-300 flex items-center gap-2">
-                      <Sparkles className="w-3.5 h-3.5 animate-spin text-indigo-400" />
-                      <span>AI Assistant is analyzing live CRM data...</span>
+                    <div className="p-3 bg-slate-900 border border-slate-800 rounded-2xl rounded-tl-none text-xs text-cyan-200 flex items-center gap-2">
+                      <Sparkles className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                      <span>AI Assistant is thinking and checking live CRM records...</span>
                     </div>
                   </div>
                 )}
+                <div ref={chatEndRef} />
               </div>
 
-              <div className="pt-3 border-t border-slate-800">
+              <div className="pt-3 mt-2 border-t border-slate-800">
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -1280,13 +1773,13 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
                     type="text"
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
-                    placeholder="Ask AI Assistant about pipelines, follow-ups, unread replies, or health fixes..."
-                    className="flex-1 bg-slate-900 border border-slate-750 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+                    placeholder="Ask anything — e.g. 'Who is waiting for a reply?', 'Who has potential?', 'Draft a WhatsApp reply for...'"
+                    className="flex-1 bg-slate-900 border border-slate-750 rounded-xl px-4 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
                   />
                   <button
                     type="submit"
                     disabled={!inputText.trim() || isSendingQuery}
-                    className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-md"
+                    className="px-4 py-3 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-md"
                   >
                     <Send className="w-3.5 h-3.5" />
                     <span>Send</span>
@@ -1301,7 +1794,7 @@ export const AiSentinelModal: React.FC<AiSentinelModalProps> = ({
         <div className="px-6 py-3 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between text-[11px] text-slate-400">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>CGP AI Assistant • Real-Time Live CRM Sync</span>
+            <span>CGP AI Assistant • Real-Time Live CRM & Gemini Chat</span>
           </div>
           <div>
             <span>

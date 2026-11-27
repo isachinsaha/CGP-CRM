@@ -32,7 +32,7 @@ export interface AssistantAlert {
   leadIds?: string[];
   suggestedAction: string;
   actionType?: 'view_leads' | 'reassign' | 'send_template' | 'fix_stale_unread' | 'archive_stagnant';
-  bucketKey?: 'unread' | 'staleUnread' | 'unassigned' | 'stagnant' | 'interviewReady';
+  bucketKey?: 'unread' | 'staleUnread' | 'unassigned' | 'stagnant' | 'interviewReady' | 'highPotential' | 'waitingFollowUp';
 }
 
 export type SentinelAlert = AssistantAlert;
@@ -65,6 +65,24 @@ export interface AssistantLeadItem {
   unreadCount: number;
   latestMessageText?: string;
   hasDocs: boolean;
+  potentialScore?: number;
+  reason?: string;
+}
+
+export interface AssistantActionStep {
+  id: string;
+  priority: 'now' | 'next' | 'opportunity';
+  title: string;
+  detail: string;
+  actionLabel: string;
+  bucketKey?: 'unread' | 'staleUnread' | 'unassigned' | 'stagnant' | 'interviewReady' | 'highPotential' | 'waitingFollowUp';
+  fixAction?: 'mark_stale_unread_read' | 'archive_stagnant_to_cold' | 'auto_assign_unassigned';
+}
+
+export interface AssistantBriefing {
+  greeting: string;
+  headline: string;
+  whatToDoNext: AssistantActionStep[];
 }
 
 export interface HealthBreakdown {
@@ -105,12 +123,17 @@ export interface SentinelOverview {
   unreadMessagesCount: number;
   staleUnreadCount: number;
   interviewReadyCount: number;
+  highPotentialCount: number;
+  waitingFollowUpCount: number;
+  assistantBriefing: AssistantBriefing;
   drilldowns: {
     unread: AssistantLeadItem[];
     staleUnread: AssistantLeadItem[];
     unassigned: AssistantLeadItem[];
     stagnant: AssistantLeadItem[];
     interviewReady: AssistantLeadItem[];
+    highPotential: AssistantLeadItem[];
+    waitingFollowUp: AssistantLeadItem[];
   };
   aiInsights: string[];
   lastScannedAt: string;
@@ -171,7 +194,8 @@ function toAssistantLeadItem(
   lead: Lead,
   now: number,
   unreadCount: number,
-  latestMessageText?: string
+  latestMessageText?: string,
+  extra?: { potentialScore?: number; reason?: string }
 ): AssistantLeadItem {
   const lastActMs = getTrueLastActivityMs(lead) || now;
   const inactiveDays = Math.max(0, Math.floor((now - lastActMs) / (24 * 60 * 60 * 1000)));
@@ -188,7 +212,67 @@ function toAssistantLeadItem(
     inactiveDays,
     unreadCount,
     latestMessageText,
-    hasDocs: Boolean(lead.docPassportCopy || lead.passportCopyUrl || lead.docResume || lead.resumeUrl)
+    hasDocs: Boolean(lead.docPassportCopy || lead.passportCopyUrl || lead.docResume || lead.resumeUrl),
+    ...(extra || {})
+  };
+}
+
+function evaluateLeadPotential(
+  lead: Lead,
+  stage: string,
+  inactiveDays: number,
+  hasInboundReply: boolean
+): { score: number; reason: string } {
+  let score = 0;
+  const reasons: string[] = [];
+
+  if (stage === 'office_visited') {
+    score += 38;
+    reasons.push('Office Visited');
+  } else if (stage === 'strong_opportunity') {
+    score += 32;
+    reasons.push('Strong Opportunity');
+  } else if (stage === 'in_discussion') {
+    score += 12;
+  }
+
+  const hasPassport = Boolean(lead.docPassportCopy || lead.passportCopyUrl);
+  const hasResume = Boolean(lead.docResume || lead.resumeUrl);
+  if (hasPassport && hasResume) {
+    score += 26;
+    reasons.push('Passport + CV ready');
+  } else if (hasPassport || hasResume) {
+    score += 16;
+    reasons.push(hasPassport ? 'Passport uploaded' : 'CV uploaded');
+  }
+
+  const fitLower = String(lead.fitScore || '').toLowerCase();
+  if (fitLower === 'high') {
+    score += 18;
+    reasons.push('High Fit Score');
+  } else if (fitLower === 'medium') {
+    score += 8;
+  }
+
+  if (inactiveDays <= 3) {
+    score += 14;
+    reasons.push('Active recently');
+  } else if (inactiveDays <= 10) {
+    score += 7;
+  }
+
+  if (hasInboundReply) {
+    score += 10;
+    reasons.push('Replied on WhatsApp');
+  }
+
+  if (lead.country && lead.country !== 'Pending' && lead.position && lead.position !== 'General Applicant') {
+    score += 6;
+  }
+
+  return {
+    score: Math.min(100, score),
+    reason: reasons.slice(0, 3).join(' • ') || 'Active prospect'
   };
 }
 
@@ -234,6 +318,8 @@ export async function computeSentinelOverview(options?: {
   const interviewOpportunities: AssistantLeadItem[] = [];
   const unreadReplies: AssistantLeadItem[] = [];
   const staleUnreadAlreadyReplied: AssistantLeadItem[] = [];
+  const highPotentialLeads: AssistantLeadItem[] = [];
+  const waitingFollowUpLeads: AssistantLeadItem[] = [];
 
   let unreadMessagesTotal = 0;
   let stagnant3to7Days = 0;
@@ -333,6 +419,44 @@ export async function computeSentinelOverview(options?: {
       );
     }
 
+    // High-Potential Candidates (hot/warm leads most likely to convert next)
+    const inactiveDaysForLead = Math.max(0, Math.floor(inactiveMs / ONE_DAY));
+    if (intaken && stage !== 'won' && stage !== 'lost' && stage !== 'cold_leads') {
+      const hasInboundReply = realMsgs.some((m) => m.sender === 'lead');
+      const { score, reason } = evaluateLeadPotential(lead, stage, inactiveDaysForLead, hasInboundReply);
+      if (score >= 35) {
+        highPotentialLeads.push(
+          toAssistantLeadItem(lead, now, unreadInboundMsgs.length, latestRealMsg?.text, {
+            potentialScore: score,
+            reason
+          })
+        );
+      }
+
+      // Who is waiting right now? (warm & actionable, excluding >30d dead backlog)
+      let waitingReason = '';
+      if (isPendingReply) {
+        waitingReason = `Sent WhatsApp reply ${inactiveDaysForLead === 0 ? 'today' : `${inactiveDaysForLead}d ago`} — waiting for your response`;
+      } else if (stage === 'new') {
+        waitingReason =
+          inactiveDaysForLead === 0
+            ? 'New Inbound today — awaiting first call'
+            : `Waiting ${inactiveDaysForLead}d in New Inbound`;
+      } else if (stage === 'office_visited' && inactiveDaysForLead >= 2 && inactiveDaysForLead <= 21) {
+        waitingReason = `Visited office ${inactiveDaysForLead}d ago — follow up on submission/interview`;
+      } else if (stage === 'in_discussion' && inactiveDaysForLead >= 2 && inactiveDaysForLead <= 14) {
+        waitingReason = `Quiet for ${inactiveDaysForLead}d in Discussion — warm check-in recommended`;
+      }
+
+      if (waitingReason) {
+        waitingFollowUpLeads.push(
+          toAssistantLeadItem(lead, now, unreadInboundMsgs.length, latestRealMsg?.text, {
+            reason: waitingReason
+          })
+        );
+      }
+    }
+
     // Per-coordinator aggregation (consistent: stagnant ONLY counts in_discussion > 3 days)
     if (assigned && intaken) {
       const matchedCoord = coordinators.find((c) => isCoordinatorMatch(lead.assignedTo, c.username, coordinators));
@@ -355,12 +479,23 @@ export async function computeSentinelOverview(options?: {
     }
   }
 
-  // Sort drilldown lists most urgent first
+  // Sort drilldown lists most urgent / actionable first
   unreadReplies.sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime());
   staleUnreadAlreadyReplied.sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime());
   unassignedOrNewInbounds.sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime());
   stagnantInDiscussion.sort((a, b) => b.inactiveDays - a.inactiveDays);
   interviewOpportunities.sort((a, b) => a.inactiveDays - b.inactiveDays);
+  highPotentialLeads.sort(
+    (a, b) =>
+      (b.potentialScore || 0) - (a.potentialScore || 0) ||
+      a.inactiveDays - b.inactiveDays
+  );
+  waitingFollowUpLeads.sort((a, b) => {
+    // Pending WhatsApp replies & New Inbounds first, then most recently active waiting leads
+    const score = (x: AssistantLeadItem) =>
+      (x.unreadCount > 0 ? 1000 : 0) + (x.stage === 'new' ? 500 : 0) - x.inactiveDays;
+    return score(b) - score(a);
+  });
 
   const visibleCoordDefinitions = coordinators.filter((c) => {
     if (!isAdmin) return isCoordinatorMatch(c.username, agentId, coordinators);
@@ -545,6 +680,94 @@ export async function computeSentinelOverview(options?: {
         .map((c) => ({ username: c.username, name: c.displayName || c.username }))
     : [];
 
+  // Real-Life Executive Assistant Daily Briefing
+  const hourNow = new Date(now).getHours();
+  const timeSalutation = hourNow < 12 ? 'Good morning' : hourNow < 17 ? 'Good afternoon' : 'Good evening';
+  const matchedSelfCoord = coordinators.find((c) => isCoordinatorMatch(c.username, agentId, coordinators));
+  const displayUser = isAdmin
+    ? agentId && agentId.toLowerCase() !== 'unassigned'
+      ? agentId
+      : 'Master Admin'
+    : matchedSelfCoord?.displayName || agentId || 'Coordinator';
+
+  const whatToDoNext: AssistantActionStep[] = [];
+  if (unreadReplies.length > 0) {
+    const names = unreadReplies
+      .slice(0, 2)
+      .map((l) => l.name)
+      .join(', ');
+    whatToDoNext.push({
+      id: 'step_reply_unread',
+      priority: 'now',
+      title: `Reply to ${unreadReplies.length} waiting WhatsApp candidate${unreadReplies.length === 1 ? '' : 's'}`,
+      detail: `Start with ${names}${unreadReplies.length > 2 ? ` and ${unreadReplies.length - 2} more` : ''} so warm replies don't go cold.`,
+      actionLabel: 'Reply Now',
+      bucketKey: 'unread'
+    });
+  }
+
+  if (isAdmin && unassignedOrNewInbounds.length > 0) {
+    whatToDoNext.push({
+      id: 'step_assign_inbounds',
+      priority: 'now',
+      title: `Assign ${unassignedOrNewInbounds.length} new unassigned inbound lead${unassignedOrNewInbounds.length === 1 ? '' : 's'}`,
+      detail: 'Distribute incoming candidates to coordinators with open capacity for same-day calling.',
+      actionLabel: 'Assign Batch',
+      bucketKey: 'unassigned'
+    });
+  } else if (!isAdmin && unassignedOrNewInbounds.length > 0) {
+    whatToDoNext.push({
+      id: 'step_call_new_inbounds',
+      priority: 'now',
+      title: `Call ${unassignedOrNewInbounds.length} New Inbound lead${unassignedOrNewInbounds.length === 1 ? '' : 's'} assigned to you`,
+      detail: 'Introduce yourself, confirm preferred country/job, and request their Passport & CV.',
+      actionLabel: 'Open New Queue',
+      bucketKey: 'unassigned'
+    });
+  }
+
+  if (highPotentialLeads.length > 0) {
+    const topHot = highPotentialLeads[0];
+    whatToDoNext.push({
+      id: 'step_advance_potential',
+      priority: 'opportunity',
+      title: `Push ${highPotentialLeads.length} high-potential candidate${highPotentialLeads.length === 1 ? '' : 's'} toward placement`,
+      detail: `Top prospect: ${topHot.name} (${topHot.country} • ${topHot.reason || 'Ready'}). Book interviews or shortlist with clients.`,
+      actionLabel: 'View High Potential',
+      bucketKey: 'highPotential'
+    });
+  }
+
+  if (waitingFollowUpLeads.length > unreadReplies.length) {
+    const warmWaitingCount = waitingFollowUpLeads.length;
+    whatToDoNext.push({
+      id: 'step_warm_waiting',
+      priority: 'next',
+      title: `Check in on ${warmWaitingCount} active waiting follow-up${warmWaitingCount === 1 ? '' : 's'}`,
+      detail: 'Warm candidates waiting 2–14 days in Discussion or after Office Visit respond well to quick job updates.',
+      actionLabel: 'See Who Is Waiting',
+      bucketKey: 'waitingFollowUp'
+    });
+  }
+
+  if (stagnantOver30Days > 0) {
+    whatToDoNext.push({
+      id: 'step_clean_aged_stagnant',
+      priority: 'next',
+      title: `Clean up ${stagnantOver30Days} inactive (>30d) leads to boost CRM Health`,
+      detail: 'Move old unengaged In Discussion leads to Cold Leads so your active board stays focused.',
+      actionLabel: 'Move >30d to Cold',
+      fixAction: 'archive_stagnant_to_cold'
+    });
+  }
+
+  const headline =
+    unreadReplies.length > 0 || unassignedOrNewInbounds.length > 0
+      ? `Here is your game plan right now: ${unreadReplies.length} candidate${unreadReplies.length === 1 ? ' is' : 's are'} waiting for a WhatsApp reply, ${highPotentialLeads.length} show high placement potential, and ${waitingFollowUpLeads.length} are waiting for follow-up.`
+      : highPotentialLeads.length > 0
+      ? `Inbox is caught up! Focus on advancing your ${highPotentialLeads.length} high-potential candidates and checking in with ${waitingFollowUpLeads.length} waiting leads.`
+      : `Everything looks well caught up right now! Use the chat below anytime to draft WhatsApp messages or review candidate strategy.`;
+
   return {
     healthScore,
     healthBreakdown: {
@@ -573,12 +796,21 @@ export async function computeSentinelOverview(options?: {
     unreadMessagesCount: unreadMessagesTotal,
     staleUnreadCount: staleUnreadAlreadyReplied.length,
     interviewReadyCount: interviewOpportunities.length,
+    highPotentialCount: highPotentialLeads.length,
+    waitingFollowUpCount: waitingFollowUpLeads.length,
+    assistantBriefing: {
+      greeting: `${timeSalutation}, ${displayUser}!`,
+      headline,
+      whatToDoNext
+    },
     drilldowns: {
       unread: unreadReplies,
       staleUnread: staleUnreadAlreadyReplied,
       unassigned: unassignedOrNewInbounds,
       stagnant: stagnantInDiscussion,
-      interviewReady: interviewOpportunities
+      interviewReady: interviewOpportunities,
+      highPotential: highPotentialLeads,
+      waitingFollowUp: waitingFollowUpLeads
     },
     aiInsights,
     lastScannedAt: new Date().toISOString()
@@ -972,8 +1204,8 @@ export async function askAiCopilot(
   query: string,
   userRole: string,
   agentId: string,
-  _conversationHistory: { role: 'user' | 'assistant'; text: string }[] = []
-): Promise<{ reply: string; suggestions?: string[] }> {
+  conversationHistory: { id?: string; role: 'user' | 'assistant'; text: string }[] = []
+): Promise<{ reply: string; suggestions?: string[]; referencedLeads?: AssistantLeadItem[] }> {
   const normalizedRole = String(userRole || 'user').trim().toLowerCase();
   const isAdmin = normalizedRole === 'admin';
   const overview = await computeSentinelOverview({ userRole: normalizedRole, agentId });
@@ -981,118 +1213,204 @@ export async function askAiCopilot(
 
   const ai = getAiClient();
   if (!ai) {
-    const secondLabel = isAdmin ? 'Unassigned Inbounds' : 'My New Inbounds';
-    return {
-      reply: `**AI Assistant Summary:**\n- **CRM Health Score:** ${overview.healthScore}%\n- **Total Scoped Candidates:** ${overview.totalActiveCandidates}\n- **In Discussion:** ${overview.pipelineSummary.inDiscussion} (${overview.stagnantCount} stagnant >3d)\n- **${secondLabel}:** ${overview.unassignedCount}\n- **Awaiting Replies:** ${overview.unreadRepliesCount} (${overview.unreadMessagesCount} unread msgs)\n\n*Recommendation:* ${overview.unreadRepliesCount > 0 ? 'Reply to pending WhatsApp conversations first.' : overview.stagnantCount > 0 ? 'Review stagnant In Discussion leads or archive inactive (>30d) leads to Cold.' : 'Follow up on Strong Opportunity & document-ready candidates.'}`,
-      suggestions: [
-        'How can I improve my CRM health score right now?',
-        'Summarize my stagnant In Discussion leads',
-        'Who should I reply to first on WhatsApp?'
-      ]
-    };
+    const err: any = new Error('AI Assistant requires GEMINI_API_KEY to be configured on the server.');
+    err.statusCode = 503;
+    throw err;
   }
 
-  const topUnread = overview.drilldowns.unread
-    .slice(0, 5)
-    .map((l) => `* ${l.name} (${l.phone || 'N/A'}) - ${l.country}, ${l.unreadCount} unread msg(s)`)
-    .join('\n');
+  const formatLeadLine = (l: AssistantLeadItem, includeReason = false) =>
+    `* ${l.name} (${l.phone || 'N/A'}) | ${l.country} - ${l.position} | Stage: ${l.stage}${isAdmin ? ` | Coord: ${l.assignedTo}` : ''} | Last active: ${l.inactiveDays}d ago${l.unreadCount > 0 ? ` | ${l.unreadCount} unread msg` : ''}${l.latestMessageText ? ` | Last msg: "${String(l.latestMessageText).slice(0, 90)}"` : ''}${includeReason && l.reason ? ` | Why: ${l.reason}` : ''}`;
 
-  const topReady = overview.drilldowns.interviewReady
-    .slice(0, 5)
-    .map((l) => `* ${l.name} (${l.position}) - ${l.country}, Stage: ${l.stage}`)
-    .join('\n');
+  const topUnread = overview.drilldowns.unread.slice(0, 12).map((l) => formatLeadLine(l)).join('\n');
+  const topHighPotential = overview.drilldowns.highPotential.slice(0, 12).map((l) => formatLeadLine(l, true)).join('\n');
+  const topWaiting = overview.drilldowns.waitingFollowUp.slice(0, 12).map((l) => formatLeadLine(l, true)).join('\n');
+  const topNewInbounds = overview.drilldowns.unassigned.slice(0, 8).map((l) => formatLeadLine(l)).join('\n');
 
   const scopeHeader = isAdmin
-    ? `Role: Administrator (Agency-wide visibility)`
-    : `Role: Coordinator "${agentId}" (STRICTLY SCOPED — ONLY discuss leads assigned to "${agentId}". Never reference or expose any other coordinator's metrics.)`;
+    ? `User: "${agentId || 'Master Admin'}" (Administrator — full agency visibility)`
+    : `User: "${agentId}" (Coordinator — STRICTLY SCOPED ONLY to candidates assigned to "${agentId}". Never mention, guess, or reference any other coordinator or unassigned leads.)`;
 
   const workloadSection = isAdmin
-    ? `Coordinator Workloads:\n${overview.coordinatorWorkloads
+    ? `Team Workloads:\n${overview.coordinatorWorkloads
         .map(
           (c) =>
-            `* ${c.name}: ${c.activeLeads} active, ${c.inDiscussion} in discussion, ${c.stagnantLeads} stagnant (>3d), ${c.wonLeads} won. Status: ${c.status}`
+            `* ${c.name}: ${c.activeLeads} active, ${c.inDiscussion} in discussion, ${c.stagnantLeads} stagnant (>3d), ${c.unreadLeads} unread, ${c.wonLeads} won (${c.status})`
         )
         .join('\n')}`
-    : `Your Personal Workload Summary:\n${overview.coordinatorWorkloads
+    : `Your Personal Workload:\n${overview.coordinatorWorkloads
         .map(
           (c) =>
-            `* ${c.name}: ${c.activeLeads} assigned, ${c.inDiscussion} in discussion, ${c.stagnantLeads} stagnant (>3d), ${c.wonLeads} won.`
+            `* ${c.name}: ${c.activeLeads} assigned, ${c.inDiscussion} in discussion, ${c.stagnantLeads} stagnant (>3d), ${c.unreadLeads} unread, ${c.wonLeads} won`
         )
         .join('\n')}`;
 
-  const contextSummary = `
-You are the CGP AI Assistant for Career Growth Placement Abroad Recruiting CRM.
+  const liveCrmContext = `
+You are a warm, smart, real-life Recruitment Executive Assistant for Career Growth Placement (CGP) CRM — conversational like Gemini, practical, and action-oriented.
 ${scopeHeader}
 
-Current Real-Time Scoped CRM Snapshot (computed ${overview.lastScannedAt}):
-- CRM Health Score: ${overview.healthScore}% (Response: ${overview.healthBreakdown.responseScore}/${overview.healthBreakdown.responseMax}, ${isAdmin ? 'Assignment' : 'New Intake'}: ${overview.healthBreakdown.assignmentScore}/${overview.healthBreakdown.assignmentMax}, Pipeline Freshness: ${overview.healthBreakdown.velocityScore}/${overview.healthBreakdown.velocityMax})
+REAL-TIME CRM SNAPSHOT (${overview.lastScannedAt}):
+- CRM Health Index: ${overview.healthScore}% (Reply ${overview.healthBreakdown.responseScore}/${overview.healthBreakdown.responseMax}, ${isAdmin ? 'Assign' : 'Intake'} ${overview.healthBreakdown.assignmentScore}/${overview.healthBreakdown.assignmentMax}, Velocity ${overview.healthBreakdown.velocityScore}/${overview.healthBreakdown.velocityMax})
 - Total Scoped Candidates: ${overview.totalActiveCandidates}
-- Pipeline Stages:
-  * New Inbound: ${overview.pipelineSummary.newInbound}
-  * In Discussion: ${overview.pipelineSummary.inDiscussion}
-  * Strong Opportunity: ${overview.pipelineSummary.strongOpportunity}
-  * Office Visited / Interview: ${overview.pipelineSummary.officeVisited}
-  * Won (Placed): ${overview.pipelineSummary.won}
-  * Cold Leads: ${overview.pipelineSummary.coldLeads}
-  * Lost: ${overview.pipelineSummary.lost}
-- ${isAdmin ? 'Unassigned Inbound Leads' : 'My New Inbounds (Awaiting First Touch)'}: ${overview.unassignedCount}
-- Candidates Awaiting WhatsApp Reply: ${overview.unreadRepliesCount} (${overview.unreadMessagesCount} unread messages)
-- Stale Already-Replied Unread Flags: ${overview.staleUnreadCount}
-- Stagnant in Discussion (> 3 days): ${overview.stagnantCount} (3-7d: ${overview.healthBreakdown.stagnant3to7Days}, 7-30d: ${overview.healthBreakdown.stagnant7to30Days}, >30d: ${overview.healthBreakdown.stagnantOver30Days})
+- Stage Breakdown: New Inbound ${overview.pipelineSummary.newInbound}, In Discussion ${overview.pipelineSummary.inDiscussion}, Strong Opportunity ${overview.pipelineSummary.strongOpportunity}, Office Visited ${overview.pipelineSummary.officeVisited}, Won ${overview.pipelineSummary.won}, Cold ${overview.pipelineSummary.coldLeads}, Lost ${overview.pipelineSummary.lost}
+- ${isAdmin ? 'Unassigned Inbounds' : 'My New Inbounds (Awaiting First Touch)'}: ${overview.unassignedCount}
+- Waiting for WhatsApp Reply: ${overview.unreadRepliesCount} candidates (${overview.unreadMessagesCount} unread messages)
+- High-Potential Candidates: ${overview.highPotentialCount}
+- Waiting for Follow-Up (warm 2-14d / New / Office Visit): ${overview.waitingFollowUpCount}
+- Stagnant >30d Inactive Backlog: ${overview.healthBreakdown.stagnantOver30Days}
 
-Top Unread Candidates Awaiting Reply:
-${topUnread || '* None'}
+WHO IS WAITING FOR A REPLY (Top 12):
+${topUnread || '* None right now'}
 
-Top Document-Ready Candidates:
-${topReady || '* None'}
+WHO HAS HIGH POTENTIAL (Top 12):
+${topHighPotential || '* None scored right now'}
 
-Active Demand Jobs:
+WHO IS WAITING / NEEDS FOLLOW-UP (Top 12):
+${topWaiting || '* None right now'}
+
+${isAdmin ? 'UNASSIGNED INBOUND QUEUE' : 'MY NEW INBOUND QUEUE'} (Top 8):
+${topNewInbounds || '* None right now'}
+
+ACTIVE JOB DEMANDS:
 ${jobs
-  .slice(0, 5)
+  .slice(0, 6)
   .map(
     (j) =>
-      `* ${j.title || j.serviceCharge || 'Job Demand'}${j.country ? ` (${j.country})` : ''} - Service Charge: ${j.serviceCharge || j.processingFeeMale || 'N/A'}, Salary: ${j.salaryRange || 'See creative'}`
+      `* ${j.title || j.serviceCharge || 'Job Demand'}${j.country ? ` (${j.country})` : ''} - Service Charge: ${j.serviceCharge || j.processingFeeMale || 'N/A'}, Salary: ${j.salaryRange || 'See details'}`
   )
-  .join('\n')}
+  .join('\n') || '* Check Active Jobs tab'}
 
 ${workloadSection}
+
+INSTRUCTIONS:
+1. Act like a proactive real-life personal assistant ("Sure! First, let's reply to...", "Here are your 3 strongest candidates...").
+2. Use exact candidate names, phone numbers, and real details from above. Never invent candidates or numbers.
+3. If the user asks to draft a WhatsApp/call script, write a ready-to-send polite message in a quote/clear block so they can copy-paste immediately.
+4. Keep responses crisp, structured with clean headings/bullet points, and end with 1 quick helpful next question or suggestion.
+5. STRICT PRIVACY: If user is a Coordinator, ONLY discuss leads and metrics present in this snapshot.
 `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: `${contextSummary}\n\nUser Question: ${query}` }]
-        }
-      ],
-      config: {
-        systemInstruction:
-          'You are the CGP AI Assistant for Career Growth Placement. Be concise, accurate, strictly respect the user scope provided in the context, and give actionable recommendations using clean markdown bullet points.'
-      }
-    });
+  // Build genuine alternating multi-turn Gemini conversation history
+  const rawTurns = (Array.isArray(conversationHistory) ? conversationHistory : [])
+    .slice(-10)
+    .filter((m) => m && typeof m.text === 'string' && m.text.trim().length > 0 && !String(m.id || '').startsWith('m_welcome'));
 
-    const text = response.text || 'All systems are synced. How would you like to prioritize your leads?';
+  const sanitizedHistory: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
+  for (const m of rawTurns) {
+    const mappedRole = m.role === 'assistant' ? ('model' as const) : ('user' as const);
+    // Gemini expects first turn to be 'user' and alternating roles
+    if (sanitizedHistory.length === 0 && mappedRole !== 'user') continue;
+    const prev = sanitizedHistory[sanitizedHistory.length - 1];
+    if (prev && prev.role === mappedRole) {
+      prev.parts[0].text += `\n${m.text.trim()}`;
+    } else {
+      sanitizedHistory.push({
+        role: mappedRole,
+        parts: [{ text: m.text.trim() }]
+      });
+    }
+  }
+
+  // Ensure the turn before our new 'user' query is not 'user'
+  if (sanitizedHistory.length > 0 && sanitizedHistory[sanitizedHistory.length - 1].role === 'user') {
+    sanitizedHistory.pop();
+  }
+
+  const contents = [
+    ...sanitizedHistory,
+    {
+      role: 'user' as const,
+      parts: [{ text: query }]
+    }
+  ];
+
+  try {
+    let response: any = null;
+    let lastErr: any = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await ai.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents,
+          config: {
+            systemInstruction: liveCrmContext
+          }
+        });
+        lastErr = null;
+        break;
+      } catch (err: any) {
+        lastErr = err;
+        const msgStr = String(err?.message || '');
+        const isTransient = msgStr.includes('503') || msgStr.includes('UNAVAILABLE') || msgStr.includes('429');
+        if (attempt < 2 && isTransient) {
+          await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (lastErr) throw lastErr;
+
+    const text =
+      response?.text || 'I am synced with your live pipeline. Tell me what you would like to tackle next!';
+
+    // Match any scoped candidate names mentioned in Gemini's reply for one-click open/reply shortcuts
+    const lowerReply = text.toLowerCase();
+    const candidatePoolMap = new Map<string, AssistantLeadItem>();
+    for (const list of [
+      overview.drilldowns.unread,
+      overview.drilldowns.highPotential,
+      overview.drilldowns.waitingFollowUp,
+      overview.drilldowns.unassigned,
+      overview.drilldowns.interviewReady,
+      overview.drilldowns.stagnant
+    ]) {
+      for (const item of list) {
+        if (!candidatePoolMap.has(item.id)) candidatePoolMap.set(item.id, item);
+      }
+    }
+
+    const referencedLeads: AssistantLeadItem[] = [];
+    for (const item of candidatePoolMap.values()) {
+      const cleanName = item.name.trim().toLowerCase();
+      if (cleanName.length >= 3 && cleanName !== 'unnamed candidate' && lowerReply.includes(cleanName)) {
+        referencedLeads.push(item);
+        if (referencedLeads.length >= 5) break;
+      }
+    }
+
     return {
       reply: text,
+      referencedLeads,
       suggestions: isAdmin
         ? [
-            'How can we boost CRM Health above 80% today?',
-            'Which stagnant leads should move to Cold?',
-            'Which coordinator has capacity right now?',
-            'Draft WhatsApp re-engagement message'
+            'What should I prioritize first right now?',
+            'Who is waiting for a reply right now?',
+            'Show our highest-potential candidates',
+            'Draft a polite follow-up WhatsApp message'
           ]
         : [
-            'How can I boost my Health Score today?',
-            'Which of my candidates need an urgent reply?',
-            'Which of my verified candidates are ready to advance?',
-            'Draft WhatsApp re-engagement message'
+            'What should I do first today?',
+            'Who of my leads are waiting for a reply?',
+            'Which of my candidates have the best potential?',
+            'Draft a WhatsApp follow-up message for me'
           ]
     };
   } catch (err: any) {
-    console.error('[AI Assistant] Error in Gemini query:', err?.message || err);
-    throw new Error(err?.message || 'AI Assistant could not reach Gemini right now.');
+    const rawMsg = String(err?.message || 'AI Assistant could not reach Gemini right now.');
+    let cleanMsg = rawMsg;
+    let statusCode = 500;
+    try {
+      const parsed = JSON.parse(rawMsg);
+      if (parsed?.error?.message) cleanMsg = parsed.error.message;
+      if (typeof parsed?.error?.code === 'number') statusCode = parsed.error.code;
+    } catch {
+      if (rawMsg.includes('503')) statusCode = 503;
+      else if (rawMsg.includes('429')) statusCode = 429;
+    }
+    console.error('[AI Assistant] Error in Gemini query:', cleanMsg);
+    const cleanErr: any = new Error(cleanMsg);
+    cleanErr.statusCode = statusCode;
+    throw cleanErr;
   }
 }
 

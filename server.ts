@@ -4083,8 +4083,9 @@ const handlePostAiCopilotChat = async (req: express.Request, res: express.Respon
     const response = await askAiCopilot(query || 'What are our operational priorities today?', userRole, agentId, history);
     res.json(response);
   } catch (err: any) {
+    const status = err?.statusCode || 500;
     console.error('Error processing AI Assistant query:', err);
-    res.status(500).json({ error: err?.message || 'Failed to process AI Assistant query' });
+    res.status(status).json({ error: err?.message || 'Failed to process AI Assistant query' });
   }
 };
 
