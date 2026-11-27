@@ -91,7 +91,7 @@ import type { FullDatabaseBackup } from './src/server/db.ts';
 import { isDefaultExperience, getEffectiveExperience, getEffectiveIntake, isCoordinatorMatch } from './src/utils.ts';
 import { DEFAULT_WHATSAPP_TEMPLATES, sendWhatsAppMessage, replaceTemplatePlaceholders, formatPhoneForWhatsApp, fetchMetaWhatsAppTemplates } from './src/server/whatsapp.ts';
 import { generateCandidateCvPdf, autoGenerateAndPersistCandidateCv } from './src/server/cvGenerator.ts';
-import { computeSentinelOverview, askAiCopilot, getLeadSpecificAiSuggestions } from './src/server/aiSentinel.ts';
+import { computeSentinelOverview, applyAiAssistantFix, askAiCopilot, getLeadSpecificAiSuggestions } from './src/server/aiSentinel.ts';
 import compression from 'compression';
 
 const app = express();
@@ -4022,41 +4022,87 @@ app.post('/api/leads/:id/messages', async (req, res) => {
   }
 });
 
-// ---------------- AI SENTINEL & COPILOT ENDPOINTS ----------------
+// ---------------- AI ASSISTANT & COPILOT ENDPOINTS ----------------
 
-// GET comprehensive AI Sentinel CRM surveillance overview
-app.get('/api/ai/sentinel', async (req, res) => {
+const handleGetAiAssistantOverview = async (req: express.Request, res: express.Response) => {
   try {
-    const overview = await computeSentinelOverview();
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    const userRole = String(req.headers['x-user-role'] || 'user').trim().toLowerCase();
+    const agentId = String(req.headers['x-agent-id'] || '').trim();
+    const forceRefresh = req.query.refresh === 'true';
+
+    const overview = await computeSentinelOverview({ userRole, agentId, forceRefresh });
     res.json(overview);
   } catch (err: any) {
-    console.error('Error computing Sentinel overview:', err);
-    res.status(500).json({ error: err?.message || 'Failed to compute sentinel overview' });
+    console.error('Error computing AI Assistant overview:', err);
+    res.status(500).json({ error: err?.message || 'Failed to compute AI Assistant overview' });
+  }
+};
+
+// GET live scoped AI Assistant overview (support both new & legacy paths)
+app.get('/api/ai/assistant', handleGetAiAssistantOverview);
+app.get('/api/ai/sentinel', handleGetAiAssistantOverview);
+
+// POST apply one-click CRM health fix via AI Assistant
+app.post('/api/ai/assistant/fix', async (req, res) => {
+  try {
+    const userRole = String(req.headers['x-user-role'] || 'user').trim().toLowerCase();
+    const agentId = String(req.headers['x-agent-id'] || '').trim();
+    const { action, leadIds, minInactiveDays, limit, targetCoordinator } = req.body || {};
+
+    if (!action) {
+      return res.status(400).json({ error: 'Fix action is required.' });
+    }
+
+    const result = await applyAiAssistantFix({
+      action,
+      userRole,
+      agentId,
+      leadIds: Array.isArray(leadIds) ? leadIds : undefined,
+      minInactiveDays: minInactiveDays !== undefined ? Number(minInactiveDays) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+      targetCoordinator: targetCoordinator ? String(targetCoordinator) : undefined
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    const status = err?.statusCode || 500;
+    console.error('Error applying AI Assistant fix:', err);
+    res.status(status).json({ error: err?.message || 'Failed to apply AI Assistant fix' });
   }
 });
 
-// POST interactive AI Copilot query
-app.post('/api/ai/copilot/chat', async (req, res) => {
+const handlePostAiCopilotChat = async (req: express.Request, res: express.Response) => {
   try {
-    const { query, history } = req.body;
-    const userRole = (req.headers['x-user-role'] as string) || 'admin';
-    const agentId = (req.headers['x-agent-id'] as string) || 'master admin';
+    const { query, history } = req.body || {};
+    const userRole = String(req.headers['x-user-role'] || 'user').trim().toLowerCase();
+    const agentId = String(req.headers['x-agent-id'] || '').trim();
     const response = await askAiCopilot(query || 'What are our operational priorities today?', userRole, agentId, history);
     res.json(response);
   } catch (err: any) {
-    console.error('Error processing AI Copilot query:', err);
-    res.status(500).json({ error: err?.message || 'Failed to process AI copilot query' });
+    console.error('Error processing AI Assistant query:', err);
+    res.status(500).json({ error: err?.message || 'Failed to process AI Assistant query' });
   }
-});
+};
 
-// GET specific AI suggestions for an individual candidate
+// POST interactive AI Assistant Copilot query
+app.post('/api/ai/assistant/chat', handlePostAiCopilotChat);
+app.post('/api/ai/copilot/chat', handlePostAiCopilotChat);
+
+// GET specific AI suggestions for an individual candidate (RBAC enforced)
 app.get('/api/ai/leads/:id/suggestions', async (req, res) => {
   try {
-    const suggestions = await getLeadSpecificAiSuggestions(req.params.id);
+    const userRole = String(req.headers['x-user-role'] || 'user').trim().toLowerCase();
+    const agentId = String(req.headers['x-agent-id'] || '').trim();
+    const suggestions = await getLeadSpecificAiSuggestions(req.params.id, userRole, agentId);
     res.json(suggestions);
   } catch (err: any) {
+    const status = err?.statusCode || 500;
     console.error('Error getting lead AI suggestions:', err);
-    res.status(500).json({ error: err?.message || 'Failed to get lead suggestions' });
+    res.status(status).json({ error: err?.message || 'Failed to get lead suggestions' });
   }
 });
 

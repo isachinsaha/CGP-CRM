@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Lead, LeadStage, StatSummary, Coordinator, WhatsAppTemplate } from './types.ts';
 import { 
-  LayoutGrid, Table, BarChart3, Briefcase, ShieldAlert, Sparkles, Bot,
+  LayoutGrid, Table, BarChart3, Briefcase, ShieldAlert, Sparkles,
   RefreshCw, MessageSquare, Plus, HelpCircle, Layers, Lock, User, Check, X, Shield,
   LogOut, Users, UserCheck, Sun, Moon, PiggyBank, Menu, ChevronRight, Settings, ChevronDown, Download, Trash2, Image,
   CheckCheck, AlertCircle, Copy, UploadCloud, Clock
@@ -44,6 +44,7 @@ import RecycleBinModal from './components/RecycleBinModal.tsx';
 import MediaLibrary from './components/MediaLibrary.tsx';
 import { DuplicateManagerModal } from './components/DuplicateManagerModal.tsx';
 import { AiSentinelModal } from './components/AiSentinelModal.tsx';
+import { FloatingAiAssistant } from './components/FloatingAiAssistant.tsx';
 
 // Import local assets
 
@@ -1266,22 +1267,6 @@ export default function App() {
 
               {/* Right Profile Actions & Utilities */}
               <div className="flex items-center gap-2 shrink-0">
-                {/* AI Sentinel Copilot button */}
-                <button
-                  onClick={() => setIsSentinelOpen(true)}
-                  className="bg-gradient-to-r from-indigo-950/80 via-slate-900 to-purple-950/80 hover:from-indigo-900 hover:to-purple-900 text-indigo-200 hover:text-white text-xs font-bold px-2.5 py-1.5 rounded-xl border border-indigo-500/40 flex items-center gap-1.5 cursor-pointer transition-all shadow-md group"
-                  title="Open AI Sentinel & Operations Copilot"
-                >
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                  </span>
-                  <Bot className="h-3.5 w-3.5 text-indigo-400 group-hover:scale-110 transition-transform" />
-                  <span className="uppercase text-[10px] font-mono tracking-wider font-extrabold hidden md:inline">
-                    AI SENTINEL
-                  </span>
-                </button>
-
                 {/* AI Inbound Parser button */}
                 <button
                   onClick={() => setApiMode(prev => prev === 'live' ? 'simulation' : 'live')}
@@ -2334,20 +2319,41 @@ export default function App() {
         />
       )}
 
-      {/* AI Sentinel & Operations Copilot Modal */}
+      {/* AI Assistant & Operations Copilot Modal */}
       {isSentinelOpen && (
         <AiSentinelModal
           isOpen={isSentinelOpen}
           onClose={() => setIsSentinelOpen(false)}
           userRole={userRole}
           currentAgentId={currentAgentId}
-          onFilterByStage={(stage) => {
+          onFilterByStage={() => {
             setActiveTab('board');
           }}
-          onNavigateToWhatsApp={() => {
-            setActiveTab('messages');
+          onSelectLead={(leadId) => {
+            const found = leads.find((l) => l.id === leadId);
+            if (found) {
+              setSelectedLead(found);
+              setIsSentinelOpen(false);
+            }
           }}
+          onNavigateToWhatsApp={(leadId) => {
+            if (leadId) {
+              const found = leads.find((l) => l.id === leadId);
+              if (found) setSelectedLead(found);
+            }
+            setActiveTab('messages');
+            setIsSentinelOpen(false);
+          }}
+          onDataUpdated={() => {
+            pullCrmData(true, true);
+          }}
+          leadsVersion={leads.length}
         />
+      )}
+
+      {/* Movable Floating AI Assistant Launcher */}
+      {!isSentinelOpen && (
+        <FloatingAiAssistant onOpen={() => setIsSentinelOpen(true)} />
       )}
 
     </div>
