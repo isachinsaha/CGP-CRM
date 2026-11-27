@@ -228,7 +228,7 @@ export default function MediaLibrary({ currentUser, onSelect, isModal = false }:
 
   // Format bytes helper
   const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
+    if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return '0 Bytes';
     const k = 1024;
     const dm = 1;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];

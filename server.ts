@@ -886,8 +886,36 @@ function compactLeadMessages(msgs: Message[] = []): Message[] {
     }));
 }
 
+function getLeadStageEnteredAt(l: Lead): string {
+  backfillLeadHistory(l);
+  const stdStageLocal = (st: string): string => {
+    if (!st) return 'new';
+    const s = st.toLowerCase().trim();
+    if (s === 'negotiating') return 'in_discussion';
+    if (s === 'rotations') return 'cold_leads';
+    if (s === 'proposal') return 'office_visited';
+    return s;
+  };
+  const actualStage = stdStageLocal(l.stage || 'new');
+  const sh = Array.isArray(l.stageHistory)
+    ? [...l.stageHistory].sort((a: any, b: any) => new Date(a.changedAt || 0).getTime() - new Date(b.changedAt || 0).getTime())
+    : [];
+  let enteredAt = '';
+  for (let i = sh.length - 1; i >= 0; i--) {
+    if (stdStageLocal(sh[i].newStage) === actualStage) {
+      enteredAt = sh[i].changedAt || '';
+    } else {
+      break;
+    }
+  }
+  return enteredAt || l.createdAt || l.entryDate || l.updatedAt || '';
+}
+
 function projectLeadForTab(l: Lead, activeTab: string, fullDetails: boolean) {
-  if (fullDetails) return l;
+  const stageChangedAt = getLeadStageEnteredAt(l);
+  if (fullDetails) {
+    return { ...l, stageChangedAt };
+  }
   const {
     cvTextContent: _cv,
     deletedDocuments: _del,
@@ -900,6 +928,7 @@ function projectLeadForTab(l: Lead, activeTab: string, fullDetails: boolean) {
   if (activeTab === 'analytics') {
     return {
       ...rest,
+      stageChangedAt,
       messages: compactLeadMessages(l.messages)
     };
   }
@@ -908,6 +937,7 @@ function projectLeadForTab(l: Lead, activeTab: string, fullDetails: boolean) {
   const { timeline: _tl, stageHistory: _sh, coordinatorHistory: _ch, ...leanRest } = rest;
   return {
     ...leanRest,
+    stageChangedAt,
     messages: compactLeadMessages(l.messages)
   };
 }
@@ -5540,9 +5570,9 @@ function backfillLeadHistory(lead: any): boolean {
     modified = true;
   }
 
-  const lastHistoryStage = lead.stageHistory && lead.stageHistory.length > 0 ? lead.stageHistory[lead.stageHistory.length - 1].newStage : '';
   const mapLabelToKeyLocal = (label: string): string => {
-    const l = label.toLowerCase().trim();
+    const l = String(label || '').toLowerCase().trim();
+    if (!l || l === 'none') return 'none';
     if (l.includes('new inbound') || l === 'new') return 'new';
     if (l.includes('in discussion') || l.includes('negotiating') || l === 'discussion') return 'in_discussion';
     if (l.includes('strong opportunity') || l === 'strong') return 'strong_opportunity';
@@ -5552,12 +5582,14 @@ function backfillLeadHistory(lead: any): boolean {
     if (l.includes('lost') || l.includes('closed lost')) return 'lost';
     return l;
   };
-  const hasStageMismatch = lastHistoryStage && lead.stage && mapLabelToKeyLocal(lastHistoryStage) !== mapLabelToKeyLocal(lead.stage);
 
-  // Reconstruct histories if they are empty or have out-of-sync stages, to ensure 100% correctness
-  if ((lead.stageHistory.length === 0 || hasStageMismatch) && lead.timeline && lead.timeline.length > 0) {
+  // Reconstruct histories only when stageHistory is empty and timeline logs exist
+  if (lead.stageHistory.length === 0 && lead.timeline && lead.timeline.length > 0) {
     lead.stageHistory = [];
-    lead.coordinatorHistory = [];
+    if (!Array.isArray(lead.coordinatorHistory)) {
+      lead.coordinatorHistory = [];
+    }
+    const shouldBackfillCoords = lead.coordinatorHistory.length === 0;
     modified = true;
     // Sort timeline ascending to process chronologically
     const sortedTimeline = [...lead.timeline].sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
@@ -5589,7 +5621,7 @@ function backfillLeadHistory(lead: any): boolean {
         if (text.includes('changed from') && text.includes('to')) {
           const parts = text.split('changed from');
           if (parts[1]) {
-            const subParts = parts[1].split('to');
+            const subParts = parts[1].split(/\s+to\s+/i);
             fromStage = subParts[0].replace(/['"“”]/g, '').trim();
             toStage = subParts[1].replace(/['"“”]/g, '').trim();
           }
@@ -5636,20 +5668,22 @@ function backfillLeadHistory(lead: any): boolean {
         if (text.includes('changed from') && text.includes('to')) {
           const parts = text.split('changed from');
           if (parts[1]) {
-            const subParts = parts[1].split('to');
+            const subParts = parts[1].split(/\s+to\s+/i);
             fromCoord = subParts[0].replace(/['"“”]/g, '').trim();
             toCoord = subParts[1].split('via')[0].replace(/['"“”]/g, '').trim();
           }
         }
 
         if (toCoord) {
-          lead.coordinatorHistory.push({
-            candidateId: lead.id,
-            previousCoordinator: fromCoord || 'unassigned',
-            newCoordinator: toCoord,
-            changedBy: actor,
-            changedAt: timestamp
-          });
+          if (shouldBackfillCoords) {
+            lead.coordinatorHistory.push({
+              candidateId: lead.id,
+              previousCoordinator: fromCoord || 'unassigned',
+              newCoordinator: toCoord,
+              changedBy: actor,
+              changedAt: timestamp
+            });
+          }
           currentCoordinator = toCoord;
         }
       }
@@ -5660,19 +5694,46 @@ function backfillLeadHistory(lead: any): boolean {
     modified = true;
   }
 
-  // Ensure baseline starting snapshot exists if history is still empty
+  if (lead.stageHistory.length > 1) {
+    lead.stageHistory.sort((a: any, b: any) => new Date(a.changedAt || 0).getTime() - new Date(b.changedAt || 0).getTime());
+  }
+  if (lead.coordinatorHistory.length > 1) {
+    lead.coordinatorHistory.sort((a: any, b: any) => new Date(a.changedAt || 0).getTime() - new Date(b.changedAt || 0).getTime());
+  }
+
+  // Ensure baseline starting snapshot exists if history is still empty, or reconcile final stage mismatch
+  const actualStageKey = mapLabelToKeyLocal(lead.stage || 'new');
   if (lead.stageHistory.length === 0) {
     lead.stageHistory.push({
       candidateId: lead.id,
       previousStage: 'none',
-      newStage: lead.stage || 'new',
+      newStage: actualStageKey,
       changedBy: 'System (Initial)',
       coordinatorId: lead.assignedTo || 'unassigned',
-      changedAt: lead.createdAt || lead.entryDate || new Date().toISOString(),
+      changedAt: lead.createdAt || lead.entryDate || lead.updatedAt || new Date().toISOString(),
       project: lead.project,
       country: lead.country
     });
     modified = true;
+  } else {
+    const lastEntry = lead.stageHistory[lead.stageHistory.length - 1];
+    const lastStageKey = mapLabelToKeyLocal(lastEntry?.newStage || 'new');
+    if (lastStageKey !== actualStageKey) {
+      const reconcileTs = lead.updatedAt || lead.createdAt || lead.entryDate || new Date().toISOString();
+      const lastTs = lastEntry?.changedAt || '';
+      const safeTs = lastTs && reconcileTs < lastTs ? lastTs : reconcileTs;
+      lead.stageHistory.push({
+        candidateId: lead.id,
+        previousStage: lastStageKey,
+        newStage: actualStageKey,
+        changedBy: 'System (Stage Sync)',
+        coordinatorId: lead.assignedTo || 'unassigned',
+        changedAt: safeTs,
+        project: lead.project,
+        country: lead.country
+      });
+      modified = true;
+    }
   }
 
   if (lead.coordinatorHistory.length === 0) {
@@ -5783,6 +5844,17 @@ app.get('/api/reports/coordinator-performance', async (req, res) => {
       let cumulativeTouchedCount = 0;
 
       const byStageCounts: Record<string, number> = {
+        new: 0,
+        in_discussion: 0,
+        strong_opportunity: 0,
+        office_visited: 0,
+        won: 0,
+        cold_leads: 0,
+        lost: 0
+      };
+
+      // Leads that entered (or started in) their end-of-month stage during targetMonth
+      const monthlyStageCounts: Record<string, number> = {
         new: 0,
         in_discussion: 0,
         strong_opportunity: 0,
@@ -5903,7 +5975,9 @@ app.get('/api/reports/coordinator-performance', async (req, res) => {
         }
 
         let stageAtEndOfMonth = 'new';
-        const pastStages = (lead.stageHistory || []).filter((e: any) => e.changedAt <= monthEndBoundary);
+        const pastStages = (lead.stageHistory || [])
+          .filter((e: any) => e.changedAt <= monthEndBoundary)
+          .sort((a: any, b: any) => new Date(a.changedAt || 0).getTime() - new Date(b.changedAt || 0).getTime());
         if (pastStages.length > 0) {
           stageAtEndOfMonth = stdStage(pastStages[pastStages.length - 1].newStage);
         } else {
@@ -5912,6 +5986,22 @@ app.get('/api/reports/coordinator-performance', async (req, res) => {
 
         if (isAssignedToTarget) {
           byStageCounts[stageAtEndOfMonth] = (byStageCounts[stageAtEndOfMonth] || 0) + 1;
+
+          // Find when the lead entered its unbroken run in stageAtEndOfMonth up to monthEndBoundary
+          let enteredCurrentStageAt = '';
+          for (let i = pastStages.length - 1; i >= 0; i--) {
+            if (stdStage(pastStages[i].newStage) === stageAtEndOfMonth) {
+              enteredCurrentStageAt = pastStages[i].changedAt || '';
+            } else {
+              break;
+            }
+          }
+          if (!enteredCurrentStageAt) {
+            enteredCurrentStageAt = lead.createdAt || lead.entryDate || '';
+          }
+          if (matchesMonth(enteredCurrentStageAt, targetMonth)) {
+            monthlyStageCounts[stageAtEndOfMonth] = (monthlyStageCounts[stageAtEndOfMonth] || 0) + 1;
+          }
 
           if (['new', 'in_discussion', 'strong_opportunity', 'office_visited'].includes(stageAtEndOfMonth)) {
             activePipelineLeads.push(lead);
@@ -6000,6 +6090,7 @@ app.get('/api/reports/coordinator-performance', async (req, res) => {
         coldCount: coldLeads.length,
         lostCount: lostLeads.length,
         byStage: byStageCounts,
+        monthlyStageCounts,
         stageMovement,
         activityCounts,
         assignedLeads,
@@ -6034,6 +6125,17 @@ app.get('/api/reports/coordinator-performance', async (req, res) => {
     const touchedAbsChange = touchedCurrent - touchedPrevious;
     const touchedPctChange = touchedPrevious === 0 ? (touchedCurrent > 0 ? 100 : 0) : Number(((touchedAbsChange / touchedPrevious) * 100).toFixed(1));
 
+    const strongMonthlyCurr = currentStats.monthlyStageCounts.strong_opportunity || 0;
+    const strongMonthlyPrev = prevStats.monthlyStageCounts.strong_opportunity || 0;
+    const interviewMonthlyCurr = currentStats.monthlyStageCounts.office_visited || 0;
+    const interviewMonthlyPrev = prevStats.monthlyStageCounts.office_visited || 0;
+    const wonMonthlyCurr = currentStats.monthlyStageCounts.won || 0;
+    const wonMonthlyPrev = prevStats.monthlyStageCounts.won || 0;
+    const coldMonthlyCurr = currentStats.monthlyStageCounts.cold_leads || 0;
+    const coldMonthlyPrev = prevStats.monthlyStageCounts.cold_leads || 0;
+    const lostMonthlyCurr = currentStats.monthlyStageCounts.lost || 0;
+    const lostMonthlyPrev = prevStats.monthlyStageCounts.lost || 0;
+
     const kpis = {
       leadsAssigned: {
         current: assignedCurrent,
@@ -6057,24 +6159,29 @@ app.get('/api/reports/coordinator-performance', async (req, res) => {
         cumulative: currentStats.activePipelineCount
       },
       strongOpportunities: {
-        ...calculateKpi(currentStats.strongOpportunityCount, prevStats.strongOpportunityCount),
-        cumulative: currentStats.strongOpportunityCount
+        ...calculateKpi(strongMonthlyCurr, strongMonthlyPrev),
+        cumulative: currentStats.strongOpportunityCount,
+        prevCumulative: prevStats.strongOpportunityCount
       },
       interviews: {
-        ...calculateKpi(currentStats.interviewCount, prevStats.interviewCount),
-        cumulative: currentStats.interviewCount
+        ...calculateKpi(interviewMonthlyCurr, interviewMonthlyPrev),
+        cumulative: currentStats.interviewCount,
+        prevCumulative: prevStats.interviewCount
       },
       won: {
-        ...calculateKpi(currentStats.wonCount, prevStats.wonCount),
-        cumulative: currentStats.wonCount
+        ...calculateKpi(wonMonthlyCurr, wonMonthlyPrev),
+        cumulative: currentStats.wonCount,
+        prevCumulative: prevStats.wonCount
       },
       cold: {
-        ...calculateKpi(currentStats.coldCount, prevStats.coldCount),
-        cumulative: currentStats.coldCount
+        ...calculateKpi(coldMonthlyCurr, coldMonthlyPrev),
+        cumulative: currentStats.coldCount,
+        prevCumulative: prevStats.coldCount
       },
       lost: {
-        ...calculateKpi(currentStats.lostCount, prevStats.lostCount),
-        cumulative: currentStats.lostCount
+        ...calculateKpi(lostMonthlyCurr, lostMonthlyPrev),
+        cumulative: currentStats.lostCount,
+        prevCumulative: prevStats.lostCount
       }
     };
 
@@ -6259,11 +6366,15 @@ app.get('/api/reports/coordinator-performance', async (req, res) => {
       kpis,
       coordinatorRows,
       currentStats: {
+        assignedCount: currentStats.assignedCount,
+        touchedCount: currentStats.touchedCount,
         byStage: currentStats.byStage,
         stageMovement: currentStats.stageMovement,
         activityCounts: currentStats.activityCounts
       },
       prevStats: {
+        assignedCount: prevStats.assignedCount,
+        touchedCount: prevStats.touchedCount,
         byStage: prevStats.byStage,
         stageMovement: prevStats.stageMovement,
         activityCounts: prevStats.activityCounts

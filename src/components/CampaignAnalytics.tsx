@@ -181,8 +181,10 @@ export default function CampaignAnalytics({
 
   // Help calculate percentage safely
   const calculatePercent = (value: number, total: number) => {
-    if (total === 0) return 0;
-    return Math.round((value / total) * 100);
+    const v = Number(value);
+    const t = Number(total);
+    if (!Number.isFinite(v) || !Number.isFinite(t) || t <= 0) return 0;
+    return Math.round((v / t) * 100);
   };
 
   // Helper to calculate the target achievement ratio for a single lead
@@ -1293,7 +1295,7 @@ export default function CampaignAnalytics({
             <div>
               <span className="text-slate-450 text-xs font-semibold block">Consultancy Success Ratio</span>
               <span className="text-2xl font-black text-slate-100 tracking-tight">
-                {calculatePercent(stats.convertedLeads, stats.totalLeads - stats.lostLeads)}%
+                {calculatePercent(Number(stats?.convertedLeads) || 0, Math.max(0, (Number(stats?.totalLeads) || 0) - (Number(stats?.lostLeads) || 0)))}%
               </span>
               <span className="text-[10px] text-amber-500 font-bold block mt-0.5">Won of non-archived candidates</span>
             </div>

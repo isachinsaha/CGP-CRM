@@ -119,9 +119,9 @@ export default function CoordinatorPerformanceReport({
             if (text.includes('changed from') && text.includes('to')) {
               const parts = text.split('changed from');
               if (parts[1]) {
-                const subParts = parts[1].split('to');
+                const subParts = parts[1].split(/\s+to\s+/i);
                 fromStage = subParts[0].replace(/['"“”]/g, '').trim();
-                toStage = subParts[1].replace(/['"“”]/g, '').trim();
+                toStage = subParts.slice(1).join(' to ').replace(/['"“”]/g, '').trim();
               }
             } else if (text.includes('auto-moved to')) {
               const parts = text.split('auto-moved to');
@@ -154,9 +154,9 @@ export default function CoordinatorPerformanceReport({
             if (text.includes('changed from') && text.includes('to')) {
               const parts = text.split('changed from');
               if (parts[1]) {
-                const subParts = parts[1].split('to');
+                const subParts = parts[1].split(/\s+to\s+/i);
                 fromCoord = subParts[0].replace(/['"“”]/g, '').trim();
-                toCoord = subParts[1].split('via')[0].replace(/['"“”]/g, '').trim();
+                toCoord = subParts.slice(1).join(' to ').split('via')[0].replace(/['"“”]/g, '').trim();
               }
             }
 
@@ -177,18 +177,50 @@ export default function CoordinatorPerformanceReport({
         lead.coordinatorHistory.sort((a: any, b: any) => new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime());
       }
 
-      // Ensure baseline starting snapshot exists if history is still empty
+      // Reconcile if stageHistory drifted behind actual lead.stage
+      const stdLocal = (label: string): string => {
+        const val = String(label || '').toLowerCase().trim();
+        if (!val || val === 'none') return 'none';
+        if (val.includes('new inbound') || val === 'new') return 'new';
+        if (val.includes('in discussion') || val.includes('negotiating') || val === 'discussion') return 'in_discussion';
+        if (val.includes('strong opportunity') || val === 'strong') return 'strong_opportunity';
+        if (val.includes('office visited') || val.includes('interview') || val === 'proposal') return 'office_visited';
+        if (val.includes('won') || val.includes('closed won')) return 'won';
+        if (val.includes('cold') || val.includes('cold leads') || val === 'rotations') return 'cold_leads';
+        if (val.includes('lost') || val.includes('closed lost')) return 'lost';
+        return val;
+      };
+      const actualStageKey = stdLocal(lead.stage || 'new');
       if (lead.stageHistory.length === 0) {
         lead.stageHistory.push({
           candidateId: lead.id,
           previousStage: 'none',
-          newStage: lead.stage || 'new',
+          newStage: actualStageKey,
           changedBy: 'System (Initial)',
           coordinatorId: lead.assignedTo || 'unassigned',
-          changedAt: lead.createdAt || lead.entryDate || new Date().toISOString(),
+          changedAt: lead.createdAt || lead.entryDate || lead.updatedAt || new Date().toISOString(),
           project: lead.project,
           country: lead.country
         });
+      } else {
+        lead.stageHistory.sort((a: any, b: any) => new Date(a.changedAt || 0).getTime() - new Date(b.changedAt || 0).getTime());
+        const lastEntry = lead.stageHistory[lead.stageHistory.length - 1];
+        const lastStageKey = stdLocal(lastEntry?.newStage || 'new');
+        if (lastStageKey !== actualStageKey) {
+          const reconcileTs = lead.updatedAt || lead.createdAt || lead.entryDate || new Date().toISOString();
+          const lastTs = lastEntry?.changedAt || '';
+          const safeTs = lastTs && reconcileTs < lastTs ? lastTs : reconcileTs;
+          lead.stageHistory.push({
+            candidateId: lead.id,
+            previousStage: lastStageKey,
+            newStage: actualStageKey,
+            changedBy: 'System (Stage Sync)',
+            coordinatorId: lead.assignedTo || 'unassigned',
+            changedAt: safeTs,
+            project: lead.project,
+            country: lead.country
+          });
+        }
       }
 
       if (lead.coordinatorHistory.length === 0) {
@@ -342,6 +374,7 @@ export default function CoordinatorPerformanceReport({
   // Drill-down State
   const [drillDownFilter, setDrillDownFilter] = useState<{
     stage?: string;
+    month?: string;
     coordinator?: string;
     project?: string;
     country?: string;
@@ -446,6 +479,27 @@ export default function CoordinatorPerformanceReport({
           (targetS === 'cold_leads' && leadS === 'rotations') ||
           (targetS === 'office_visited' && leadS === 'proposal');
         if (!matchesStage) return false;
+
+        if (drillDownFilter.month) {
+          const enteredAt = l.stageChangedAt || (() => {
+            const sh = Array.isArray(l.stageHistory) ? [...l.stageHistory].sort((a: any, b: any) => new Date(a.changedAt || 0).getTime() - new Date(b.changedAt || 0).getTime()) : [];
+            const norm = (s: string) => {
+              const x = String(s || '').toLowerCase().trim();
+              if (x === 'negotiating') return 'in_discussion';
+              if (x === 'rotations') return 'cold_leads';
+              if (x === 'proposal') return 'office_visited';
+              return x;
+            };
+            let ts = '';
+            for (let i = sh.length - 1; i >= 0; i--) {
+              if (norm(sh[i].newStage) === targetS) ts = sh[i].changedAt || '';
+              else break;
+            }
+            return ts || l.createdAt || l.entryDate || '';
+          })();
+          const enteredMonth = enteredAt ? new Date(enteredAt).toISOString().slice(0, 7) : '';
+          if (enteredMonth !== drillDownFilter.month) return false;
+        }
       }
 
       // Project match
@@ -823,7 +877,7 @@ export default function CoordinatorPerformanceReport({
               { 
                 label: 'Strong Opportunities', 
                 kpi: data.kpis.strongOpportunities, 
-                desc: 'Strong opportunities pipeline',
+                desc: 'Entered strong opp in month',
                 suffix: 'Total opps',
                 positiveIsGood: true,
                 warningValue: false
@@ -831,7 +885,7 @@ export default function CoordinatorPerformanceReport({
               { 
                 label: 'Interviews Scheduled', 
                 kpi: data.kpis.interviews, 
-                desc: 'Office visited/Interview stage',
+                desc: 'Scheduled in reporting month',
                 suffix: 'Total scheduled',
                 positiveIsGood: true,
                 warningValue: false
@@ -839,7 +893,7 @@ export default function CoordinatorPerformanceReport({
               { 
                 label: 'Closed Won', 
                 kpi: data.kpis.won, 
-                desc: 'Visa confirmed/Won files',
+                desc: 'Won in reporting month',
                 suffix: 'Total won',
                 positiveIsGood: true,
                 warningValue: false
@@ -847,7 +901,7 @@ export default function CoordinatorPerformanceReport({
               { 
                 label: 'Cold Leads', 
                 kpi: data.kpis.cold, 
-                desc: 'Marked as cold files',
+                desc: 'Marked cold in reporting month',
                 suffix: 'Total cold',
                 positiveIsGood: false,
                 warningValue: true
@@ -855,15 +909,18 @@ export default function CoordinatorPerformanceReport({
               { 
                 label: 'Closed Lost', 
                 kpi: data.kpis.lost, 
-                desc: 'Marked as lost files',
+                desc: 'Marked lost in reporting month',
                 suffix: 'Total lost',
                 positiveIsGood: false,
                 warningValue: false
               }
             ].map((item, idx) => {
               const { label, kpi, desc, suffix, positiveIsGood } = item;
-              const abs = kpi.absChange;
-              const pct = kpi.pctChange;
+              const safeCurr = Number.isFinite(Number(kpi?.current)) ? Number(kpi.current) : 0;
+              const safePrev = Number.isFinite(Number(kpi?.previous)) ? Number(kpi.previous) : 0;
+              const safeCum = kpi?.cumulative !== undefined && Number.isFinite(Number(kpi.cumulative)) ? Number(kpi.cumulative) : safeCurr;
+              const abs = Number.isFinite(Number(kpi?.absChange)) ? Number(kpi.absChange) : 0;
+              const pct = Number.isFinite(Number(kpi?.pctChange)) ? Number(kpi.pctChange) : 0;
               
               const isPositiveChange = abs > 0;
               const isNoChange = abs === 0;
@@ -888,7 +945,8 @@ export default function CoordinatorPerformanceReport({
                   onClick={() => {
                     setDrillDownFilter({
                       stage: stageValue,
-                      title: `${selectedCoord.toUpperCase()} - ${label.toUpperCase()}`
+                      month: stageValue ? selectedMonth : undefined,
+                      title: `${selectedCoord.toUpperCase()} - ${label.toUpperCase()}${stageValue ? ` (${selectedMonth})` : ''}`
                     });
                   }}
                   className="bg-slate-900/60 backdrop-blur-sm border border-slate-800/80 hover:border-indigo-500/35 rounded-2xl p-5 text-left relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-indigo-500/5 group cursor-pointer flex flex-col justify-between min-h-[145px]"
@@ -897,14 +955,14 @@ export default function CoordinatorPerformanceReport({
                   <div className="flex justify-between items-start gap-2">
                     <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-mono group-hover:text-indigo-300 transition-colors">{label}</span>
                     <span className="text-[12.5px] font-extrabold px-3 py-1.5 rounded-lg shadow-sm font-mono whitespace-nowrap bg-slate-950/80 border border-slate-800/80 text-slate-200">
-                      <span className="text-indigo-400 font-black mr-1 text-[15.5px]">{kpi.cumulative !== undefined ? kpi.cumulative : kpi.current}</span> {suffix}
+                      <span className="text-indigo-400 font-black mr-1 text-[15.5px]">{safeCum}</span> {suffix}
                     </span>
                   </div>
                   
                   {/* Card Middle Row (Large current metric with clean trend percentage) */}
                   <div className="mt-3 flex items-baseline gap-2 flex-wrap">
                     <span className="text-4xl font-black font-mono tracking-tight text-slate-100 group-hover:text-white transition-all duration-300">
-                      {kpi.current}
+                      {safeCurr}
                     </span>
                     {(() => {
                       const isGood = positiveIsGood ? isPositiveChange : !isPositiveChange;
@@ -913,7 +971,8 @@ export default function CoordinatorPerformanceReport({
                         : isGood 
                           ? 'text-emerald-400 bg-emerald-950/40 border-emerald-900/35' 
                           : 'text-rose-400 bg-rose-950/40 border-rose-900/35';
-                      const displayPct = isAssignedCard && kpi.cumulativePctChange !== undefined ? kpi.cumulativePctChange : pct;
+                      const rawDisplayPct = isAssignedCard && kpi?.cumulativePctChange !== undefined ? Number(kpi.cumulativePctChange) : pct;
+                      const displayPct = Number.isFinite(rawDisplayPct) ? rawDisplayPct : 0;
                       return (
                         <span className={`text-xs font-black font-mono px-2 py-0.5 rounded-md border ${trendColorClass}`}>
                           {isNoChange ? 'Flat' : `${isPositiveChange ? '↑' : '↓'} (${displayPct >= 0 ? `+${displayPct}%` : `${displayPct}%`})`}
@@ -928,7 +987,7 @@ export default function CoordinatorPerformanceReport({
                       {desc}
                     </p>
                     <span className="text-xs text-slate-400 font-extrabold font-mono whitespace-nowrap text-right shrink-0 select-none">
-                      prev month: <span className="text-slate-100 font-black">{kpi.previous}</span>
+                      prev month: <span className="text-slate-100 font-black">{safePrev}</span>
                     </span>
                   </div>
                 </div>
@@ -1251,8 +1310,8 @@ export default function CoordinatorPerformanceReport({
 
               <div className="space-y-4">
                 {[
-                  { label: 'Leads Assigned', key: 'assignedCount', curr: data.currentStats.assignedCount, prev: data.prevStats.assignedCount, color: 'bg-indigo-500' },
-                  { label: 'Leads Touched', key: 'touchedCount', curr: data.currentStats.touchedCount, prev: data.prevStats.touchedCount, color: 'bg-purple-500' },
+                  { label: 'Leads Assigned', key: 'assignedCount', curr: Number.isFinite(Number(data.currentStats?.assignedCount)) ? Number(data.currentStats.assignedCount) : Number(data.kpis?.leadsAssigned?.cumulative ?? 0), prev: Number.isFinite(Number(data.prevStats?.assignedCount)) ? Number(data.prevStats.assignedCount) : Number(data.kpis?.leadsAssigned?.prevCumulative ?? 0), color: 'bg-indigo-500' },
+                  { label: 'Leads Touched', key: 'touchedCount', curr: Number.isFinite(Number(data.currentStats?.touchedCount)) ? Number(data.currentStats.touchedCount) : Number(data.kpis?.leadsTouched?.current ?? 0), prev: Number.isFinite(Number(data.prevStats?.touchedCount)) ? Number(data.prevStats.touchedCount) : Number(data.kpis?.leadsTouched?.previous ?? 0), color: 'bg-purple-500' },
                   { label: 'In Discussion', key: 'in_discussion', curr: data.currentStats.byStage.in_discussion || 0, prev: data.prevStats.byStage.in_discussion || 0, color: 'bg-blue-500' },
                   { label: 'Strong Opportunity', key: 'strong_opportunity', curr: data.currentStats.byStage.strong_opportunity || 0, prev: data.prevStats.byStage.strong_opportunity || 0, color: 'bg-emerald-500' },
                   { label: 'Interview Scheduled', key: 'office_visited', curr: data.currentStats.byStage.office_visited || 0, prev: data.prevStats.byStage.office_visited || 0, color: 'bg-amber-500' },
@@ -1260,10 +1319,12 @@ export default function CoordinatorPerformanceReport({
                   { label: 'Cold Leads', key: 'cold_leads', curr: data.currentStats.byStage.cold_leads || 0, prev: data.prevStats.byStage.cold_leads || 0, color: 'bg-orange-500' },
                   { label: 'Lost', key: 'lost', curr: data.currentStats.byStage.lost || 0, prev: data.prevStats.byStage.lost || 0, color: 'bg-rose-500' }
                 ].map((item, idx) => {
-                  const maxVal = Math.max(item.curr, item.prev, 10);
-                  const currPct = Math.round((item.curr / maxVal) * 100);
-                  const prevPct = Math.round((item.prev / maxVal) * 100);
-                  const diff = item.curr - item.prev;
+                  const safeCurr = Number.isFinite(Number(item.curr)) ? Number(item.curr) : 0;
+                  const safePrev = Number.isFinite(Number(item.prev)) ? Number(item.prev) : 0;
+                  const maxVal = Math.max(safeCurr, safePrev, 10);
+                  const currPct = Math.round((safeCurr / maxVal) * 100);
+                  const prevPct = Math.round((safePrev / maxVal) * 100);
+                  const diff = safeCurr - safePrev;
 
                   return (
                     <div 
@@ -1289,8 +1350,8 @@ export default function CoordinatorPerformanceReport({
                       <div className="flex justify-between items-center text-xs">
                         <span className="font-extrabold text-slate-350">{item.label}</span>
                         <div className="flex items-center gap-3 font-mono font-black">
-                          <span className="text-slate-450 text-[10px]">Prev: {item.prev}</span>
-                          <span className="text-slate-100 text-[11px] group-hover:text-indigo-400 transition-colors">Curr: {item.curr}</span>
+                          <span className="text-slate-450 text-[10px]">Prev: {safePrev}</span>
+                          <span className="text-slate-100 text-[11px] group-hover:text-indigo-400 transition-colors">Curr: {safeCurr}</span>
                           <span className={`text-[10px] ${diff >= 0 ? (item.label.includes('Lost') || item.label.includes('Cold') ? 'text-rose-400' : 'text-emerald-400') : (item.label.includes('Lost') || item.label.includes('Cold') ? 'text-emerald-400' : 'text-rose-400')}`}>
                             {diff >= 0 ? `+${diff}` : diff}
                           </span>
@@ -1536,8 +1597,9 @@ export default function CoordinatorPerformanceReport({
                   { bucket: '31-60', label: '31–60 Days', count: data.ageingBuckets['31-60'], color: 'bg-amber-500' },
                   { bucket: '60+', label: '60+ Days (Lagging)', count: data.ageingBuckets['60+'], color: 'bg-rose-500' }
                 ].map((item, idx) => {
-                  const totalAgeingCount = Object.values(data.ageingBuckets).reduce((a: any, b: any) => a + b, 0) as number;
-                  const pct = totalAgeingCount === 0 ? 0 : Math.round((item.count / totalAgeingCount) * 100);
+                  const totalAgeingCount = (Object.values(data.ageingBuckets || {}) as unknown[]).reduce<number>((a, b) => a + (Number(b) || 0), 0);
+                  const safeBucketCount = Number.isFinite(Number(item.count)) ? Number(item.count) : 0;
+                  const pct = totalAgeingCount === 0 ? 0 : Math.round((safeBucketCount / totalAgeingCount) * 100);
 
                   return (
                     <div 
@@ -1553,7 +1615,7 @@ export default function CoordinatorPerformanceReport({
                       <div className="flex justify-between items-center text-xs font-bold">
                         <span className="text-slate-350">{item.label}</span>
                         <div className="flex items-center gap-2 font-mono">
-                          <span className="text-slate-100 text-sm group-hover:text-indigo-400 transition-all">{item.count} leads</span>
+                          <span className="text-slate-100 text-sm group-hover:text-indigo-400 transition-all">{safeBucketCount} leads</span>
                           <span className="text-slate-500 text-[10px]">({pct}%)</span>
                         </div>
                       </div>
@@ -1831,7 +1893,8 @@ export default function CoordinatorPerformanceReport({
                   </thead>
                   <tbody className="divide-y divide-slate-850 font-medium text-slate-300">
                     {processedDrilledLeads.map((item, idx) => {
-                      const ageDays = Math.ceil(Math.abs(Date.now() - new Date(item.createdAt || item.entryDate || Date.now()).getTime()) / (1000 * 60 * 60 * 24));
+                      const createdMs = new Date(item.createdAt || item.entryDate || Date.now()).getTime();
+                      const ageDays = Number.isFinite(createdMs) ? Math.ceil(Math.abs(Date.now() - createdMs) / (1000 * 60 * 60 * 24)) : 0;
                       
                       return (
                         <tr 

@@ -262,7 +262,11 @@ export default function LeadBoard({
       const customEnd = filterEndDate ? new Date(filterEndDate + 'T23:59:59').getTime() : Infinity;
 
       filtered = filtered.filter(lead => {
-        const datesToTry = [lead.createdAt, lead.updatedAt, lead.assignDate, lead.entryDate];
+        const st = String(lead.stage || 'new').toLowerCase().trim();
+        const stageDate = lead.stageChangedAt || lead.createdAt || lead.entryDate;
+        const datesToTry = st === 'new'
+          ? [lead.stageChangedAt, lead.assignDate, lead.createdAt, lead.entryDate]
+          : [stageDate];
         return pipelineDateFilter.some(df => {
           let startMs = 0;
           let endMs = Infinity;

@@ -975,9 +975,11 @@ export default function App() {
     // 1. Instantly update UI state optimistically so stage change is instantaneous and never reverts
     const prevLead = leads.find(l => l.id === id);
     const prevStage = prevLead?.stage;
-    setLeads(prev => prev.map(l => l.id === id ? { ...l, stage } : l));
+    const prevStageChangedAt = prevLead?.stageChangedAt;
+    const nowIso = new Date().toISOString();
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, stage, stageChangedAt: prevStage !== stage ? nowIso : l.stageChangedAt } : l));
     if (selectedLead && selectedLead.id === id) {
-      setSelectedLead(prev => prev ? { ...prev, stage } : null);
+      setSelectedLead(prev => prev ? { ...prev, stage, stageChangedAt: prevStage !== stage ? nowIso : prev.stageChangedAt } : null);
     }
 
     try {
@@ -993,15 +995,19 @@ export default function App() {
       });
       if (res.ok) {
         const updatedLead = await res.json();
-        setLeads(prev => prev.map(l => l.id === id ? updatedLead : l));
+        const patchedLead = {
+          ...updatedLead,
+          stageChangedAt: updatedLead.stageChangedAt || (prevStage !== stage ? nowIso : prevStageChangedAt)
+        };
+        setLeads(prev => prev.map(l => l.id === id ? patchedLead : l));
         if (selectedLead && selectedLead.id === id) {
-          setSelectedLead(updatedLead);
+          setSelectedLead(patchedLead);
         }
       } else {
         if (prevStage) {
-          setLeads(prev => prev.map(l => l.id === id ? { ...l, stage: prevStage } : l));
+          setLeads(prev => prev.map(l => l.id === id ? { ...l, stage: prevStage, stageChangedAt: prevStageChangedAt } : l));
           if (selectedLead && selectedLead.id === id) {
-            setSelectedLead(prev => prev ? { ...prev, stage: prevStage } : null);
+            setSelectedLead(prev => prev ? { ...prev, stage: prevStage, stageChangedAt: prevStageChangedAt } : null);
           }
         }
         const errJson = await res.json().catch(() => ({}));

@@ -156,6 +156,7 @@ export interface Lead {
   }[];
   hasArchivedHistory?: boolean;
   archivedChunksCount?: number;
+  stageChangedAt?: string;
 }
 
 export interface LeadAuditEntry {
