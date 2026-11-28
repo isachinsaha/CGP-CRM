@@ -2200,42 +2200,72 @@ app.delete('/api/wallets/:username/transaction/:txId', async (req, res) => {
 
 
 
-// POST /api/tasks/resolve-overdue - Resolve all pending overdue tasks on or before a specified date (default today)
+// POST /api/tasks/resolve-overdue - Admin-only resolution of strictly overdue pending tasks (< beforeDate)
 app.post('/api/tasks/resolve-overdue', async (req, res) => {
   try {
+    if (!(await checkIsAdmin(req))) {
+      res.status(403).json({ error: 'Forbidden: Only administrators can bulk-resolve overdue tasks.' });
+      return;
+    }
+
     const targetDate = req.body?.beforeDate || new Date().toISOString().split('T')[0];
     const targetCoordinator = req.body?.coordinator; // optional filter
+    const isAllCoordinators = !targetCoordinator || targetCoordinator === 'All';
 
+    if (isAllCoordinators && req.body?.confirmAll !== true) {
+      res.status(400).json({ error: 'Explicit confirmation (confirmAll: true) is required to bulk-resolve overdue tasks across all coordinators.' });
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
     let resolvedCount = 0;
     await updateMultipleLeads(
       (lead) => {
-        if (targetCoordinator && targetCoordinator !== 'All') {
+        if (!isAllCoordinators) {
           if (!isCoordinatorMatch(lead.assignedTo, targetCoordinator)) return false;
         }
-        return Array.isArray(lead.tasks) && lead.tasks.some(t => !t.completed && t.dueDate <= targetDate);
+        return Array.isArray(lead.tasks) && lead.tasks.some(t => !t.completed && t.dueDate && t.dueDate < targetDate);
       },
       (lead) => {
         let modified = false;
+        const resolvedTitles: string[] = [];
         lead.tasks = (lead.tasks || []).map(task => {
-          if (!task.completed && task.dueDate <= targetDate) {
+          if (!task.completed && task.dueDate && task.dueDate < targetDate) {
             resolvedCount++;
             modified = true;
-            return { ...task, completed: true };
+            if (task.title) resolvedTitles.push(task.title);
+            return { ...task, completed: true, completedAt: nowIso };
           }
           return task;
         });
         if (!modified) return null;
+        lead.timeline = [
+          ...(lead.timeline || []),
+          {
+            id: `tl_${Date.now()}_bulk_resolve_${Math.random().toString(36).slice(2, 6)}`,
+            type: 'task',
+            text: `Bulk-resolved ${resolvedTitles.length} overdue follow-up task(s) due before ${targetDate}`,
+            actor: 'Administrator',
+            timestamp: nowIso
+          }
+        ];
         if (!lead.tasks.some(t => !t.completed)) {
           lead.reminderEnabled = false;
         }
         return lead;
+      },
+      {
+        auditMeta: {
+          actor: 'Administrator',
+          sourceView: 'resolve_overdue'
+        }
       }
     );
 
     res.json({
       success: true,
       resolvedCount,
-      message: `Successfully resolved ${resolvedCount} completed/overdue tasks up to ${targetDate}.`
+      message: `Successfully resolved ${resolvedCount} overdue tasks due before ${targetDate}.`
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });

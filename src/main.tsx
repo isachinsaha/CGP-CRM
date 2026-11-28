@@ -8,13 +8,14 @@ import './index.css';
 if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason;
+    const msg = String(reason?.message || reason || '').toLowerCase();
     if (
       reason?.name === 'AbortError' ||
-      reason?.message?.includes('aborted') ||
-      reason?.message?.includes('Failed to fetch')
+      msg.includes('abort') ||
+      msg.includes('superseded by newer') ||
+      msg.includes('failed to fetch')
     ) {
       event.preventDefault();
-      console.warn('[App] Caught and handled background fetch cancellation:', reason?.message || reason);
     }
   });
 }

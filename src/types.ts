@@ -129,6 +129,8 @@ export interface Lead {
     dueDate: string;
     completed: boolean;
     createdAt: string;
+    completedAt?: string;
+    reopenedAt?: string;
   }[];
   timeline?: {
     id: string;

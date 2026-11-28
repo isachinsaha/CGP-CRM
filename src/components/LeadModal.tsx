@@ -853,9 +853,10 @@ export default function LeadModal({
         const todayStr = new Date().toISOString().split('T')[0];
         const hasPastTasks = lead.tasks.some(t => !t.completed && t.dueDate <= todayStr);
         if (hasPastTasks) {
+          const nowIso = new Date().toISOString();
           const resolvedTasks = lead.tasks.map(t => {
             if (!t.completed && t.dueDate <= todayStr) {
-              return { ...t, completed: true };
+              return { ...t, completed: true, completedAt: nowIso };
             }
             return t;
           });
@@ -1025,9 +1026,16 @@ export default function LeadModal({
 
   // Toggle task status & log to timeline
   const handleToggleTask = async (taskId: string) => {
+    const nowIso = new Date().toISOString();
     const updatedTasks = (lead.tasks || []).map(t => {
       if (t.id === taskId) {
-        return { ...t, completed: !t.completed };
+        const nextCompleted = !t.completed;
+        return {
+          ...t,
+          completed: nextCompleted,
+          completedAt: nextCompleted ? nowIso : t.completedAt,
+          reopenedAt: !nextCompleted ? nowIso : t.reopenedAt
+        };
       }
       return t;
     });

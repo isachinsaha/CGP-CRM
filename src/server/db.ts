@@ -1561,7 +1561,7 @@ export function mergeTimelineList(listA: any[], listB: any[]): any[] {
   return Array.from(map.values()).sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
 }
 
-// Non-destructive follow-up tasks merger: Never drops a scheduled task or loses completion status
+// Non-destructive follow-up tasks merger: Never drops a scheduled task or loses valid completion/reopen transitions
 export function mergeTasksList(listA: any[], listB: any[]): any[] {
   const map = new Map<string, any>();
   if (Array.isArray(listA)) {
@@ -1574,17 +1574,46 @@ export function mergeTasksList(listA: any[], listB: any[]): any[] {
       if (t && t.id) {
         const existing = map.get(t.id);
         if (existing) {
-          // If either version marks it completed, keep completed
-          const isCompleted = existing.completed || t.completed;
+          const existingCompletedMs = existing.completedAt ? new Date(existing.completedAt).getTime() || 0 : 0;
+          const incomingCompletedMs = t.completedAt ? new Date(t.completedAt).getTime() || 0 : 0;
+          const latestCompletedMs = Math.max(existingCompletedMs, incomingCompletedMs);
+          const latestCompletedAt =
+            latestCompletedMs > 0
+              ? (incomingCompletedMs >= existingCompletedMs ? t.completedAt : existing.completedAt)
+              : undefined;
+
+          const existingReopenedMs = existing.reopenedAt ? new Date(existing.reopenedAt).getTime() || 0 : 0;
+          const incomingReopenedMs = t.reopenedAt ? new Date(t.reopenedAt).getTime() || 0 : 0;
+          const latestReopenedMs = Math.max(existingReopenedMs, incomingReopenedMs);
+          const latestReopenedAt =
+            latestReopenedMs > 0
+              ? (incomingReopenedMs >= existingReopenedMs ? t.reopenedAt : existing.reopenedAt)
+              : undefined;
+
+          let isCompleted = Boolean(existing.completed || t.completed);
+          if (latestReopenedMs > 0) {
+            if (latestCompletedMs > latestReopenedMs) {
+              isCompleted = true;
+            } else if (latestCompletedMs === latestReopenedMs) {
+              isCompleted = Boolean(t.completed);
+            } else {
+              // Explicitly reopened/recovered after any recorded completion (or stale cache lacked completedAt)
+              isCompleted = false;
+            }
+          }
+
           const dueDate = t.dueDate || existing.dueDate;
           const title = (t.title && t.title.length >= (existing.title?.length || 0)) ? t.title : (existing.title || t.title);
-          map.set(t.id, {
+          const mergedTask: any = {
             ...existing,
             ...t,
             title,
             dueDate,
             completed: isCompleted
-          });
+          };
+          if (latestCompletedAt) mergedTask.completedAt = latestCompletedAt;
+          if (latestReopenedAt) mergedTask.reopenedAt = latestReopenedAt;
+          map.set(t.id, mergedTask);
         } else {
           map.set(t.id, { ...t });
         }

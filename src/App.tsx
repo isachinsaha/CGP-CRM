@@ -165,7 +165,8 @@ export default function App() {
   const rateLimitedUntilRef = useRef<number>(0);
   const lastEtagMapRef = useRef<Map<string, string>>(new Map());
   const statsEtagRef = useRef<string>('');
-  const activeAbortControllerRef = useRef<AbortController | null>(null);
+  const activeSyncIdRef = useRef<number>(0);
+  const isSyncInFlightRef = useRef<boolean>(false);
   const inFlightLoadKeyRef = useRef<string>('');
   const lastKnownVersionRef = useRef<number>(0);
   const loadedStateRef = useRef<{ user: string; mode: 'none' | 'light-all' | 'analytics-all' | 'list'; queryKey: string }>({
@@ -573,8 +574,8 @@ export default function App() {
       return; // Pause background polling while Cloud Armor cooldown is active
     }
 
-    // Do not abort an identical in-flight load (e.g., React StrictMode double-mount or duplicate effect trigger)
-    if (activeAbortControllerRef.current && !activeAbortControllerRef.current.signal.aborted && inFlightLoadKeyRef.current === baseKey) {
+    // Do not duplicate an identical in-flight load (e.g., React StrictMode double-mount or rapid trigger)
+    if (isSyncInFlightRef.current && inFlightLoadKeyRef.current === baseKey) {
       if (!forceRefresh || (now - lastFetchTimeRef.current < 3000)) {
         return;
       }
@@ -593,31 +594,11 @@ export default function App() {
       }
     }
 
-    // Cancel any in-flight request only when genuinely superseded
-    if (activeAbortControllerRef.current) {
-      try {
-        if (!activeAbortControllerRef.current.signal.aborted) {
-          activeAbortControllerRef.current.abort(new DOMException('Superseded by newer sync request', 'AbortError'));
-        }
-      } catch {
-        // ignore abort error
-      }
-    }
-
-    const controller = new AbortController();
-    activeAbortControllerRef.current = controller;
+    // Track supersession cleanly with a monotonic sync ID instead of aborting in-flight fetches
+    const mySyncId = ++activeSyncIdRef.current;
+    isSyncInFlightRef.current = true;
     inFlightLoadKeyRef.current = baseKey;
-    let didTimeout = false;
-    const timeoutId = setTimeout(() => {
-      didTimeout = true;
-      try {
-        if (!controller.signal.aborted) {
-          controller.abort(new DOMException('Sync request timed out', 'AbortError'));
-        }
-      } catch {
-        // ignore abort error
-      }
-    }, 25000);
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     try {
       const reqHeaders: Record<string, string> = {};
@@ -636,30 +617,29 @@ export default function App() {
         statsHeaders['If-None-Match'] = statsEtagRef.current;
       }
 
-      const safeFetch = (url: string, options: RequestInit) =>
-        fetch(url, options).catch(err => {
-          if (controller.signal.aborted || err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('abort')) {
-            return null;
-          }
-          throw err;
-        });
+      const timeoutPromise = new Promise<{ timedOut: true }>((resolve) => {
+        timeoutId = setTimeout(() => resolve({ timedOut: true }), 25000);
+      });
 
-      const [leadsRes, statsRes] = await Promise.all([
-        safeFetch(`/api/leads?${queryKey}`, {
-          signal: controller.signal,
-          headers: reqHeaders
-        }),
-        safeFetch('/api/stats', {
-          signal: controller.signal,
-          headers: statsHeaders
-        }).catch(() => null)
-      ]);
+      const fetchPairPromise = Promise.all([
+        fetch(`/api/leads?${queryKey}`, { headers: reqHeaders }),
+        fetch('/api/stats', { headers: statsHeaders }).catch(() => null)
+      ]).then(([leadsRes, statsRes]) => ({ timedOut: false as const, leadsRes, statsRes }));
 
-      clearTimeout(timeoutId);
+      const raceResult = await Promise.race([fetchPairPromise, timeoutPromise]);
 
-      // If this request was aborted/superseded by a newer pullCrmData call, exit silently
-      if (controller.signal.aborted || activeAbortControllerRef.current !== controller) {
-        if (didTimeout && activeAbortControllerRef.current === controller && leadsRef.current.length === 0) {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+
+      // If this request was superseded by a newer pullCrmData call, discard quietly
+      if (mySyncId !== activeSyncIdRef.current) {
+        return;
+      }
+
+      if (raceResult.timedOut || !('leadsRes' in raceResult)) {
+        if (leadsRef.current.length === 0) {
           setLoadError('Sync timed out — retrying automatically...');
           loadRetryTimerRef.current = setTimeout(() => {
             pullCrmData(false, false);
@@ -667,6 +647,8 @@ export default function App() {
         }
         return;
       }
+
+      const { leadsRes, statsRes } = raceResult;
 
       // Handle HTTP 429 Rate Limit gracefully with retry if leads haven't loaded yet
       if ((leadsRes && leadsRes.status === 429) || (statsRes && statsRes.status === 429)) {
@@ -687,11 +669,8 @@ export default function App() {
         const etag = leadsRes.headers.get('ETag');
         if (etag) lastEtagMapRef.current.set(queryKey, etag);
 
-        const leadsData = await leadsRes.json().catch(err => {
-          if (controller.signal.aborted || err?.name === 'AbortError') return null;
-          throw err;
-        });
-        if (!leadsData || controller.signal.aborted || activeAbortControllerRef.current !== controller) {
+        const leadsData = await leadsRes.json().catch(() => null);
+        if (!leadsData || mySyncId !== activeSyncIdRef.current) {
           return;
         }
 
@@ -738,23 +717,22 @@ export default function App() {
         const sEtag = statsRes.headers.get('ETag');
         if (sEtag) statsEtagRef.current = sEtag;
         const statsData = await statsRes.json().catch(() => null);
-        if (statsData && !controller.signal.aborted && activeAbortControllerRef.current === controller) {
+        if (statsData && mySyncId === activeSyncIdRef.current) {
           setStats(statsData);
         }
       }
     } catch (err: any) {
-      clearTimeout(timeoutId);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (mySyncId !== activeSyncIdRef.current) {
+        return;
+      }
       const isAbort =
-        controller.signal.aborted ||
         err?.name === 'AbortError' ||
         String(err?.message || '').toLowerCase().includes('abort');
       if (isAbort) {
-        if (didTimeout && activeAbortControllerRef.current === controller && leadsRef.current.length === 0) {
-          setLoadError('Sync timed out — retrying automatically...');
-          loadRetryTimerRef.current = setTimeout(() => {
-            pullCrmData(false, false);
-          }, 3000);
-        }
         return;
       }
       if (err instanceof TypeError && err.message?.includes('Failed to fetch')) {
@@ -762,16 +740,19 @@ export default function App() {
       } else {
         console.error('Failed to sync placement entries from Express REST routes:', err);
       }
-      if (activeAbortControllerRef.current === controller && leadsRef.current.length === 0) {
+      if (mySyncId === activeSyncIdRef.current && leadsRef.current.length === 0) {
         setLoadError('Network hiccup while loading leads — retrying automatically...');
         loadRetryTimerRef.current = setTimeout(() => {
           pullCrmData(false, false);
         }, 4000);
       }
     } finally {
-      clearTimeout(timeoutId);
-      if (activeAbortControllerRef.current === controller) {
-        activeAbortControllerRef.current = null;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (mySyncId === activeSyncIdRef.current) {
+        isSyncInFlightRef.current = false;
         inFlightLoadKeyRef.current = '';
         setIsRefreshing(false);
         setLoading(false);

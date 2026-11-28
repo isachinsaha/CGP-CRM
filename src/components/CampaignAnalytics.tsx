@@ -83,6 +83,9 @@ export default function CampaignAnalytics({
   const [todoStatusFilter, setTodoStatusFilter] = useState<'active' | 'today' | 'upcoming' | 'overdue' | 'all'>('active');
   const [isResolvingOverdue, setIsResolvingOverdue] = useState(false);
   const [resolveOverdueSuccess, setResolveOverdueSuccess] = useState<string | null>(null);
+  const [showResolveOverdueModal, setShowResolveOverdueModal] = useState(false);
+  const [resolveOverdueConfirmText, setResolveOverdueConfirmText] = useState('');
+  const [resolveOverdueError, setResolveOverdueError] = useState<string | null>(null);
   const [attributionChartType, setAttributionChartType] = useState<'bar' | 'pie'>('bar');
   const [pipelineChartType, setPipelineChartType] = useState<'funnel' | 'pie'>('funnel');
 
@@ -371,12 +374,21 @@ export default function CampaignAnalytics({
     return pendingTasks;
   }, [pendingTasks, todoStatusFilter]);
 
-  const handleResolveOverdue = async () => {
-    if (taskCounts.overdue === 0) return;
-    if (!window.confirm(`Mark all ${taskCounts.overdue} overdue follow-up tasks as completed? This will clear the backlog for coordinator follow-ups.`)) {
+  const handleResolveOverdue = () => {
+    if (userRole !== 'admin' || taskCounts.overdue === 0) return;
+    setResolveOverdueConfirmText('');
+    setResolveOverdueError(null);
+    setShowResolveOverdueModal(true);
+  };
+
+  const confirmResolveOverdue = async () => {
+    if (userRole !== 'admin' || taskCounts.overdue === 0) return;
+    if (resolveOverdueConfirmText.trim().toUpperCase() !== 'RESOLVE') {
+      setResolveOverdueError('Please type RESOLVE to confirm bulk-clearing overdue follow-up tasks.');
       return;
     }
     setIsResolvingOverdue(true);
+    setResolveOverdueError(null);
     setResolveOverdueSuccess(null);
     try {
       const res = await fetch('/api/tasks/resolve-overdue', {
@@ -387,19 +399,21 @@ export default function CampaignAnalytics({
         },
         body: JSON.stringify({
           beforeDate: new Date().toISOString().split('T')[0],
-          coordinator: todoCoordFilter
+          coordinator: todoCoordFilter,
+          confirmAll: todoCoordFilter === 'All'
         })
       });
       const data = await res.json();
       if (res.ok) {
+        setShowResolveOverdueModal(false);
         setResolveOverdueSuccess(data.message || 'Successfully resolved all overdue tasks!');
         setTimeout(() => setResolveOverdueSuccess(null), 4000);
         if (onRefreshData) onRefreshData();
       } else {
-        alert(data.error || 'Failed to resolve overdue tasks.');
+        setResolveOverdueError(data.error || 'Failed to resolve overdue tasks.');
       }
     } catch (err: any) {
-      alert(err.message || 'Error resolving overdue tasks.');
+      setResolveOverdueError(err.message || 'Error resolving overdue tasks.');
     } finally {
       setIsResolvingOverdue(false);
     }
@@ -409,9 +423,10 @@ export default function CampaignAnalytics({
     const lead = activeLeads.find(l => l.id === leadId);
     if (!lead) return;
 
+    const completedAt = new Date().toISOString();
     const updatedTasks = (lead.tasks || []).map(task => {
       if (task.id === taskId) {
-        return { ...task, completed: true };
+        return { ...task, completed: true, completedAt };
       }
       return task;
     });
@@ -1349,13 +1364,13 @@ export default function CampaignAnalytics({
             <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">Daily interactive action items scheduled for candidates by callers.</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {taskCounts.overdue > 0 && (
+            {userRole === 'admin' && taskCounts.overdue > 0 && (
               <button
                 type="button"
                 onClick={handleResolveOverdue}
                 disabled={isResolvingOverdue}
                 className="px-2.5 py-1 text-[11px] font-black uppercase tracking-wider rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                title="Mark all overdue follow-up tasks completed if calls were already conducted"
+                title="Admin-only: Mark overdue follow-up tasks completed with typed confirmation"
               >
                 <CheckSquare className="h-3.5 w-3.5" />
                 <span>{isResolvingOverdue ? 'Resolving...' : `Resolve Overdue (${taskCounts.overdue})`}</span>
@@ -1455,11 +1470,9 @@ export default function CampaignAnalytics({
         {displayedTasks.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 max-h-[300px] overflow-y-auto pr-1">
             {displayedTasks.map((task) => {
-              const taskDate = new Date(task.dueDate);
-              const today = new Date();
-              today.setHours(0,0,0,0);
-              const isOverdue = taskDate < today;
-              const isToday = taskDate.toDateString() === new Date().toDateString();
+              const todayStr = new Date().toISOString().split('T')[0];
+              const isOverdue = task.dueDate < todayStr;
+              const isToday = task.dueDate === todayStr;
 
               let dateBadgeColor = "bg-slate-100 dark:bg-slate-950 text-slate-700 dark:text-slate-400 border-slate-200 dark:border-slate-800";
               let dateBadgeText = task.dueDate;
@@ -1524,6 +1537,55 @@ export default function CampaignAnalytics({
           <div className="py-12 text-center text-xs text-slate-600 dark:text-slate-400 border border-dashed border-slate-300 dark:border-slate-750 rounded-xl bg-slate-50 dark:bg-slate-850/20 space-y-1.5">
             <p className="font-semibold text-slate-900 dark:text-slate-300">🎉 All follow-up tasks completed!</p>
             <p className="text-[10px] text-slate-600 dark:text-slate-400">When agents log action items on any candidate profile, they will appear here as daily checklist tasks.</p>
+          </div>
+        )}
+
+        {showResolveOverdueModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xs p-4">
+            <div className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl text-left">
+              <div className="space-y-1">
+                <h4 className="text-sm font-black text-rose-400 uppercase tracking-wider">
+                  Confirm Bulk Resolve Overdue Tasks
+                </h4>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  You are about to mark <span className="font-bold text-white">{taskCounts.overdue}</span> overdue follow-up tasks (due before today) as completed for{' '}
+                  <span className="font-bold text-white">{todoCoordFilter === 'All' ? 'ALL Coordinators' : todoCoordFilter}</span>.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Type RESOLVE to proceed
+                </label>
+                <input
+                  type="text"
+                  value={resolveOverdueConfirmText}
+                  onChange={(e) => setResolveOverdueConfirmText(e.target.value)}
+                  placeholder="RESOLVE"
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-white focus:outline-none focus:border-rose-500"
+                />
+                {resolveOverdueError && (
+                  <p className="text-[11px] text-rose-400 font-semibold">{resolveOverdueError}</p>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowResolveOverdueModal(false)}
+                  disabled={isResolvingOverdue}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmResolveOverdue}
+                  disabled={isResolvingOverdue || resolveOverdueConfirmText.trim().toUpperCase() !== 'RESOLVE'}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white transition cursor-pointer"
+                >
+                  {isResolvingOverdue ? 'Resolving...' : 'Confirm Resolve'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
